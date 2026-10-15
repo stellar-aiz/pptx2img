@@ -17,7 +17,12 @@ cargo build --release --locked
 ./target/release/pptx2img examples/basic.pptx --out images --width 1600
 ```
 
-出力先は新しいディレクトリを指定してください。既存出力は上書きしません。
+`--out` を省略すると、入力ファイルと同じ場所に、最後の拡張子を
+`.pptx2img` に置き換えたディレクトリを作成します。
+たとえば `pptx2img ~/Downloads/資料.pptx` の出力先は
+`~/Downloads/資料.pptx2img/` です。
+`--out` を指定した場合はそのパスを優先します。
+いずれの場合も既存の出力先は上書きせず、エラーで終了します。
 `slide-001.png` などと `manifest.json` を出力します。
 途中で I/O エラーが発生した場合、出力済み画像が残ることがあります。
 完了した処理だけが manifest を持ちます。
@@ -52,26 +57,29 @@ cargo build --release --locked
   文字幅・改行・左右中央揃えに反映。段落・リスト既定からの継承と明示ゼロに対応
 - 上・中央・下の縦配置、文字枠からのはみ出し警告
 - run / 段落既定 / リストレベル既定の文字属性を属性ごとに継承
-- 埋め込まれた PNG / JPEG の配置
+- 埋め込まれた PNG / JPEG の配置と srcRect による切り抜き
+- 基本的なプレースホルダー継承、マスター・レイアウトの共通図形と単色背景
+- グループ座標系、明示セル書式の表（矩形の結合を含む）
 
 ## 制限
 
 次は未実装です。品質判定に使う場合は特に注意してください。
 
-- レイアウト・マスターの図形・座標・背景・文字スタイルの完全な継承
-- プレースホルダー継承、テーマの描画スタイル行列と themeOverride
+- レイアウト・マスターの全属性・文字スタイルの完全な継承
+- テーマの描画スタイル行列と themeOverride
 - 完全な禁則・完全な自動句読点圧縮・全記号のぶら下がり・複雑な文字 shaping・自動縮小
 - あらゆるフォント・文字組みで Office と一致するベースライン
-- フォント代替の正確な追跡、Office との文字組み一致
-- 表、グラフ、SmartArt、グループ、自由図形、多くのプリセット図形
-- 透明度、グラデーション、影などの効果、画像トリミング
+- Office と同じフォント代替・文字組みの完全な再現
+- 表のテーマスタイル、グラフ、SmartArt、グループの塗り継承、自由図形、多くのプリセット図形
+- 透明度、グラデーション、影などの効果、画像のタイル・塗り先の矩形指定
 - SVG / EMF / WMF 画像、外部リンク、アニメーション
 - Strict OOXML、旧式 .ppt、暗号化ファイル
 
 未対応検出も開発途中です。strict モードは現在検出できる警告に対する
 ゲートであり、未実装属性の完全検出や PowerPoint との一致は保証しません。
 フォントが異なる端末では文字の見え方が変わります。
-現時点の実行確認は macOS のみです。
+通常テストは Windows / Linux / macOS の CI で検証します。
+描画比較の実測環境は macOS です。
 
 入力は 128 MiB、展開後合計は 256 MiB、部品ごとは 32 MiB、
 最大 200 スライドです。出力と埋め込み画像にも画素数の上限があります。
@@ -122,7 +130,7 @@ cargo fmt --check
 テーマ色・テーマフォントと基本的な折り返しは実装済みです。
 固定行間の初行位置と句読点のぶら下がりは比較テストで改善を確認しました。
 明示字間による句読点の詰めと、任意で有効にする自動圧縮に対応しました。
-境界幅での文字組み一致とマスター図形継承は今後の課題です。
+境界幅・複雑な文字組みの一致と、継承対象属性の拡充は今後の課題です。
 PowerPoint が出した参照画像と同一フォントで比較する回帰テストを整備し、
 対応表現を増やします。生成側のプレビューとの自己一致だけでは、
 PPTX の表示互換性を検証できません。
@@ -142,7 +150,7 @@ PPTX2IMG_TEST_PYTHON="$PWD/.venv-visual/bin/python" \
 ```
 
 Windows では `.venv-visual/Scripts/python.exe` を使い、環境変数は
-使用するシェルの方法で設定してください。Windows / Linux は未実測です。
+使用するシェルの方法で設定してください。Windows / Linux の LibreOffice 比較は未実測です。
 
 図形・画像だけの `examples/geometry.pptx` と、テーマ色・テーマフォントの
 `examples/theme.pptx`、固定行間・句読点を含む `examples/text-theme.pptx`
@@ -221,7 +229,7 @@ LibreOffice 比較の回帰テストに登録しています。個別の再現�
 
 文字幅はフォントの公称 advance、縦配置は OS/2 の Windows セル
 メトリクスを優先し、OS/2 がない場合は typographic/hhea に戻します。
-描画側の kerning・合字によって測定幅と見た目の幅に差が出ることがあり、
+各文字の x 座標を指定するよう改善しましたが、合字などの複雑な処理では幅に差が残り、
 完全な文字 shaping とフォント代替の一致は今後の課題です。
 
 
@@ -496,3 +504,104 @@ python tests/visual/compare_punctuation_positions.py \
 python tests/visual/make_punctuation_positions.py \
   examples/punctuation-position-nested.pptx --sizes 24 --nested
 ```
+
+## 5 点の改善（2026-10-15）
+
+今回追加した範囲と、まだ保証しない範囲を分けます。
+
+| 改善 | 追加した動作 | 残る制限 |
+|---|---|---|
+| 共通ひな形の継承 | マスター→レイアウト→スライドの描画順、単色背景、プレースホルダーの座標・図形属性・基本文字書式 | テーマのスタイル行列、themeOverride、完全な文字書式継承 |
+| 複合的な部品 | 入れ子グループの拡大・反転・回転、表の明示セル書式・結合、PNG/JPEG の srcRect 切り抜き | グループの塗り継承、表のテーマスタイル・帯、画像の効果・タイル・fillRect 指定 |
+| フォントの整合 | 計測したフォント ID を描画にも使用、代替文字の再計測、各文字の x 座標を指定 | 複雑な文字組み・合字・自動縮小・PowerPoint との完全一致 |
+| 継続検証 | 3 OS の通常 CI、固定版 LibreOffice による週次・手動比較、失敗時の証跡保存 | 最新結果は PR のチェック欄を参照。ホスト OS イメージ自体は完全固定ではない |
+| 構造化警告 | 分類コード・部品・図形 ID/名前・図形ツリーやセル内の位置を manifest に記録 | 未対応属性すべての検出、図形への警告の重ね描き |
+
+プレースホルダーはスライド→レイアウトで `idx`、レイアウト→マスターで
+種類を照合します。ひな形に書かれたサンプル文字は描画せず、スライド側の本文に
+設定を補います。スライド側の明示指定を優先し、`showMasterSp="0"` で
+上位層の共通図形を非表示にできます。座標・単色塗り・基本文字書式の範囲での対応であり、
+全属性の継承を保証するものではありません。
+グループの入れ子は 64 段、表は 100000 セルまでです。
+変換処理は 8 MiB のスタックを確保したスレッドで実行します。
+OS ごとのメインスレッドの容量差によって XML 解析が異常終了しないようにし、
+64 段の描画と、65 段以上の入力に対する終了コード 1・出力なしをテストしています。
+
+### フォントを指定したものだけに限定する
+
+```sh
+./target/release/pptx2img input.pptx --out images \
+  --no-system-fonts --font-file /path/to/font.ttf
+```
+
+`--font-file` は複数指定できます。`--no-system-fonts` を付けなければ、
+従来どおり OS のフォントも利用します。manifest の `fonts` に使用した
+ファミリー名・PostScript 名・コレクション内の face index を記録します。
+同名で異なる版のフォントの同一性を保証するものではないため、
+再現する場合は同じフォントファイルを指定してください。
+描画時にだけ別のフォントへ置き換える動作を止め、代替は幅計測前に解決します。
+対応する字形がなければ `missing_glyph` として記録し、近似の警告を維持します。
+
+### 機械で読める警告
+
+manifest に `schema_version: 2` を追加しました。
+既存の `slides[].warnings`（重複を除いた文字列の一覧）は維持し、
+`slides[].diagnostics` に対象ごとの記録を追加しています。
+同じ警告でも対象図形が違えば別の記録です。ページ番号は親の `slide` です。
+
+```json
+{
+  "code": "omitted",
+  "part": "ppt/slides/slide1.xml",
+  "object_id": "42",
+  "object_name": "未対応グラフ",
+  "location": "spTree/0/2",
+  "message": "未対応の要素を省略しました: graphicFrame（表以外）"
+}
+```
+
+分類は `unsupported`（未対応の属性）、`omitted`（要素の省略）、
+`approximation`（近似）、`font_substitution`（書体の代替）、
+`missing_glyph`（字形なし）、`text_overflow`（枠からのはみ出し）です。
+図形 ID・名前がない要素ではその値は `null` です。
+表は `location` に行・セル番号も記録します。
+`--strict` は引き続き、いずれかの警告があれば出力前に停止します。
+
+### 追加テストと自動実行
+
+`tests/rendering.rs` は OS フォントを無効にして自作フォントを使い、
+継承と明示書式の描画一致、図形・表・画像の画素、警告の対象の分離を検証します。
+自作の `examples/composite-shapes.pptx` は、グループ・結合表・画像切り抜き・
+継承タイトルの 4 ページを LibreOffice と比較します。
+
+```sh
+PPTX2IMG_TEST_PYTHON="$PWD/.venv-visual/bin/python" \
+  cargo test --test libreoffice composite_shapes -- --ignored --nocapture
+# 資料の再生成時だけ python-pptx 1.0.2 が必要
+.venv-visual/bin/python tests/visual/make_composite_shapes.py
+```
+
+`.github/workflows/ci.yml` は push / PR ごとに Rust のテスト・書式・静的解析と
+Python 比較器の単体テストを実行します。Windows / Linux の結果は CI の初回実行で
+確認する必要があります。
+`.github/workflows/visual.yml` は週次・手動で描画比較を実行します。
+LibreOffice 26.2.5.2 の配布物を SHA-256 で確認し、主要な日本語フォント
+（Hiragino Sans W3 / W6）のハッシュも `check_environment.py` で確認します。
+フォントが基準と違えば比較前に失敗させます。OS とその他のフォントの情報も
+従来どおり report に保存します。環境差を判定閾値の緩和で吸収しないでください。
+ローカルでの全比較は LibreOffice 不要の通常テストから引き続き分離しています。
+
+実装時の参照（仕様・依存ライブラリの公開 API）：
+
+- [Microsoft: スライドマスター](https://learn.microsoft.com/en-us/office/open-xml/presentation/working-with-slide-masters)
+- [Microsoft: グループ座標変換](https://learn.microsoft.com/ja-jp/dotnet/api/documentformat.openxml.drawing.transformgroup)
+- [usvg 0.48.1: FontResolver](https://docs.rs/usvg/0.48.1/usvg/struct.FontResolver.html)
+- [GitHub: ホストランナー](https://docs.github.com/en/actions/reference/runners/github-hosted-runners)
+
+新しい実行時依存は追加していません。LibreOffice は比較にのみ利用します。
+
+今回のローカル検証（macOS / LibreOffice 26.2.5.2）では、Rust 45 件、
+Python 比較器 14 件、LibreOffice 比較 8 系統が合格しました。
+`cargo fmt --check`、`cargo clippy --locked --all-targets -- -D warnings`、
+`actionlint` も合格しています。既存の画像・改行・行内位置の閾値は変更していません。
+PowerPoint の参照画像との照合は未確認です。GitHub 上の CI 結果は PR のチェック欄を参照してください。

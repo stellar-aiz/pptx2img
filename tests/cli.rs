@@ -143,3 +143,38 @@ fn theme_colors_are_resolved_through_layout_and_master() {
         (0, 0, 0)
     );
 }
+
+#[test]
+fn default_output_is_next_to_input_and_explicit_output_takes_precedence() {
+    let dir = tempfile::tempdir().unwrap();
+    let nested = dir.path().join("入力 資料");
+    fs::create_dir(&nested).unwrap();
+    let input = nested.join("資料.v2.pptx");
+    fixture(&input, "");
+    let out = nested.join("資料.v2.pptx2img");
+    let invoke = || {
+        let mut command = Command::new(env!("CARGO_BIN_EXE_pptx2img"));
+        command
+            .current_dir(dir.path())
+            .arg(Path::new("入力 資料").join("資料.v2.pptx"))
+            .args(["--width", "100", "--no-system-fonts"]);
+        command.output().unwrap()
+    };
+    let result = invoke();
+    assert!(
+        result.status.success(),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+    assert!(String::from_utf8_lossy(&result.stderr).contains("資料.v2.pptx2img/"));
+    assert!(out.join("slide-001.png").is_file());
+    assert!(out.join("slide-002.png").is_file());
+    let before = fs::read(out.join("manifest.json")).unwrap();
+    let repeated = invoke();
+    assert!(!repeated.status.success());
+    assert!(String::from_utf8_lossy(&repeated.stderr).contains("出力先が既に存在します"));
+    assert_eq!(before, fs::read(out.join("manifest.json")).unwrap());
+    let explicit = dir.path().join("指定出力");
+    assert!(run(&input, &explicit, true).status.success());
+    assert!(explicit.join("manifest.json").is_file());
+}

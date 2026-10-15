@@ -4,7 +4,12 @@ use base64::{Engine, engine::general_purpose::STANDARD};
 use roxmltree::{Document, Node};
 use std::{collections::HashMap, fs::File, io::Read, path::Path};
 
+mod diagnostics;
+mod layout;
+mod objects;
 mod text;
+pub use diagnostics::Diagnostic;
+use diagnostics::{Code, Target, Warnings};
 mod theme;
 use theme::Theme;
 
@@ -21,6 +26,7 @@ pub struct Deck {
 pub struct Slide {
     pub svg: String,
     pub warnings: Vec<String>,
+    pub diagnostics: Vec<Diagnostic>,
 }
 struct Part {
     target: String,
@@ -30,11 +36,8 @@ struct Part {
 type Parts = HashMap<String, Vec<u8>>;
 type Relationships = HashMap<String, Part>;
 
-fn warn(warnings: &mut Vec<String>, value: impl Into<String>) {
-    let value = value.into();
-    if !warnings.contains(&value) {
-        warnings.push(value);
-    }
+fn warn(warnings: &mut Warnings, value: impl Into<String>) {
+    warnings.push(Code::Unsupported, value);
 }
 fn xml<'a>(parts: &'a Parts, name: &str) -> Result<Document<'a>> {
     let bytes = parts
@@ -194,7 +197,7 @@ pub fn read(path: &Path, options: &RenderOptions<'_>) -> Result<Deck> {
     })
 }
 
-fn color(node: Node<'_, '_>, default: &str, theme: &Theme, warnings: &mut Vec<String>) -> String {
+fn color(node: Node<'_, '_>, default: &str, theme: &Theme, warnings: &mut Warnings) -> String {
     for c in node.children().filter(|n| n.is_element()) {
         let resolved = match c.tag_name().name() {
             "srgbClr" => c
@@ -221,7 +224,7 @@ fn color(node: Node<'_, '_>, default: &str, theme: &Theme, warnings: &mut Vec<St
     warn(warnings, "色を解決できないため代替色で描画しました");
     default.into()
 }
-fn fill(node: Node<'_, '_>, default: &str, theme: &Theme, warnings: &mut Vec<String>) -> String {
+fn fill(node: Node<'_, '_>, default: &str, theme: &Theme, warnings: &mut Warnings) -> String {
     if child(node, A, "noFill").is_some() {
         return "none".into();
     }
@@ -245,44 +248,69 @@ fn render_slide(
     height: f64,
     options: &RenderOptions<'_>,
 ) -> Result<Slide> {
-    let doc = xml(parts, name)?;
-    let rels = relationships(parts, name)?;
-    let mut warnings = Vec::new();
+    let paths = layout::chain(parts, name)?;
+    let docs = paths
+        .iter()
+        .map(|p| xml(parts, p))
+        .collect::<Result<Vec<_>>>()?;
+    let roots: Vec<_> = docs.iter().map(Document::root_element).collect();
+    let mut warnings = Warnings::default();
+    warnings.target = Target {
+        part: name.into(),
+        location: "slide".into(),
+        ..Target::default()
+    };
     let theme = Theme::load(parts, name, &mut warnings)?;
-    if rels.values().any(|r| r.kind.ends_with("/slideLayout")) {
-        warn(
-            &mut warnings,
-            "レイアウト・マスターの図形・座標・文字スタイルの完全な継承は未対応です",
-        );
-    }
-    let common = child(doc.root_element(), P, "cSld").context("スライド内容がありません")?;
-    let background = child(common, P, "bg")
+    let background_node = roots
+        .iter()
+        .find_map(|r| child(*r, P, "cSld").and_then(|n| child(n, P, "bg")));
+    let background = background_node
         .and_then(|n| child(n, P, "bgPr"))
         .map(|n| fill(n, "#ffffff", &theme, &mut warnings))
         .unwrap_or_else(|| "#ffffff".into());
-    if child(common, P, "bg")
-        .and_then(|n| child(n, P, "bgRef"))
-        .is_some()
-    {
+    if background_node.and_then(|n| child(n, P, "bgRef")).is_some() {
         warn(&mut warnings, "テーマ背景は未対応です");
     }
     let mut svg = format!(
         "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"{width}\" height=\"{height}\" viewBox=\"0 0 {width} {height}\"><rect width=\"100%\" height=\"100%\" fill=\"{background}\"/>"
     );
-    let tree = child(common, P, "spTree").context("図形ツリーがありません")?;
-    for node in tree.children().filter(|n| n.is_element()) {
-        match node.tag_name().name() {
-            "nvGrpSpPr" | "grpSpPr" => {}
-            "sp" | "pic" | "cxnSp" => {
-                render_shape(node, parts, &rels, &theme, options, &mut svg, &mut warnings)?
+    // 低い層から描き、スライド自身が最後に重なる。ひな形のサンプル文字は描かない。
+    for index in (0..roots.len()).rev() {
+        if index > 0 && theme::bool_attr(roots[0], "showMasterSp") == Some(false) {
+            continue;
+        }
+        if index == 2 && theme::bool_attr(roots[1], "showMasterSp") == Some(false) {
+            continue;
+        }
+        let tree = layout::tree(roots[index]).context("図形ツリーがありません")?;
+        let rels = relationships(parts, &paths[index])?;
+        let mut renderer = objects::Renderer {
+            parts,
+            rels: &rels,
+            theme: &theme,
+            options,
+            svg: &mut svg,
+            warnings: &mut warnings,
+            part: &paths[index],
+            ancestors: &roots[index + 1..],
+            master_style: roots
+                .iter()
+                .find(|n| n.has_tag_name((P, "sldMaster")))
+                .and_then(|n| child(*n, P, "txStyles")),
+        };
+        for (position, node) in tree.children().filter(|n| n.is_element()).enumerate() {
+            if index > 0 && layout::placeholder(node).is_some() {
+                continue;
             }
-            other => warn(
-                &mut warnings,
-                format!("未対応の要素を省略しました: {other}"),
-            ),
+            renderer.node(node, &format!("spTree/{position}"), 0)?;
         }
     }
-    for n in doc.root_element().children().filter(|n| n.is_element()) {
+    warnings.target = Target {
+        part: name.into(),
+        location: "slide".into(),
+        ..Target::default()
+    };
+    for n in roots[0].children().filter(|n| n.is_element()) {
         if !matches!(n.tag_name().name(), "cSld" | "clrMapOvr") {
             warn(
                 &mut warnings,
@@ -291,27 +319,44 @@ fn render_slide(
         }
     }
     svg.push_str("</svg>");
-    Ok(Slide { svg, warnings })
+    let (warnings, diagnostics) = warnings.into_parts();
+    Ok(Slide {
+        svg,
+        warnings,
+        diagnostics,
+    })
 }
 fn render_shape(
-    node: Node<'_, '_>,
+    shape: objects::Shape<'_>,
     parts: &Parts,
     rels: &Relationships,
     theme: &Theme,
     options: &RenderOptions<'_>,
     svg: &mut String,
-    warnings: &mut Vec<String>,
+    warnings: &mut Warnings,
 ) -> Result<()> {
-    let Some(props) = child(node, P, "spPr") else {
-        warn(warnings, "図形属性がない要素を省略しました");
+    let node = shape.chain[0];
+    let props_chain: Vec<_> = shape
+        .chain
+        .iter()
+        .filter_map(|n| child(*n, P, "spPr"))
+        .collect();
+    let Some(props) = props_chain.first().copied() else {
+        warnings.push(Code::Omitted, "図形属性がない要素を省略しました");
         return Ok(());
     };
-    let Some(transform) = child(props, A, "xfrm") else {
-        warn(warnings, "継承座標の要素を省略しました");
+    let transforms: Vec<_> = props_chain
+        .iter()
+        .filter_map(|n| child(*n, A, "xfrm"))
+        .collect();
+    let Some(transform) = transforms.first().copied() else {
+        warnings.push(Code::Omitted, "継承座標を解決できない要素を省略しました");
         return Ok(());
     };
-    let (Some(offset), Some(extent)) = (child(transform, A, "off"), child(transform, A, "ext"))
-    else {
+    let (Some(offset), Some(extent)) = (
+        transforms.iter().find_map(|n| child(*n, A, "off")),
+        transforms.iter().find_map(|n| child(*n, A, "ext")),
+    ) else {
         bail!("図形の座標・寸法がありません");
     };
     let x = number(offset, "x", 0.0) / EMU;
@@ -339,7 +384,11 @@ fn render_shape(
         -w / 2.0,
         -h / 2.0
     ));
-    for attr in props.children().filter(|n| n.is_element()) {
+    for attr in props_chain
+        .iter()
+        .flat_map(|n| n.children())
+        .filter(|n| n.is_element())
+    {
         if !matches!(
             attr.tag_name().name(),
             "xfrm" | "prstGeom" | "solidFill" | "noFill" | "ln"
@@ -350,28 +399,53 @@ fn render_shape(
             );
         }
     }
-    if child(node, P, "style").is_some() {
+    if shape.chain.iter().any(|n| child(*n, P, "style").is_some()) {
         warn(warnings, "テーマ由来の図形スタイルは未対応です");
-    }
-    if node.descendants().any(|n| n.has_tag_name((P, "ph"))) {
-        warn(warnings, "プレースホルダーの継承は未対応です");
     }
     if node.has_tag_name((P, "pic")) {
         render_image(node, parts, rels, w, h, svg, warnings)?;
     } else {
-        let fill = fill(props, "none", theme, warnings);
-        let line = child(props, A, "ln");
+        let fill = fill(
+            props_chain
+                .iter()
+                .copied()
+                .find(|n| layout::has_fill(*n))
+                .unwrap_or(props),
+            "none",
+            theme,
+            warnings,
+        );
+        let line = props_chain.iter().find_map(|n| child(*n, A, "ln"));
         let stroke = line
             .map(|n| fill_line(n, theme, warnings))
             .unwrap_or_else(|| "none".into());
         let line_width = line.map(|n| number(n, "w", 9525.0) / EMU).unwrap_or(1.0);
         let style = format!("fill=\"{fill}\" stroke=\"{stroke}\" stroke-width=\"{line_width}\"");
-        if let Some(geometry) = child(props, A, "prstGeom") {
-            if geometry.descendants().any(|n| n.has_tag_name((A, "gd"))) {
+        if let Some(geometry) = props_chain.iter().find_map(|n| child(*n, A, "prstGeom")) {
+            if geometry.attribute("prst") != Some("roundRect")
+                && geometry.descendants().any(|n| n.has_tag_name((A, "gd")))
+            {
                 warn(warnings, "図形の調整値は未対応です");
             }
             match geometry.attribute("prst").unwrap_or("") {
                 "rect" => svg.push_str(&format!("<rect width=\"{w}\" height=\"{h}\" {style}/>")),
+                "roundRect" => {
+                    let mut adjustment = 16667.0_f64;
+                    for guide in geometry.descendants().filter(|n| n.has_tag_name((A, "gd"))) {
+                        let value = guide
+                            .attribute("fmla")
+                            .and_then(|s| s.strip_prefix("val "))
+                            .and_then(|s| s.trim().parse::<f64>().ok())
+                            .filter(|v| v.is_finite());
+                        if let (Some("adj"), Some(value)) = (guide.attribute("name"), value) {
+                            adjustment = value;
+                        } else {
+                            warn(warnings, "角丸矩形の調整式は未対応です");
+                        }
+                    }
+                    let radius = w.min(h) * adjustment.clamp(0.0, 50000.0) / 100000.0;
+                    svg.push_str(&format!("<rect width=\"{w}\" height=\"{h}\" rx=\"{radius}\" ry=\"{radius}\" {style}/>"));
+                }
                 "ellipse" => svg.push_str(&format!(
                     "<ellipse cx=\"{}\" cy=\"{}\" rx=\"{}\" ry=\"{}\" {style}/>",
                     w / 2.0,
@@ -380,23 +454,41 @@ fn render_shape(
                     h / 2.0
                 )),
                 "line" => svg.push_str(&format!("<line x2=\"{w}\" y2=\"{h}\" {style}/>")),
-                other => warn(warnings, format!("未対応のプリセット図形: {other}")),
+                other => warnings.push(Code::Omitted, format!("未対応のプリセット図形: {other}")),
             }
         }
         if let Some(body) = child(node, P, "txBody") {
-            text::render(body, w, h, theme, options, svg, warnings);
+            text::render(
+                text::TextBody {
+                    body,
+                    inherited: shape
+                        .chain
+                        .iter()
+                        .skip(1)
+                        .filter_map(|n| child(*n, P, "txBody"))
+                        .collect(),
+                    master_style: shape.master_style,
+                    cell_props: None,
+                },
+                w,
+                h,
+                theme,
+                options,
+                svg,
+                warnings,
+            );
         }
     }
     svg.push_str("</g>");
     Ok(())
 }
-fn fill_line(node: Node<'_, '_>, theme: &Theme, warnings: &mut Vec<String>) -> String {
+fn fill_line(node: Node<'_, '_>, theme: &Theme, warnings: &mut Warnings) -> String {
     for n in node.children().filter(|n| n.is_element()) {
         if !matches!(n.tag_name().name(), "solidFill" | "noFill") {
             warn(warnings, format!("未対応の線属性: {}", n.tag_name().name()));
         }
     }
-    fill(node, "#000000", theme, warnings)
+    fill(node, "none", theme, warnings)
 }
 fn render_image(
     node: Node<'_, '_>,
@@ -405,19 +497,19 @@ fn render_image(
     w: f64,
     h: f64,
     svg: &mut String,
-    warnings: &mut Vec<String>,
+    warnings: &mut Warnings,
 ) -> Result<()> {
     let Some(blip) = node.descendants().find(|n| n.has_tag_name((A, "blip"))) else {
-        warn(warnings, "画像参照がありません");
+        warnings.push(Code::Omitted, "画像参照がありません");
         return Ok(());
     };
     let Some(id) = blip.attribute((R, "embed")) else {
-        warn(warnings, "外部リンク画像は読み込みません");
+        warnings.push(Code::Omitted, "外部リンク画像は読み込みません");
         return Ok(());
     };
     let part = rels.get(id).context("画像の関連がありません")?;
     if part.external {
-        warn(warnings, "外部リンク画像は読み込みません");
+        warnings.push(Code::Omitted, "外部リンク画像は読み込みません");
         return Ok(());
     }
     let data = parts.get(&part.target).context("画像の部品がありません")?;
@@ -433,17 +525,28 @@ fn render_image(
     } else if data.starts_with(b"\xff\xd8\xff") {
         "image/jpeg"
     } else {
-        warn(warnings, "PNG/JPEG 以外の画像は未対応です");
+        warnings.push(Code::Omitted, "PNG/JPEG 以外の画像は未対応です");
         return Ok(());
     };
-    if node
-        .descendants()
-        .any(|n| n.has_tag_name((A, "srcRect")) || n.has_tag_name((A, "tile")))
-        || blip.children().any(|n| n.is_element())
+    if node.descendants().any(|n| {
+        n.has_tag_name((A, "tile")) || (n.has_tag_name((A, "fillRect")) && n.attributes().len() > 0)
+    }) || blip.children().any(|n| n.is_element())
     {
-        warn(warnings, "画像のトリミング・タイル・効果は未対応です");
+        warn(warnings, "画像のタイル・効果・塗り先の矩形指定は未対応です");
     }
-    svg.push_str(&format!("<image width=\"{w}\" height=\"{h}\" preserveAspectRatio=\"none\" href=\"data:{mime};base64,{}\"/>", STANDARD.encode(data)));
+    let crop = node.descendants().find(|n| n.has_tag_name((A, "srcRect")));
+    let values: Vec<_> = ["l", "t", "r", "b"]
+        .iter()
+        .map(|key| crop.map(|n| number(n, key, 0.0) / 100000.0).unwrap_or(0.0))
+        .collect();
+    let (left, top, right, bottom) = (values[0], values[1], values[2], values[3]);
+    if left + right >= 1.0 || top + bottom >= 1.0 {
+        bail!("画像のトリミング後の寸法が正数ではありません");
+    }
+    let iw = w / (1.0 - left - right);
+    let ih = h / (1.0 - top - bottom);
+    // 入れ子の SVG の表示領域で切り抜く。回転・反転は外側の図形座標系で適用する。
+    svg.push_str(&format!("<svg width=\"{w}\" height=\"{h}\" overflow=\"hidden\"><image x=\"{}\" y=\"{}\" width=\"{iw}\" height=\"{ih}\" preserveAspectRatio=\"none\" href=\"data:{mime};base64,{}\"/></svg>", -left*iw, -top*ih, STANDARD.encode(data)));
     Ok(())
 }
 #[cfg(test)]

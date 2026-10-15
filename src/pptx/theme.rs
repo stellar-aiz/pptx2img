@@ -9,7 +9,7 @@ pub(super) struct Theme {
     hanging: HashMap<String, [Option<bool>; 9]>,
 }
 impl Theme {
-    pub(super) fn load(parts: &Parts, slide: &str, warnings: &mut Vec<String>) -> Result<Self> {
+    pub(super) fn load(parts: &Parts, slide: &str, warnings: &mut Warnings) -> Result<Self> {
         let mut result = Self::default();
         let roots = relationships(parts, "")?;
         if let Some(presentation) = roots
@@ -154,7 +154,7 @@ impl Theme {
             }
         }
     }
-    pub(super) fn font(&self, value: &str, warnings: &mut Vec<String>) -> String {
+    pub(super) fn font(&self, value: &str, warnings: &mut Warnings) -> String {
         if !value.starts_with('+') {
             return value.into();
         }
@@ -221,6 +221,6 @@ mod tests {
         assert_eq!(theme.color("tx1"), Some("#112233"));
         theme.mapping.insert("tx1".into(), "accent1".into());
         assert_eq!(theme.color("tx1"), Some("#ABCDEF"));
-        assert_eq!(theme.font("+mn-ea", &mut vec![]), "日本語書体");
+        assert_eq!(theme.font("+mn-ea", &mut Warnings::default()), "日本語書体");
     }
 }
