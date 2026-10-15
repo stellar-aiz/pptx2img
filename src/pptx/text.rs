@@ -79,6 +79,13 @@ fn style(
 fn is_east_asian(ch: char) -> bool {
     matches!(ch as u32, 0x3000..=0x9fff | 0xf900..=0xfaff | 0xff00..=0xffef | 0x20000..=0x323af)
 }
+// Impress の 600 DPI 参照デバイスに合わせた計測用サイズ。
+// 字形の描画サイズは変更しない。根拠と比較範囲は README のフォント幅計測を参照。
+fn measurement_size(css_px: f64) -> f64 {
+    let hundredth_mm = (css_px * 2540.0 / 96.0).round();
+    (hundredth_mm * 600.0 / 2540.0).round().max(1.0) * 96.0 / 600.0
+}
+
 fn glyphs(
     value: &str,
     mut style: Style,
@@ -141,7 +148,13 @@ fn glyphs(
                     f64::from(-metrics.descent),
                     f64::from(metrics.leading.max(0.0)),
                 ));
-            let gm = font.glyph_metrics(size, LocationRef::default());
+            let gm = font.glyph_metrics(Size::unscaled(), LocationRef::default());
+            if metrics.units_per_em == 0 {
+                return None;
+            }
+            // サイズ指定の glyph_metrics は固定小数点の丸めを含む。
+            // フォント単位で取得した幅を、計測用サイズへ倍精度で換算する。
+            let advance_scale = measurement_size(style.size) / f64::from(metrics.units_per_em);
             let map = font.charmap();
             Some(
                 value
@@ -158,7 +171,9 @@ fn glyphs(
                             ch,
                             offset: 0.0,
                             compressed: false,
-                            advance: f64::from(advance.unwrap_or(style.size as f32)),
+                            advance: advance
+                                .map(|value| f64::from(value) * advance_scale)
+                                .unwrap_or(style.size),
                             ascent,
                             descent,
                             leading,
@@ -270,11 +285,12 @@ fn wrap(glyphs: &[Glyph], available: f64, enabled: bool, hanging: bool) -> Vec<V
             result.push(hard_line.to_vec());
             continue;
         }
-        // 明示字間が混在する行は別の丸め特性を持つため、従来の幅判定を保つ。
-        let quantized = hard_line.iter().all(|g| g.style.spacing == 0.0);
+        let explicit_spacing = hard_line.iter().any(|g| g.style.spacing != 0.0);
         let mut remaining = hard_line;
         while !remaining.is_empty() {
             let mut sum = 0.0;
+            let mut segment_width = 0.0;
+            let mut completed_units = 0.0;
             let mut end = 0;
             while end < remaining.len() {
                 let candidate = if end == 0 {
@@ -284,10 +300,17 @@ fn wrap(glyphs: &[Glyph], available: f64, enabled: bool, hanging: bool) -> Vec<V
                         + step(&remaining[end - 1], Some(&remaining[end]))
                         + remaining[end].advance
                 };
-                let fits = if quantized {
-                    fits_line(candidate, 0.0, available)
+                // 明示字間を含む行は、同じ書式の区間ごとに幅を丸める。
+                if end > 0 && remaining[end - 1].style != remaining[end].style {
+                    completed_units += layout_units(segment_width);
+                    segment_width = remaining[end].advance;
                 } else {
-                    candidate <= available
+                    segment_width += candidate - sum;
+                }
+                let fits = if explicit_spacing {
+                    completed_units + layout_units(segment_width) <= layout_units(available)
+                } else {
+                    fits_line(candidate, 0.0, available)
                 };
                 if end > 0 && !fits {
                     break;
@@ -682,16 +705,43 @@ mod tests {
         );
     }
     #[test]
-    fn explicit_spacing_keeps_unrounded_fit_at_boundary() {
+    fn explicit_spacing_rounds_style_segments_before_adding_widths() {
         let mut glyphs = sample("あいう");
-        glyphs[0].style.spacing = 0.01;
-        glyphs[1].style.spacing = 0.01;
-        let width = text_width(&glyphs);
-        assert_eq!(
-            strings(wrap(&glyphs, width - 0.001, true, false)),
-            ["あい", "う"]
-        );
-        assert_eq!(strings(wrap(&glyphs, width, true, false)), ["あいう"]);
+        for (index, glyph) in glyphs.iter_mut().enumerate() {
+            glyph.advance = 32.0;
+            glyph.style.size = 32.0;
+            glyph.style.spacing = index as f64;
+        }
+        // 区間はすべて別書式なので字間は加わらないが、各区間の丸めは蓄積する。
+        assert_eq!(strings(wrap(&glyphs, 96.0, true, false)), ["あい", "う"]);
+        assert_eq!(strings(wrap(&glyphs, 96.04, true, false)), ["あいう"]);
+    }
+    #[test]
+    fn font_units_preserve_proportions_at_fractional_sizes() {
+        let mut fonts = Database::new();
+        fonts.load_font_data(include_bytes!("../../tests/fixtures/metrics.ttf").to_vec());
+        for (size_pt, full) in [
+            (12.0, 16.0),
+            (18.0, 24.0),
+            (20.0, 26.72),
+            (21.5, 28.64),
+            (24.0, 32.0),
+            (32.0, 42.72),
+        ] {
+            let mut style = sample("あ")[0].style.clone();
+            style.face = "Pptx2img Metrics Test".into();
+            style.size = size_pt * 4.0 / 3.0;
+            let mut warnings = vec![];
+            let measured = glyphs("あA \u{301}", style.clone(), &fonts, &mut warnings);
+            assert!(warnings.is_empty(), "{warnings:?}");
+            for (glyph, expected) in measured.iter().zip([full, full / 2.0, full / 4.0, 0.0]) {
+                assert!((glyph.advance - expected).abs() < 1e-10);
+                assert_eq!(glyph.style.size, style.size);
+            }
+            let missing = glyphs("未", style.clone(), &fonts, &mut warnings);
+            assert_eq!(missing[0].advance, style.size);
+            assert!(warnings.iter().any(|w| w.contains("U+672A")));
+        }
     }
     #[test]
     fn compression_capacity_is_truncated_per_character() {

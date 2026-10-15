@@ -44,6 +44,6 @@ def make(output, sizes):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('output', type=Path)
-    parser.add_argument('--sizes', type=float, nargs='+', default=[18, 24])
+    parser.add_argument('--sizes', type=float, nargs='+', default=[18, 20, 21.5, 24, 32])
     args = parser.parse_args()
     make(args.output, args.sizes)

@@ -341,9 +341,9 @@ Hiragino Sans の比較結果から得た近似であり、OOXML 全般の規則
 例えば 24pt の「あ、いう、え」は圧縮 ON で幅 120pt では折り返し、
 120.01pt では一行になります。18pt では 90.01pt / 90.02pt が境界です。
 
-`examples/boundary-widths.pptx` は、18pt・24pt の通常文字と句読点について、
-境界の前後 ±0.1pt 内を 0.01pt の差も含めて調べる自作の 45 ページです。
-圧縮 OFF / ON の計 90 条件を LibreOffice と比較します。
+`examples/boundary-widths.pptx` は、18pt・20pt・21.5pt・24pt・32pt の通常文字と句読点について、
+境界の前後 ±0.1pt 内を 0.01pt の差も含めて調べる自作の 99 ページです。
+圧縮 OFF / ON の計 198 条件を LibreOffice と比較します。
 既存の MAE と差分画素率に加え、文字の行数と各行に占める描画量の割合を
 比較します。後者は全体の濃さで正規化し、割合差 0.02 以下を要求します。
 OCR ではなく、白背景・黒文字・単一文字枠の専用資料での回帰検出です。
@@ -360,9 +360,9 @@ python tests/visual/make_boundary_widths.py examples/boundary-widths.pptx
 改行の不一致が変更前 27 件から変更後 2 件に減りました。
 既存の画像比較だけでは変更前も全件合格していたため、行単位の検査を追加しています。
 
-未解決ケースは `examples/boundary-font-metrics.pptx` に保持しています。
-12pt・圧縮 OFF・「あ、いう、え」・幅 59.98pt / 59.99pt の改行差、
-20pt・21.5pt・32pt のフォント幅計測に由来する境界差を含む 72 ページです。
+調査資料 `examples/boundary-font-metrics.pptx` は全 72 ページを保持しています。
+12pt・圧縮 OFF・「あ、いう、え」・幅 59.98pt / 59.99pt の改行差は残ります。
+20pt・21.5pt・32pt の境界差は下記の幅計測の変更で改善しました。
 次の手動比較は現時点では不合格になります。合格する回帰テストには混ぜず、
 不一致を無視する例外や閾値の緩和も入れていません。
 
@@ -377,5 +377,50 @@ python tests/visual/make_boundary_widths.py examples/boundary-font-metrics.pptx 
 また、改行が一致しても境界付近での句読点の圧縮量や字形位置は完全一致しません。
 単一書体・余白なしの専用資料で確認した結果であり、混在書体や枠の余白を含めた
 すべての丸め処理を再現したものではありません。非ゼロの明示字間を含む行は
-既存の判定を維持し、既存の字間比較テストで回帰を確認します。
+下記の書式区間単位の丸めを使い、既存の字間比較テストで回帰を確認します。
 実行時依存の追加はありません。
+
+
+### フォント幅の計測（2026-10-15）
+
+サイズ指定の `skrifa::GlyphMetrics` は FreeType 互換の固定小数点換算を行うため、
+1/64px 単位のサイズ切り捨てが文字幅に入りました。例えば 20pt の全角幅は
+約 26.656px でした。`Size::unscaled()` でフォント単位の advance を取得し、
+倍精度で換算するよう変更しました。全角だけを補正する定数は使わず、半角・空白・
+幅ゼロの文字も元の幅比率を維持します。
+
+ただし公称サイズへ比例換算するだけでは LibreOffice との改行差は解消しません。
+Impress の計測は 600 DPI の参照デバイスを使い、フォント高さを整数デバイス座標へ
+丸めます。そのため、計測用の高さを 1/100 mm 単位へ丸めた後、600 DPI の整数へ
+丸める段階を分離しました。計測用の全角幅は 20pt で 26.72px、21.5pt で
+28.64px、32pt で 42.72px です。SVG に指定する字形のサイズは元のままです。
+
+参照した公開実装と API：
+
+- [skrifa 0.44.0 の Size API](https://docs.rs/skrifa/0.44.0/skrifa/instance/struct.Size.html)
+- [Impress の参照デバイス設定](https://github.com/LibreOffice/core/blob/libreoffice-26.2.5.2/sd/source/ui/app/sdmod.cxx#L79)
+- [フォント高さのデバイス座標変換](https://github.com/LibreOffice/core/blob/libreoffice-26.2.5.2/vcl/source/outdev/font.cxx#L686)
+- [計測時のスケール](https://github.com/LibreOffice/core/blob/libreoffice-26.2.5.2/vcl/source/font/LogicalFontInstance.cxx#L115)
+
+公開実装は丸め方の確認に参照しました。コードの移植はせず、計測モデルと自作の
+比較資料に基づく独立実装です。LibreOffice はテスト時だけ利用します。
+このモデルは確認した Impress の挙動への近似で、すべての Office や書体での
+完全一致を意味しません。複雑な shaping やカーニングは別の未対応事項です。
+
+正確な幅に変更すると、従来の微小誤差で隠れていた明示字間の境界差も現れました。
+非ゼロの明示字間を含む行では、同じ書式の区間ごとに幅を丸めて足し合わせるよう
+変更し、既存の字間比較を維持しました。閾値の緩和はありません。
+
+既存の 72 ページを圧縮 OFF / ON で調べた 144 条件では、改行の不一致が
+**65 件から 2 件**へ減りました。改善した 20pt・21.5pt・32pt の 54 ページは
+`boundary-widths.pptx` の自動回帰テストにも追加しています。
+残る 2 件は上記 12pt のケースで、元資料から削除していません。
+
+通常の Rust テストは自作の `tests/fixtures/metrics.ttf` を使い、6 サイズで
+全角・半角・空白・幅ゼロの比率、描画サイズの保持、欠落文字の警告を検証します。
+このフォントは単純な矩形字形と自前の幅値だけで作り、外部の字形は使っていません。
+実行時依存は追加していません。再生成だけには `fontTools` が必要です。
+
+```sh
+python tests/fixtures/make_metrics_font.py
+```
