@@ -73,7 +73,8 @@ cargo build --release --locked
 未対応検出も開発途中です。strict モードは現在検出できる警告に対する
 ゲートであり、未実装属性の完全検出や PowerPoint との一致は保証しません。
 フォントが異なる端末では文字の見え方が変わります。
-現時点の実行確認は macOS のみです。
+通常テストは Windows / Linux / macOS の CI で検証します。
+描画比較の実測環境は macOS です。
 
 入力は 128 MiB、展開後合計は 256 MiB、部品ごとは 32 MiB、
 最大 200 スライドです。出力と埋め込み画像にも画素数の上限があります。
@@ -144,7 +145,7 @@ PPTX2IMG_TEST_PYTHON="$PWD/.venv-visual/bin/python" \
 ```
 
 Windows では `.venv-visual/Scripts/python.exe` を使い、環境変数は
-使用するシェルの方法で設定してください。Windows / Linux は未実測です。
+使用するシェルの方法で設定してください。Windows / Linux の LibreOffice 比較は未実測です。
 
 図形・画像だけの `examples/geometry.pptx` と、テーマ色・テーマフォントの
 `examples/theme.pptx`、固定行間・句読点を含む `examples/text-theme.pptx`
@@ -508,7 +509,7 @@ python tests/visual/make_punctuation_positions.py \
 | 共通ひな形の継承 | マスター→レイアウト→スライドの描画順、単色背景、プレースホルダーの座標・図形属性・基本文字書式 | テーマのスタイル行列、themeOverride、完全な文字書式継承 |
 | 複合的な部品 | 入れ子グループの拡大・反転・回転、表の明示セル書式・結合、PNG/JPEG の srcRect 切り抜き | グループの塗り継承、表のテーマスタイル・帯、画像の効果・タイル・fillRect 指定 |
 | フォントの整合 | 計測したフォント ID を描画にも使用、代替文字の再計測、各文字の x 座標を指定 | 複雑な文字組み・合字・自動縮小・PowerPoint との完全一致 |
-| 継続検証 | 3 OS の通常 CI、固定版 LibreOffice による週次・手動比較、失敗時の証跡保存 | GitHub 上での初回実行は未確認。ホスト OS イメージ自体は完全固定ではない |
+| 継続検証 | 3 OS の通常 CI、固定版 LibreOffice による週次・手動比較、失敗時の証跡保存 | 最新結果は PR のチェック欄を参照。ホスト OS イメージ自体は完全固定ではない |
 | 構造化警告 | 分類コード・部品・図形 ID/名前・図形ツリーやセル内の位置を manifest に記録 | 未対応属性すべての検出、図形への警告の重ね描き |
 
 プレースホルダーはスライド→レイアウトで `idx`、レイアウト→マスターで
@@ -517,6 +518,9 @@ python tests/visual/make_punctuation_positions.py \
 上位層の共通図形を非表示にできます。座標・単色塗り・基本文字書式の範囲での対応であり、
 全属性の継承を保証するものではありません。
 グループの入れ子は 64 段、表は 100000 セルまでです。
+変換処理は 8 MiB のスタックを確保したスレッドで実行します。
+OS ごとのメインスレッドの容量差によって XML 解析が異常終了しないようにし、
+64 段の描画と、65 段以上の入力に対する終了コード 1・出力なしをテストしています。
 
 ### フォントを指定したものだけに限定する
 
@@ -595,4 +599,4 @@ LibreOffice 26.2.5.2 の配布物を SHA-256 で確認し、主要な日本語�
 Python 比較器 14 件、LibreOffice 比較 8 系統が合格しました。
 `cargo fmt --check`、`cargo clippy --locked --all-targets -- -D warnings`、
 `actionlint` も合格しています。既存の画像・改行・行内位置の閾値は変更していません。
-PowerPoint の参照画像との照合と、GitHub 上での CI 実行は未確認です。
+PowerPoint の参照画像との照合は未確認です。GitHub 上の CI 結果は PR のチェック欄を参照してください。

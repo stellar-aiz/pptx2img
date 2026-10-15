@@ -58,10 +58,22 @@ struct SlideReport {
 }
 
 fn main() {
-    if let Err(error) = run(Args::parse()) {
+    if let Err(error) = run_with_stack(Args::parse()) {
         eprintln!("エラー: {error:#}");
         std::process::exit(1);
     }
+}
+fn run_with_stack(args: Args) -> Result<()> {
+    // OOXML/SVG パーサーには再帰処理がある。OS のメインスレッド既定値に
+    // 依存させず、検証済みの macOS と同じ 8 MiB を変換処理に確保する。
+    // グループの 64 段制限は維持し、超過時にはクラッシュせず診断を返す。
+    std::thread::Builder::new()
+        .name("pptx-render".into())
+        .stack_size(8 * 1024 * 1024)
+        .spawn(move || run(args))
+        .context("変換用スレッドを作成できません")?
+        .join()
+        .map_err(|_| anyhow::anyhow!("変換処理が異常終了しました"))?
 }
 fn run(args: Args) -> Result<()> {
     if args.out.exists() {

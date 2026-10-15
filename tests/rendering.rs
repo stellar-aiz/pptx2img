@@ -351,21 +351,39 @@ fn invalid_table_merge_is_rejected_before_output() {
 }
 
 #[test]
-fn deeply_nested_group_is_rejected_before_output() {
-    let dir = tempfile::tempdir().unwrap();
-    let input = dir.path().join("a.pptx");
-    let out = dir.path().join("out");
-    let mut shape = rect(0, 0, 10, 10, "000000");
-    for _ in 0..66 {
-        shape = format!(
-            r#"<p:grpSp><p:grpSpPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="952500" cy="952500"/><a:chOff x="0" y="0"/><a:chExt cx="952500" cy="952500"/></a:xfrm></p:grpSpPr>{shape}</p:grpSp>"#
-        );
+fn nested_group_limit_keeps_valid_input_and_rejects_excess_before_output() {
+    for depth in [64, 65, 66] {
+        let dir = tempfile::tempdir().unwrap();
+        let input = dir.path().join("a.pptx");
+        let out = dir.path().join("out");
+        let mut shape = rect(0, 0, 10, 10, "000000");
+        for _ in 0..depth {
+            shape = format!(
+                r#"<p:grpSp><p:grpSpPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="952500" cy="952500"/><a:chOff x="0" y="0"/><a:chExt cx="952500" cy="952500"/></a:xfrm></p:grpSpPr>{shape}</p:grpSp>"#
+            );
+        }
+        write_deck(&input, page("sld", "", "", &shape), vec![]);
+        let result = run(&input, &out, false);
+        if depth == 64 {
+            check(result);
+            assert_eq!(rgb(&image(&out), 5, 5), (0, 0, 0));
+        } else {
+            // 通常のエラー終了を要求する。クラッシュを入力拒否として扱わない。
+            assert_eq!(
+                result.status.code(),
+                Some(1),
+                "終了状態: {:?}, 標準エラー: {}",
+                result.status,
+                String::from_utf8_lossy(&result.stderr)
+            );
+            assert!(!out.exists());
+            assert!(
+                String::from_utf8_lossy(&result.stderr).contains("64 段"),
+                "{}",
+                String::from_utf8_lossy(&result.stderr)
+            );
+        }
     }
-    write_deck(&input, page("sld", "", "", &shape), vec![]);
-    let result = run(&input, &out, false);
-    assert!(!result.status.success());
-    assert!(!out.exists());
-    assert!(String::from_utf8_lossy(&result.stderr).contains("64 段"));
 }
 
 #[test]
