@@ -1,0 +1,166 @@
+//! スライド → レイアウト → マスター → テーマの関連と色・書体を解決する。
+use super::*;
+
+#[derive(Default)]
+pub(super) struct Theme {
+    colors: HashMap<String, String>,
+    mapping: HashMap<String, String>,
+    fonts: HashMap<String, String>,
+}
+impl Theme {
+    pub(super) fn load(parts: &Parts, slide: &str, warnings: &mut Vec<String>) -> Result<Self> {
+        let mut result = Self::default();
+        let mut chain = vec![slide.to_string()];
+        for kind in ["/slideLayout", "/slideMaster"] {
+            let rels = relationships(parts, chain.last().unwrap())?;
+            if let Some(part) = rels
+                .values()
+                .find(|p| p.kind.ends_with(kind) && !p.external)
+            {
+                chain.push(part.target.clone());
+            } else {
+                break;
+            }
+        }
+        let mut theme_path = None;
+        let mut master_mapping = HashMap::new();
+        // 下位の明示 override が優先される。
+        for name in chain.iter().rev() {
+            let doc = xml(parts, name)?;
+            if let Some(map) = child(doc.root_element(), P, "clrMap") {
+                for attr in map.attributes() {
+                    result
+                        .mapping
+                        .insert(attr.name().into(), attr.value().into());
+                }
+            }
+            if doc.root_element().has_tag_name((P, "sldMaster")) {
+                master_mapping = result.mapping.clone();
+            }
+            if child(doc.root_element(), P, "clrMapOvr")
+                .and_then(|n| child(n, A, "masterClrMapping"))
+                .is_some()
+            {
+                result.mapping = master_mapping.clone();
+            }
+            if let Some(map) = child(doc.root_element(), P, "clrMapOvr")
+                .and_then(|n| child(n, A, "overrideClrMapping"))
+            {
+                for attr in map.attributes() {
+                    result
+                        .mapping
+                        .insert(attr.name().into(), attr.value().into());
+                }
+            }
+            let rels = relationships(parts, name)?;
+            if let Some(part) = rels
+                .values()
+                .find(|p| p.kind.ends_with("/theme") && !p.external)
+            {
+                theme_path = Some(part.target.clone());
+            }
+            if rels.values().any(|p| p.kind.ends_with("/themeOverride")) {
+                warn(warnings, "themeOverride 部品は未対応です");
+            }
+        }
+        if let Some(path) = theme_path {
+            let doc = xml(parts, &path)?;
+            result.read_theme(doc.root_element());
+        }
+        Ok(result)
+    }
+    fn read_theme(&mut self, root: Node<'_, '_>) {
+        if let Some(scheme) = root
+            .descendants()
+            .find(|n| n.has_tag_name((A, "clrScheme")))
+        {
+            for entry in scheme.children().filter(|n| n.is_element()) {
+                if let Some(c) = entry.children().find(|n| n.is_element()) {
+                    let value = if c.has_tag_name((A, "sysClr")) {
+                        c.attribute("lastClr")
+                    } else if c.has_tag_name((A, "srgbClr")) {
+                        c.attribute("val")
+                    } else {
+                        None
+                    };
+                    if let Some(rgb) = value.filter(|s| valid_rgb(s)) {
+                        self.colors
+                            .insert(entry.tag_name().name().into(), format!("#{rgb}"));
+                    }
+                }
+            }
+        }
+        for (tag, key) in [("majorFont", "+mj"), ("minorFont", "+mn")] {
+            if let Some(group) = root.descendants().find(|n| n.has_tag_name((A, tag))) {
+                for (script, suffix) in [("latin", "lt"), ("ea", "ea"), ("cs", "cs")] {
+                    let direct = child(group, A, script)
+                        .and_then(|n| n.attribute("typeface"))
+                        .filter(|s| !s.is_empty());
+                    let value = direct.or_else(|| {
+                        if script == "ea" {
+                            group
+                                .children()
+                                .find(|n| {
+                                    n.has_tag_name((A, "font"))
+                                        && n.attribute("script") == Some("Jpan")
+                                })
+                                .and_then(|n| n.attribute("typeface"))
+                        } else {
+                            None
+                        }
+                    });
+                    if let Some(value) = value {
+                        self.fonts.insert(format!("{key}-{suffix}"), value.into());
+                    }
+                }
+            }
+        }
+    }
+    pub(super) fn font(&self, value: &str, warnings: &mut Vec<String>) -> String {
+        if !value.starts_with('+') {
+            return value.into();
+        }
+        match self.fonts.get(value) {
+            Some(face) => face.clone(),
+            None => {
+                warn(warnings, format!("テーマフォントを解決できません: {value}"));
+                "sans-serif".into()
+            }
+        }
+    }
+    pub(super) fn color(&self, value: &str) -> Option<&str> {
+        let mapped = self
+            .mapping
+            .get(value)
+            .map(String::as_str)
+            .unwrap_or(match value {
+                "tx1" => "dk1",
+                "tx2" => "dk2",
+                "bg1" => "lt1",
+                "bg2" => "lt2",
+                _ => value,
+            });
+        self.colors.get(mapped).map(String::as_str)
+    }
+}
+pub(super) fn valid_rgb(value: &str) -> bool {
+    value.len() == 6 && value.bytes().all(|c| c.is_ascii_hexdigit())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn theme_resolves_system_color_japanese_font_and_mapping() {
+        let source = format!(
+            r#"<a:theme xmlns:a="{A}"><a:clrScheme><a:dk1><a:sysClr val="windowText" lastClr="112233"/></a:dk1><a:accent1><a:srgbClr val="ABCDEF"/></a:accent1></a:clrScheme><a:minorFont><a:latin typeface="Example"/><a:ea typeface=""/><a:font script="Jpan" typeface="日本語書体"/></a:minorFont></a:theme>"#
+        );
+        let doc = Document::parse(&source).unwrap();
+        let mut theme = Theme::default();
+        theme.read_theme(doc.root_element());
+        assert_eq!(theme.color("tx1"), Some("#112233"));
+        theme.mapping.insert("tx1".into(), "accent1".into());
+        assert_eq!(theme.color("tx1"), Some("#ABCDEF"));
+        assert_eq!(theme.font("+mn-ea", &mut vec![]), "日本語書体");
+    }
+}

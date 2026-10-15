@@ -1,0 +1,20 @@
+[package]
+name = "pptx2img"
+version = "0.1.0"
+edition = "2024"
+description = "Office に依存せず PPTX を PNG に変換する CLI（初期実装）"
+
+[dependencies]
+anyhow = "1"
+base64 = "0.22"
+clap = { version = "4", features = ["derive"] }
+resvg = "0.48.1"
+roxmltree = "0.21"
+imagesize = "0.15"
+skrifa = "0.44"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+zip = { version = "2.4", default-features = false, features = ["deflate"] }
+
+[dev-dependencies]
+tempfile = "3"

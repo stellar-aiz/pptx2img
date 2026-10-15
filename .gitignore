@@ -1,0 +1,26 @@
+# Rust のビルド成果物と描画比較の実行証跡
+/target/
+
+# Python の仮想環境とキャッシュ（比較テスト専用）
+/.venv/
+/.venv-*/
+/venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# ローカル環境設定。共有用の設定例は管理する
+.env
+.env.*
+!.env.example
+!.env.*.example
+
+# OS・エディターの一時ファイル
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
