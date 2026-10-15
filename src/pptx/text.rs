@@ -417,9 +417,13 @@ fn compress_wrap(glyphs: &[Glyph], available: f64, hanging: bool) -> Vec<Vec<Gly
             let line = &remaining[..end];
             let total: f64 = line.iter().map(capacity).sum();
             let width = layout_width(line, available, hanging);
+            // 折り返した行が自然幅へ戻る整数境界では、圧縮済みの字形位置が残る。
+            // 境界の 1 単位（1/100 mm）はこの保持判定にだけ適用する。
             let ratio = if total == 0.0 {
                 0.0
-            } else if end < candidate {
+            } else if end < candidate
+                || (end < remaining.len() && layout_units(width) <= layout_units(available) + 1.0)
+            {
                 1.0
             } else {
                 ((width - available) / total).clamp(0.0, 1.0)
@@ -789,6 +793,28 @@ mod tests {
                 ["あ、いう、え"]
             );
         }
+    }
+    #[test]
+    fn wrapped_line_keeps_maximum_compression_at_expansion_boundary() {
+        let mut glyphs = sample("あ、いう、え");
+        for glyph in &mut glyphs {
+            glyph.advance = 32.0;
+            glyph.style.size = 32.0;
+        }
+        let before = compress_wrap(&glyphs, 119.9 * 4.0 / 3.0, false);
+        assert_eq!(strings(before.clone()), ["あ、いう、", "え"]);
+        assert!(before[0][1].advance > 31.9);
+        for width in [119.95, 119.98, 120.0] {
+            let lines = compress_wrap(&glyphs, width * 4.0 / 3.0, false);
+            assert_eq!(strings(lines.clone()), ["あ、いう、", "え"]);
+            assert_eq!(lines[0][1].advance, 16.0);
+            assert_eq!(lines[0][4].advance, 16.0);
+            assert_eq!(lines[1][0].advance, 32.0);
+        }
+        assert_eq!(compress_wrap(&glyphs, 120.01 * 4.0 / 3.0, false).len(), 1);
+        // 残りの文字がない行では、枠に必要な分だけ縮める。
+        let last = compress_wrap(&glyphs[..5], 119.95 * 4.0 / 3.0, false);
+        assert!(last[0][1].advance > 31.9);
     }
     #[test]
     fn automatic_compression_uses_only_the_required_punctuation_space() {

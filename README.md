@@ -448,3 +448,51 @@ python tests/fixtures/make_metrics_font.py
 [改行候補から禁則を適用する処理](https://github.com/LibreOffice/core/blob/libreoffice-26.2.5.2/editeng/source/editeng/impedit3.cxx#L1976)
 も調査時に参照しましたが、コードの移植は行っていません。
 句読点の圧縮量や字形位置の完全一致は引き続き未達です。
+
+
+### 境界幅で残る最大圧縮と行内位置（2026-10-15）
+
+折り返した行を自然幅へ戻せる整数境界では、最大圧縮の文字位置が残る挙動を
+反映しました。24pt の「あ、いう、え」は枠幅 119.9pt ではほぼ圧縮が戻り、
+119.95〜120pt では先頭行に最大圧縮が残ります。後続行のない文字列末尾には
+この保持条件を適用せず、枠に収めるために必要な量だけ圧縮します。
+
+保持判定は自然幅と枠幅を 1/100 mm の整数へ丸めて比較し、境界の 1 単位を
+扱います。この値は保持判定だけに使い、改行判定や画像比較の閾値は緩めません。
+[圧縮済み文字位置の復元処理](https://github.com/LibreOffice/core/blob/libreoffice-26.2.5.2/editeng/source/editeng/impedit3.cxx#L4917)
+も挙動の確認に参照しました。コードの移植はせず、自作資料の観測結果に基づく
+独立実装です。LibreOffice の実行時依存は追加していません。
+
+新しい自作資料 `examples/punctuation-positions.pptx` は、読点・句点・括弧を
+12pt・18pt・24pt の境界前後で確認する 162 ページです。圧縮 OFF / ON の
+324 条件で、行内位置の不一致は旧実装の **38 件から 0 件**になりました。
+既存の LibreOffice 比較 6 系統も合格しています。
+
+新しい比較は従来の画素比較と改行比較に加え、各行の横方向の描画量を正規化し、
+累積分布の差から位置のずれを測ります。分布間の移動距離と左右端のずれが
+それぞれ 2px 以下で合格です（画像幅 1200px、専用資料では約 0.48pt）。
+外枠が同じでも内部の描画位置が動く差を検出しますが、OCR や文字ごとの
+座標照合ではありません。今回の最大移動距離は約 1.91px、端のずれは 2px でした。
+
+```sh
+python tests/visual/compare_punctuation_positions.py \
+  --binary target/release/pptx2img \
+  --fixture examples/punctuation-positions.pptx --out /tmp/punctuation-positions
+python tests/visual/make_punctuation_positions.py examples/punctuation-positions.pptx
+```
+
+結果は `position-report.json` と OFF / ON ごとの画像・差分・環境記録に残ります。
+Rust の ignored テスト `punctuation_positions_match_both_modes` からも実行できます。
+
+連続する括弧「「あ」」い」には改行や位置の差が残っています。既知の不一致を
+`examples/punctuation-position-nested.pptx` に保持し、次の比較は失敗を報告します。
+合格する自動回帰資料からは分けています。混在書体・余白・複雑な shaping を含む
+完全互換性を意味せず、近似描画の警告も維持しています。
+
+```sh
+python tests/visual/compare_punctuation_positions.py \
+  --binary target/release/pptx2img \
+  --fixture examples/punctuation-position-nested.pptx --out /tmp/punctuation-nested
+python tests/visual/make_punctuation_positions.py \
+  examples/punctuation-position-nested.pptx --sizes 24 --nested
+```
