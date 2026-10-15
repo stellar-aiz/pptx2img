@@ -11,9 +11,9 @@ use std::{fs, path::PathBuf};
 struct Args {
     /// 入力 PPTX
     input: PathBuf,
-    /// 新しく作成する出力ディレクトリ（既存は上書きしない）
+    /// 出力ディレクトリ（省略時は入力と同じ場所の <入力名>.pptx2img、既存は上書きしない）
     #[arg(long)]
-    out: PathBuf,
+    out: Option<PathBuf>,
     /// 出力画像の横幅
     #[arg(long, default_value_t = 1600, value_parser = clap::value_parser!(u32).range(64..=4096))]
     width: u32,
@@ -76,8 +76,11 @@ fn run_with_stack(args: Args) -> Result<()> {
         .map_err(|_| anyhow::anyhow!("変換処理が異常終了しました"))?
 }
 fn run(args: Args) -> Result<()> {
-    if args.out.exists() {
-        bail!("出力先が既に存在します: {}", args.out.display());
+    let out = args
+        .out
+        .unwrap_or_else(|| args.input.with_extension("pptx2img"));
+    if out.exists() {
+        bail!("出力先が既に存在します: {}", out.display());
     }
     let mut options = resvg::usvg::Options::default();
     if !args.no_system_fonts {
@@ -136,7 +139,7 @@ fn run(args: Args) -> Result<()> {
         .iter()
         .map(|slide| resvg::usvg::Tree::from_str(&slide.svg, &options))
         .collect::<Result<_, _>>()?;
-    fs::create_dir(&args.out).context("出力ディレクトリを作成できません")?;
+    fs::create_dir(&out).context("出力ディレクトリを作成できません")?;
     let mut reports = Vec::new();
     for (index, (slide, tree)) in deck.slides.iter().zip(trees).enumerate() {
         let name = format!("slide-{:03}.png", index + 1);
@@ -150,7 +153,7 @@ fn run(args: Args) -> Result<()> {
             ),
             &mut pixmap.as_mut(),
         );
-        pixmap.save_png(args.out.join(&name))?;
+        pixmap.save_png(out.join(&name))?;
         reports.push(SlideReport {
             slide: index + 1,
             image: name,
@@ -188,13 +191,13 @@ fn run(args: Args) -> Result<()> {
         slides: reports,
     };
     fs::write(
-        args.out.join("manifest.json"),
+        out.join("manifest.json"),
         serde_json::to_vec_pretty(&manifest)?,
     )?;
     eprintln!(
-        "{} 枚を出力しました: {}",
+        "{} 枚を出力しました。出力先: {}/",
         manifest.slides.len(),
-        args.out.display()
+        out.display()
     );
     Ok(())
 }

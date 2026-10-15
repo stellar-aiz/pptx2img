@@ -17,7 +17,12 @@ cargo build --release --locked
 ./target/release/pptx2img examples/basic.pptx --out images --width 1600
 ```
 
-出力先は新しいディレクトリを指定してください。既存出力は上書きしません。
+`--out` を省略すると、入力ファイルと同じ場所に、最後の拡張子を
+`.pptx2img` に置き換えたディレクトリを作成します。
+たとえば `pptx2img ~/Downloads/資料.pptx` の出力先は
+`~/Downloads/資料.pptx2img/` です。
+`--out` を指定した場合はそのパスを優先します。
+いずれの場合も既存の出力先は上書きせず、エラーで終了します。
 `slide-001.png` などと `manifest.json` を出力します。
 途中で I/O エラーが発生した場合、出力済み画像が残ることがあります。
 完了した処理だけが manifest を持ちます。
