@@ -1,0 +1,36 @@
+name: 通常の検証
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  test:
+    name: Rust と比較器の検証
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-15, windows-2025]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - name: Rust を固定
+        run: |
+          rustup toolchain install 1.97.0 --profile minimal --component clippy,rustfmt
+          rustup override set 1.97.0
+      - name: 書式・静的解析・通常テスト
+        run: |
+          cargo fmt --check
+          cargo clippy --locked --all-targets -- -D warnings
+          cargo test --locked
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.14'
+      - name: 画像比較器の単体テスト
+        run: |
+          python -m pip install -r tests/visual/requirements.txt
+          python -m unittest discover -s tests/visual -p 'test_*.py'

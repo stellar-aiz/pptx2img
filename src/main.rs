@@ -26,22 +26,35 @@ struct Args {
     /// システムフォントに加えて読み込むフォント（複数指定可）
     #[arg(long)]
     font_file: Vec<PathBuf>,
+    /// システムフォントを読まず、指定したフォントだけを使う
+    #[arg(long)]
+    no_system_fonts: bool,
 }
 
 #[derive(Serialize)]
 struct Manifest {
+    schema_version: u32,
     version: &'static str,
     status: &'static str,
     width: u32,
     height: u32,
     punctuation_compression: bool,
+    system_fonts: bool,
+    fonts: Vec<FontReport>,
     slides: Vec<SlideReport>,
+}
+#[derive(Serialize)]
+struct FontReport {
+    family: String,
+    post_script_name: String,
+    face_index: u32,
 }
 #[derive(Serialize)]
 struct SlideReport {
     slide: usize,
     image: String,
     warnings: Vec<String>,
+    diagnostics: Vec<pptx::Diagnostic>,
 }
 
 fn main() {
@@ -55,13 +68,29 @@ fn run(args: Args) -> Result<()> {
         bail!("出力先が既に存在します: {}", args.out.display());
     }
     let mut options = resvg::usvg::Options::default();
-    options.fontdb_mut().load_system_fonts();
+    if !args.no_system_fonts {
+        options.fontdb_mut().load_system_fonts();
+    }
     for path in &args.font_file {
         options
             .fontdb_mut()
             .load_font_file(path)
             .with_context(|| format!("フォントを読めません: {}", path.display()))?;
     }
+    // 計測した face ID を描画にも渡し、同名フォントの再選択を避ける。
+    let aliases: std::collections::HashMap<_, _> = options
+        .fontdb
+        .faces()
+        .map(|f| (format!("pptx2img-face-{}", f.id), f.id))
+        .collect();
+    options.font_resolver.select_font = Box::new(move |font, _| {
+        font.families().iter().find_map(|family| match family {
+            resvg::usvg::FontFamily::Named(name) => aliases.get(name).copied(),
+            _ => None,
+        })
+    });
+    // 代替は計測時に解決する。描画側だけで別のフォントに変えない。
+    options.font_resolver.select_fallback = Box::new(|_, _, _| None);
     let deck = pptx::read(
         &args.input,
         &pptx::RenderOptions {
@@ -114,9 +143,11 @@ fn run(args: Args) -> Result<()> {
             slide: index + 1,
             image: name,
             warnings: slide.warnings.clone(),
+            diagnostics: slide.diagnostics.clone(),
         });
     }
     let manifest = Manifest {
+        schema_version: 2,
         version: env!("CARGO_PKG_VERSION"),
         status: if has_warnings {
             "preview_with_warnings"
@@ -126,6 +157,22 @@ fn run(args: Args) -> Result<()> {
         width: args.width,
         height,
         punctuation_compression: args.punctuation_compression,
+        system_fonts: !args.no_system_fonts,
+        fonts: options
+            .fontdb
+            .faces()
+            .filter(|f| {
+                deck.slides.iter().any(|s| {
+                    s.svg
+                        .contains(&format!("font-family=\"pptx2img-face-{}\"", f.id))
+                })
+            })
+            .map(|f| FontReport {
+                family: f.families.first().map(|f| f.0.clone()).unwrap_or_default(),
+                post_script_name: f.post_script_name.clone(),
+                face_index: f.index,
+            })
+            .collect(),
         slides: reports,
     };
     fs::write(

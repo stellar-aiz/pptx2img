@@ -1,0 +1,28 @@
+"""日本語比較資料の主要フォントと LibreOffice 版を固定する。差はエラーにする。"""
+import hashlib
+import os
+from pathlib import Path
+import subprocess
+import unicodedata
+
+EXPECTED_FONTS = {
+    "ヒラギノ角ゴシック W3.ttc": "ff92033a300f55aff2f45f57479a560af2c5467973b425d3f724f870af07f83e",
+    "ヒラギノ角ゴシック W6.ttc": "495faf728470c0111c15265fd5844293fb0bef4240371b79a888371a4ae38c3b",
+}
+
+
+def check():
+    fonts = {unicodedata.normalize("NFC", p.name): p for p in Path("/System/Library/Fonts").glob("*.ttc")}
+    for name, expected in EXPECTED_FONTS.items():
+        path = fonts.get(name)
+        if path is None or hashlib.sha256(path.read_bytes()).hexdigest() != expected:
+            raise RuntimeError(f"比較用フォントが基準と一致しません: {name}。環境差を確認してください")
+    soffice = os.environ.get("SOFFICE", "/Applications/LibreOffice.app/Contents/MacOS/soffice")
+    version = subprocess.check_output([soffice, "--version"], text=True).strip()
+    if not version.startswith("LibreOffice 26.2.5.2 "):
+        raise RuntimeError(f"比較用 LibreOffice の版が一致しません: {version}")
+    print("比較用フォントと LibreOffice の版を確認しました")
+
+
+if __name__ == "__main__":
+    check()

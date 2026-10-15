@@ -6,6 +6,12 @@ use std::{
 };
 
 #[test]
+#[ignore = "LibreOffice と日本語フォントが必要"]
+fn composite_shapes_match_libreoffice() {
+    compare_fixture("composite-shapes");
+}
+
+#[test]
 #[ignore = "LibreOffice と tests/visual/requirements.txt の Python 依存が必要"]
 fn geometry_matches_libreoffice() {
     compare_fixture("geometry");

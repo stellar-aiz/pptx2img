@@ -24,3 +24,8 @@ Thumbs.db
 *.swp
 *.swo
 *~
+
+# ローカル専用の認証・内部状態
+/auth.json
+/internal_storage.json
+/version.json

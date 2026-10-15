@@ -55,7 +55,7 @@ fn style(
     nodes: &[Node<'_, '_>],
     east_asian: bool,
     theme: &Theme,
-    warnings: &mut Vec<String>,
+    warnings: &mut Warnings,
 ) -> Style {
     let latin = face(nodes, "latin").unwrap_or_else(|| "sans-serif".into());
     let requested = if east_asian {
@@ -86,12 +86,7 @@ fn measurement_size(css_px: f64) -> f64 {
     (hundredth_mm * 600.0 / 2540.0).round().max(1.0) * 96.0 / 600.0
 }
 
-fn glyphs(
-    value: &str,
-    mut style: Style,
-    fonts: &Database,
-    warnings: &mut Vec<String>,
-) -> Vec<Glyph> {
+fn glyphs(value: &str, mut style: Style, fonts: &Database, warnings: &mut Warnings) -> Vec<Glyph> {
     let families = [if style.face == "sans-serif" {
         Family::SansSerif
     } else {
@@ -111,20 +106,25 @@ fn glyphs(
         },
         ..Default::default()
     };
-    let id = fonts.query(&query).or_else(|| {
-        warn(
-            warnings,
-            format!("指定フォントがないため代替します: {}", style.face),
-        );
-        fonts.query(&Query {
-            families: &[Family::SansSerif],
-            ..query
-        })
-    });
+    let id = fonts
+        .faces()
+        .find(|f| format!("pptx2img-face-{}", f.id) == style.face)
+        .map(|f| f.id)
+        .or_else(|| fonts.query(&query))
+        .or_else(|| {
+            warnings.push(
+                Code::FontSubstitution,
+                format!("指定フォントがないため代替します: {}", style.face),
+            );
+            fonts
+                .query(&Query {
+                    families: &[Family::SansSerif],
+                    ..query
+                })
+                .or_else(|| fonts.faces().next().map(|f| f.id))
+        });
     if let Some(id) = id {
-        if let Some(info) = fonts.face(id) {
-            style.face = info.families[0].0.clone();
-        }
+        style.face = format!("pptx2img-face-{id}");
         if let Some(Some(result)) = fonts.with_face_data(id, |data, index| {
             let font = FontRef::from_index(data, index).ok()?;
             let size = Size::new(style.size as f32);
@@ -162,8 +162,28 @@ fn glyphs(
                     .map(|ch| {
                         let advance = map.map(ch).and_then(|id| gm.advance_width(id));
                         if advance.is_none() && ch != '\n' {
-                            warn(
-                                warnings,
+                            let mut database = std::sync::Arc::new(fonts.clone());
+                            let fallback = resvg::usvg::FontResolver::default_fallback_selector()(
+                                ch,
+                                &[id],
+                                &mut database,
+                            );
+                            if let Some(fallback) = fallback {
+                                let name = fonts
+                                    .face(fallback)
+                                    .map(|f| f.post_script_name.as_str())
+                                    .unwrap_or("");
+                                warnings.push(
+                                    Code::FontSubstitution,
+                                    format!("文字 U+{:04X} を {name} で代替します", ch as u32),
+                                );
+                                let mut replacement = style.clone();
+                                replacement.face = format!("pptx2img-face-{fallback}");
+                                return glyphs(&ch.to_string(), replacement, fonts, warnings)
+                                    .remove(0);
+                            }
+                            warnings.push(
+                                Code::MissingGlyph,
                                 format!("フォントに文字がなく幅を近似します: U+{:04X}", ch as u32),
                             );
                         }
@@ -186,8 +206,8 @@ fn glyphs(
             return result;
         }
     }
-    warn(
-        warnings,
+    warnings.push(
+        Code::Approximation,
         "フォントのメトリクスを取得できないため文字幅を近似します",
     );
     value
@@ -212,6 +232,7 @@ fn break_allowed(left: char, right: char) -> bool {
         && !(left.is_ascii_alphanumeric() && right.is_ascii_alphanumeric())
         && !matches!(right as u32, 0x0300..=0x036f | 0x3099..=0x309a | 0xfe00..=0xfe0f)
 }
+#[cfg(test)]
 fn paragraph_hanging(nodes: [Option<Node<'_, '_>>; 3], inherited: bool) -> bool {
     nodes
         .into_iter()
@@ -445,18 +466,40 @@ fn spacing(node: Option<Node<'_, '_>>, tag: &str, natural: f64, default: f64) ->
         .map(|n| natural * number(n, "val", 100000.0) / 100000.0)
         .unwrap_or(default)
 }
-pub(super) fn render(
-    body: Node<'_, '_>,
+pub(super) struct TextBody<'a> {
+    pub body: Node<'a, 'a>,
+    pub inherited: Vec<Node<'a, 'a>>,
+    pub master_style: Option<Node<'a, 'a>>,
+    pub cell_props: Option<Node<'a, 'a>>,
+}
+impl<'a> From<Node<'a, 'a>> for TextBody<'a> {
+    fn from(body: Node<'a, 'a>) -> Self {
+        Self {
+            body,
+            inherited: vec![],
+            master_style: None,
+            cell_props: None,
+        }
+    }
+}
+
+pub(super) fn render<'a>(
+    source: impl Into<TextBody<'a>>,
     w: f64,
     h: f64,
     theme: &Theme,
     options: &RenderOptions<'_>,
     svg: &mut String,
-    warnings: &mut Vec<String>,
+    warnings: &mut Warnings,
 ) {
-    warn(
-        warnings,
-        "文字組みは近似です。複雑な shaping・自動縮小・マスター文字スタイル・完全な Office 互換は未対応です",
+    let source = source.into();
+    let body = source.body;
+    let bodies: Vec<_> = std::iter::once(body)
+        .chain(source.inherited.iter().copied())
+        .collect();
+    warnings.push(
+        Code::Approximation,
+        "文字組みは近似です。複雑な shaping・自動縮小・完全な Office 互換は未対応です",
     );
     if options.punctuation_compression {
         warn(
@@ -464,20 +507,40 @@ pub(super) fn render(
             "自動句読点圧縮は実験的な描画方針です。PPTX 内の指定ではありません",
         );
     }
-    let bp = child(body, A, "bodyPr");
-    if bp.is_some_and(|n| n.attribute("vert").is_some_and(|s| s != "horz")) {
+    let body_props: Vec<_> = bodies
+        .iter()
+        .filter_map(|n| child(*n, A, "bodyPr"))
+        .collect();
+    if attr(&body_props, "vert").is_some_and(|s| s != "horz") {
         warn(warnings, "縦書きは未対応です");
     }
-    let left = bp.map(|n| number(n, "lIns", 91440.0) / EMU).unwrap_or(9.6);
-    let right = bp.map(|n| number(n, "rIns", 91440.0) / EMU).unwrap_or(9.6);
-    let top = bp.map(|n| number(n, "tIns", 45720.0) / EMU).unwrap_or(4.8);
-    let bottom = bp.map(|n| number(n, "bIns", 45720.0) / EMU).unwrap_or(4.8);
-    let wrap_enabled = bp.and_then(|n| n.attribute("wrap")) != Some("none");
+    if body_props.iter().any(|n| {
+        n.children()
+            .any(|c| matches!(c.tag_name().name(), "normAutofit" | "spAutoFit"))
+    }) {
+        warn(warnings, "テキストの自動縮小・枠の自動拡張は未対応です");
+    }
+    let margin = |key, cell_key, default| {
+        source
+            .cell_props
+            .and_then(|n| n.attribute(cell_key))
+            .and_then(|s| s.parse::<f64>().ok())
+            .filter(|n| n.is_finite())
+            .unwrap_or_else(|| prop_number(&body_props, key, default))
+            / EMU
+    };
+    let left = margin("lIns", "marL", 91440.0);
+    let right = margin("rIns", "marR", 91440.0);
+    let top = margin("tIns", "marT", 45720.0);
+    let bottom = margin("bIns", "marB", 45720.0);
+    let wrap_enabled = attr(&body_props, "wrap") != Some("none");
     let available = (w - left - right).max(1.0);
-    let placeholder = body
-        .parent()
-        .and_then(|n| n.descendants().find(|n| n.has_tag_name((P, "ph"))));
-    let style_kind = match placeholder.and_then(|n| n.attribute("type")) {
+    let placeholder_type = bodies
+        .iter()
+        .filter_map(|n| n.parent())
+        .filter_map(layout::placeholder)
+        .find_map(|n| n.attribute("type"));
+    let style_kind = match placeholder_type {
         Some("title" | "ctrTitle") => "titleStyle",
         Some("body" | "obj" | "subTitle") => "bodyStyle",
         _ => "otherStyle",
@@ -491,17 +554,36 @@ pub(super) fn render(
             .unwrap_or(0)
             .min(8);
         let level_tag = format!("lvl{}pPr", level + 1);
-        let list = child(body, A, "lstStyle").and_then(|n| child(n, A, &level_tag));
-        let list_default = child(body, A, "lstStyle").and_then(|n| child(n, A, "defPPr"));
-        let hanging = paragraph_hanging(
-            [pp, list, list_default],
-            theme.hanging_punctuation(style_kind, level),
-        );
-        let defaults: Vec<_> = [pp, list, list_default]
-            .into_iter()
-            .flatten()
-            .filter_map(|n| child(n, A, "defRPr"))
+        let mut paragraph_props: Vec<_> = pp.into_iter().collect();
+        for (i, body) in bodies.iter().enumerate() {
+            if i > 0
+                && let Some(inherited) = child(*body, A, "p").and_then(|p| child(p, A, "pPr"))
+            {
+                paragraph_props.push(inherited);
+            }
+            if let Some(list) = child(*body, A, "lstStyle") {
+                paragraph_props.extend(child(list, A, &level_tag));
+                paragraph_props.extend(child(list, A, "defPPr"));
+            }
+        }
+        if let Some(style) = source.master_style.and_then(|n| child(n, P, style_kind)) {
+            paragraph_props.extend(child(style, A, &level_tag));
+            paragraph_props.extend(child(style, A, "defPPr"));
+        }
+        let hanging = paragraph_props
+            .iter()
+            .find_map(|n| theme::bool_attr(*n, "hangingPunct"))
+            .unwrap_or_else(|| theme.hanging_punctuation(style_kind, level));
+        let defaults: Vec<_> = paragraph_props
+            .iter()
+            .filter_map(|n| child(*n, A, "defRPr"))
             .collect();
+        let spacing_node = |tag| {
+            paragraph_props
+                .iter()
+                .copied()
+                .find(|n| child(*n, A, tag).is_some())
+        };
         let mut all = Vec::new();
         for run in paragraph.children().filter(|n| n.is_element()) {
             if run.has_tag_name((A, "br")) {
@@ -544,7 +626,7 @@ pub(super) fn render(
                 }
             }
         }
-        if pp.is_some_and(|n| {
+        if paragraph_props.iter().any(|n| {
             n.children()
                 .any(|n| matches!(n.tag_name().name(), "buChar" | "buAutoNum"))
                 || n.attribute("marL").is_some()
@@ -566,7 +648,7 @@ pub(super) fn render(
             .map(|g| g.ascent + g.descent + g.leading)
             .fold(0.0, f64::max)
             .max(empty_size);
-        cursor += spacing(pp, "spcBef", natural, 0.0);
+        cursor += spacing(spacing_node("spcBef"), "spcBef", natural, 0.0);
         let compressed = options.punctuation_compression && wrap_enabled;
         if compressed && all.iter().any(|g| g.style.spacing != 0.0) {
             warn(
@@ -582,7 +664,7 @@ pub(super) fn render(
         for glyph_line in wrapped {
             let width = layout_width(&glyph_line, available, hanging);
             if width > available + 0.01 {
-                warn(warnings, "文字がテキスト枠の横幅を超えています");
+                warnings.push(Code::TextOverflow, "文字がテキスト枠の横幅を超えています");
             }
             let ascent = glyph_line.iter().map(|g| g.ascent).fold(0.0, f64::max);
             let descent = glyph_line.iter().map(|g| g.descent).fold(0.0, f64::max);
@@ -592,11 +674,8 @@ pub(super) fn render(
             } else {
                 ascent + descent + leading
             };
-            let advance = spacing(pp, "lnSpc", line_height, line_height);
-            let x = match pp
-                .and_then(|n| n.attribute("algn"))
-                .or_else(|| list.and_then(|n| n.attribute("algn")))
-            {
+            let advance = spacing(spacing_node("lnSpc"), "lnSpc", line_height, line_height);
+            let x = match attr(&paragraph_props, "algn") {
                 Some("ctr") => left + (available - width) / 2.0,
                 Some("r") => left + available - width,
                 _ => left,
@@ -604,16 +683,21 @@ pub(super) fn render(
             lines.push(Line {
                 glyphs: glyph_line,
                 x,
-                baseline: cursor + baseline_offset(pp, ascent, line_height, advance),
+                baseline: cursor
+                    + baseline_offset(spacing_node("lnSpc"), ascent, line_height, advance),
             });
             cursor += advance;
         }
-        cursor += spacing(pp, "spcAft", natural, 0.0);
+        cursor += spacing(spacing_node("spcAft"), "spcAft", natural, 0.0);
     }
     if cursor > h - top - bottom + 0.01 {
-        warn(warnings, "文字がテキスト枠の高さを超えています");
+        warnings.push(Code::TextOverflow, "文字がテキスト枠の高さを超えています");
     }
-    let vertical = match bp.and_then(|n| n.attribute("anchor")) {
+    let vertical = match source
+        .cell_props
+        .and_then(|n| n.attribute("anchor"))
+        .or_else(|| attr(&body_props, "anchor"))
+    {
         Some("ctr") => top + (h - top - bottom - cursor) / 2.0,
         Some("b") => h - bottom - cursor,
         Some("t") | None => top,
@@ -626,7 +710,7 @@ pub(super) fn render(
         let mut x = line.x;
         let y = line.baseline + vertical;
         svg.push_str(&format!("<text y=\"{y}\" xml:space=\"preserve\">"));
-        let positioned = line.glyphs.iter().any(|g| g.offset != 0.0 || g.compressed);
+
         let mut start = 0;
         while start < line.glyphs.len() {
             let style = &line.glyphs[start].style;
@@ -634,7 +718,7 @@ pub(super) fn render(
             while end < line.glyphs.len() && line.glyphs[end].style == *style {
                 end += 1;
             }
-            let positions = if style.spacing != 0.0 || positioned {
+            let positions = {
                 let mut position = x;
                 line.glyphs[start..end]
                     .iter()
@@ -651,8 +735,6 @@ pub(super) fn render(
                     })
                     .collect::<Vec<_>>()
                     .join(" ")
-            } else {
-                x.to_string()
             };
             let value: String = line.glyphs[start..end].iter().map(|g| g.ch).collect();
             svg.push_str(&format!("<tspan x=\"{positions}\" font-family=\"{}\" font-size=\"{}\" fill=\"{}\" font-weight=\"{}\" font-style=\"{}\">{}</tspan>", escape(&style.face), style.size, style.color, if style.bold {"bold"} else {"normal"}, if style.italic {"italic"} else {"normal"}, escape(&value)));
@@ -764,7 +846,7 @@ mod tests {
             let mut style = sample("あ")[0].style.clone();
             style.face = "Pptx2img Metrics Test".into();
             style.size = size_pt * 4.0 / 3.0;
-            let mut warnings = vec![];
+            let mut warnings = Warnings::default();
             let measured = glyphs("あA \u{301}", style.clone(), &fonts, &mut warnings);
             assert!(warnings.is_empty(), "{warnings:?}");
             for (glyph, expected) in measured.iter().zip([full, full / 2.0, full / 4.0, 0.0]) {
@@ -874,14 +956,14 @@ mod tests {
         for (spc, wrap_mode, expected, warn_spacing) in [
             ("0", "square", "0 10 17.5 27.5 37.5 45", false),
             ("-75", "square", "0 9 18 27 36 45", true),
-            ("0", "none", "0", false),
+            ("0", "none", "0 10 20 30 40 50", false),
         ] {
             let source = format!(
                 r#"<a:txBody xmlns:a="{A}"><a:bodyPr lIns="0" rIns="0" wrap="{wrap_mode}"/><a:p><a:r><a:rPr sz="750" spc="{spc}"/><a:t>あ、いう、え</a:t></a:r></a:p></a:txBody>"#
             );
             let doc = Document::parse(&source).unwrap();
             let mut svg = String::new();
-            let mut warnings = vec![];
+            let mut warnings = Warnings::default();
             render(
                 doc.root_element(),
                 55.0,
@@ -955,8 +1037,9 @@ mod tests {
             .children()
             .filter(|n| n.is_element())
             .collect();
-        let resolve =
-            |nodes: &[Node<'_, '_>]| style(nodes, true, &Theme::default(), &mut vec![]).spacing;
+        let resolve = |nodes: &[Node<'_, '_>]| {
+            style(nodes, true, &Theme::default(), &mut Warnings::default()).spacing
+        };
         assert_eq!(resolve(&[nodes[0]]), -8.0);
         assert_eq!(resolve(&[nodes[1], nodes[0]]), 0.0);
         assert_eq!(resolve(&[nodes[2], nodes[0]]), 4.0);
@@ -985,7 +1068,7 @@ mod tests {
                     punctuation_compression: false,
                 },
                 &mut svg,
-                &mut vec![],
+                &mut Warnings::default(),
             );
             assert!(svg.contains(&format!("<tspan x=\"{expected}\"")), "{svg}");
         }
@@ -996,7 +1079,7 @@ mod tests {
             r#"<a:txBody xmlns:a="{A}"><a:p><a:r><a:rPr sz="750" spc="-1500"/><a:t>あい</a:t></a:r></a:p></a:txBody>"#
         );
         let doc = Document::parse(&source).unwrap();
-        let mut warnings = vec![];
+        let mut warnings = Warnings::default();
         render(
             doc.root_element(),
             50.0,
@@ -1113,7 +1196,12 @@ mod tests {
             .descendants()
             .find(|n| n.has_tag_name((A, "rPr")))
             .unwrap();
-        let s = style(&[run, defaults], false, &Theme::default(), &mut vec![]);
+        let s = style(
+            &[run, defaults],
+            false,
+            &Theme::default(),
+            &mut Warnings::default(),
+        );
         assert_eq!(s.size, 16.0);
         assert!(!s.bold);
         assert_eq!(s.face, "Example");
