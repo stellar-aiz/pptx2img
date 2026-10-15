@@ -8,12 +8,16 @@ from pptx.enum.text import MSO_AUTO_SIZE
 from pptx.oxml.xmlchemy import OxmlElement
 
 
-def make(output, sizes):
+def make(output, sizes, include_prefix_cases=False):
     deck = Presentation()
     deck.slide_width, deck.slide_height = Inches(4), Inches(2)
     cases = []
     patterns = [(size, text, size * factor) for size in sizes
                 for text, factor in [('あいうえおか', 6), ('あ、いう、え', 5)]]
+    if 12 in sizes and include_prefix_cases:
+        # 末尾で終わる場合と途中の改行候補を比較し、句読点なしでも同じ境界か確認する。
+        patterns.extend((12, 'あいうえおか', width) for width in (36, 48, 60))
+        patterns.extend([(12, 'あいうえお', 60), (12, 'あ、いう、', 60)])
     if 24 in sizes:
         patterns.append((24, 'あいうえおか', 120))
     for size, text, boundary in patterns:
@@ -44,6 +48,7 @@ def make(output, sizes):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('output', type=Path)
-    parser.add_argument('--sizes', type=float, nargs='+', default=[18, 20, 21.5, 24, 32])
+    parser.add_argument('--sizes', type=float, nargs='+', default=[12, 18, 20, 21.5, 24, 32])
+    parser.add_argument('--include-prefix-cases', action='store_true')
     args = parser.parse_args()
-    make(args.output, args.sizes)
+    make(args.output, args.sizes, args.include_prefix_cases)

@@ -335,15 +335,16 @@ python tests/visual/make_auto_punctuation.py examples/auto-punctuation.pptx
 
 ### 境界幅での改行（2026-10-15）
 
-字間ゼロの行では、行と枠の幅を 1/100 mm 単位に丸め、句読点ごとの圧縮可能量を同じ単位で
-切り捨ててから足す判定へ変更しました。LibreOffice 26.2.5.2 / macOS /
+字間ゼロの行では、枠の幅を 1/100 mm 単位に四捨五入し、収まり判定に使う
+累積文字幅は切り捨てます。句読点ごとの圧縮可能量も同じ単位で切り捨てて
+足し合わせます。LibreOffice 26.2.5.2 / macOS /
 Hiragino Sans の比較結果から得た近似であり、OOXML 全般の規則とは断定しません。
 例えば 24pt の「あ、いう、え」は圧縮 ON で幅 120pt では折り返し、
 120.01pt では一行になります。18pt では 90.01pt / 90.02pt が境界です。
 
-`examples/boundary-widths.pptx` は、18pt・20pt・21.5pt・24pt・32pt の通常文字と句読点について、
-境界の前後 ±0.1pt 内を 0.01pt の差も含めて調べる自作の 99 ページです。
-圧縮 OFF / ON の計 198 条件を LibreOffice と比較します。
+`examples/boundary-widths.pptx` は、12pt・18pt・20pt・21.5pt・24pt・32pt の通常文字と句読点について、
+境界の前後 ±0.1pt 内を 0.01pt の差も含めて調べる自作の 162 ページです。
+圧縮 OFF / ON の計 324 条件を LibreOffice と比較します。
 既存の MAE と差分画素率に加え、文字の行数と各行に占める描画量の割合を
 比較します。後者は全体の濃さで正規化し、割合差 0.02 以下を要求します。
 OCR ではなく、白背景・黒文字・単一文字枠の専用資料での回帰検出です。
@@ -353,7 +354,7 @@ OCR ではなく、白背景・黒文字・単一文字枠の専用資料での�
 ```sh
 PPTX2IMG_TEST_PYTHON="$PWD/.venv-visual/bin/python" \
   cargo test --test libreoffice boundary_widths -- --ignored --nocapture
-python tests/visual/make_boundary_widths.py examples/boundary-widths.pptx
+python tests/visual/make_boundary_widths.py examples/boundary-widths.pptx --include-prefix-cases
 ```
 
 調査時の 12pt・18pt・24pt の 63 ページ、圧縮 OFF / ON の計 126 条件では、
@@ -361,10 +362,10 @@ python tests/visual/make_boundary_widths.py examples/boundary-widths.pptx
 既存の画像比較だけでは変更前も全件合格していたため、行単位の検査を追加しています。
 
 調査資料 `examples/boundary-font-metrics.pptx` は全 72 ページを保持しています。
-12pt・圧縮 OFF・「あ、いう、え」・幅 59.98pt / 59.99pt の改行差は残ります。
-20pt・21.5pt・32pt の境界差は下記の幅計測の変更で改善しました。
-次の手動比較は現時点では不合格になります。合格する回帰テストには混ぜず、
-不一致を無視する例外や閾値の緩和も入れていません。
+20pt・21.5pt・32pt の境界差は下記の幅計測の変更で、残っていた
+12pt・圧縮 OFF・幅 59.98pt / 59.99pt の改行差は累積幅の判定変更で改善しました。
+元の再現資料も保持し、次の手動比較で全 144 条件を確認できます。
+不一致を無視する例外や閾値の緩和は入れていません。
 
 ```sh
 python tests/visual/compare_boundary_widths.py \
@@ -414,7 +415,7 @@ Impress の計測は 600 DPI の参照デバイスを使い、フォント高さ
 既存の 72 ページを圧縮 OFF / ON で調べた 144 条件では、改行の不一致が
 **65 件から 2 件**へ減りました。改善した 20pt・21.5pt・32pt の 54 ページは
 `boundary-widths.pptx` の自動回帰テストにも追加しています。
-残る 2 件は上記 12pt のケースで、元資料から削除していません。
+この段階で残った 2 件は上記 12pt のケースで、下記の累積幅判定で改善しました。
 
 通常の Rust テストは自作の `tests/fixtures/metrics.ttf` を使い、6 サイズで
 全角・半角・空白・幅ゼロの比率、描画サイズの保持、欠落文字の警告を検証します。
@@ -424,3 +425,26 @@ Impress の計測は 600 DPI の参照デバイスを使い、フォント高さ
 ```sh
 python tests/fixtures/make_metrics_font.py
 ```
+
+
+### 12pt の残存改行差（2026-10-15）
+
+12pt の「あ、いう、え」では、先頭 5 文字の公称幅は 60pt、
+1/100 mm 換算で約 2116.67 です。幅 59.98pt / 59.99pt の枠は、
+同じ単位への四捨五入で 2116 になります。累積文字幅まで四捨五入して 2117 と
+判定していたため、5文字目の読点が収まらず、禁則により手前の文字も追い出していました。
+
+収まり判定に使う累積文字幅の整数部を取るよう変更し、文字ごとの幅・描画座標・
+禁則の規則は変更していません。各文字を切り捨ててから合計すると誤差が蓄積するため、
+必ず候補行の累積幅を使います。明示字間の書式区間単位の判定は維持しています。
+
+比較では、句読点なしの「あいうえおか」、5文字で終わる「あいうえお」「あ、いう、」
+でも同じ境界を確認しました。字形や句読点だけに依存する特例は入れていません。
+12pt の 36pt・48pt・60pt の境界前後と文字列末尾も自動比較に加えました。
+既存の 72 ページ資料に残っていた不一致は **2 件から 0 件**になります。
+
+これは LibreOffice 26.2.5.2 / macOS / Hiragino Sans の観測結果に基づく近似です。
+[累積文字位置の計測](https://github.com/LibreOffice/core/blob/libreoffice-26.2.5.2/vcl/source/outdev/text.cxx#L850)と
+[改行候補から禁則を適用する処理](https://github.com/LibreOffice/core/blob/libreoffice-26.2.5.2/editeng/source/editeng/impedit3.cxx#L1976)
+も調査時に参照しましたが、コードの移植は行っていません。
+句読点の圧縮量や字形位置の完全一致は引き続き未達です。

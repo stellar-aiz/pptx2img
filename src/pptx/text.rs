@@ -270,13 +270,14 @@ fn baseline_offset(
     }
 }
 // LibreOffice 比較で確認したレイアウト単位（1/100 mm）。
-// 枠と行全体は丸め、圧縮可能な余白は各文字で切り捨ててから合計する。
+// 枠と書式区間は四捨五入。収まり判定の累積幅と文字ごとの圧縮余白は切り捨てる。
 const LAYOUT_UNITS_PER_PX: f64 = 2540.0 / 96.0;
 fn layout_units(width: f64) -> f64 {
     (width * LAYOUT_UNITS_PER_PX).round()
 }
 fn fits_line(width: f64, compressed_units: f64, available: f64) -> bool {
-    layout_units(width) - compressed_units <= layout_units(available)
+    // 境界での収まり判定は累積幅の整数部を使う。文字ごとの切り捨てはしない。
+    (width * LAYOUT_UNITS_PER_PX).floor() - compressed_units <= layout_units(available)
 }
 fn wrap(glyphs: &[Glyph], available: f64, enabled: bool, hanging: bool) -> Vec<Vec<Glyph>> {
     let mut result = Vec::new();
@@ -687,6 +688,34 @@ mod tests {
             .iter()
             .map(|l| l.iter().map(|g| g.ch).collect())
             .collect()
+    }
+    #[test]
+    fn twelve_point_boundary_uses_cumulative_width_before_kinsoku() {
+        for text in ["あいうえお", "あいうえおか", "あ、いう、", "あ、いう、え"]
+        {
+            let mut glyphs = sample(text);
+            for glyph in &mut glyphs {
+                glyph.advance = 16.0;
+                glyph.style.size = 16.0;
+            }
+            let below = strings(wrap(&glyphs, 59.95 * 4.0 / 3.0, true, false));
+            assert!(below.len() > 1);
+            for width in [59.98, 59.99, 60.0] {
+                let lines = strings(wrap(&glyphs, width * 4.0 / 3.0, true, false));
+                assert_eq!(lines[0], text.chars().take(5).collect::<String>());
+                assert_eq!(lines.concat(), text);
+            }
+        }
+        // 各文字を切り捨ててから合計すると狭すぎる枠にも収まってしまう。
+        let mut glyphs = sample("あいうえお");
+        for glyph in &mut glyphs {
+            glyph.advance = 16.0;
+            glyph.style.size = 16.0;
+        }
+        assert_eq!(
+            strings(wrap(&glyphs, 59.95 * 4.0 / 3.0, true, false)),
+            ["あいうえ", "お"]
+        );
     }
     #[test]
     fn rounded_line_width_changes_only_at_layout_unit_boundary() {
