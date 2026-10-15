@@ -23,6 +23,12 @@ fn text_spacing_and_punctuation_match_libreoffice() {
     compare_fixture("text-theme");
 }
 
+#[test]
+#[ignore = "LibreOffice と日本語フォントが必要"]
+fn explicit_character_spacing_matches_libreoffice() {
+    compare_fixture("character-spacing");
+}
+
 fn compare_fixture(fixture: &str) {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let python = std::env::var_os("PPTX2IMG_TEST_PYTHON").unwrap_or_else(|| "python3".into());

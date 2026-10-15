@@ -15,6 +15,7 @@ struct Style {
     color: String,
     bold: bool,
     italic: bool,
+    spacing: f64,
 }
 #[derive(Clone)]
 struct Glyph {
@@ -70,6 +71,7 @@ fn style(
             .unwrap_or_else(|| "#000000".into()),
         bold: matches!(attr(nodes, "b"), Some("1" | "true")),
         italic: matches!(attr(nodes, "i"), Some("1" | "true")),
+        spacing: prop_number(nodes, "spc", 0.0).clamp(-400000.0, 400000.0) / 75.0,
     }
 }
 fn is_east_asian(ch: char) -> bool {
@@ -199,15 +201,31 @@ fn paragraph_hanging(nodes: [Option<Node<'_, '_>>; 3], inherited: bool) -> bool 
 fn can_hang(ch: char) -> bool {
     "、。，．".contains(ch)
 }
+// 字間は同じ文字書式が続く文字間にだけ加える。行末には加えない。
+// LibreOffice の描画でも書式境界では字間がリセットされる。
+fn step(glyph: &Glyph, next: Option<&Glyph>) -> f64 {
+    let spacing = next
+        .filter(|next| glyph.style == next.style)
+        .map(|_| glyph.style.spacing)
+        .unwrap_or(0.0);
+    (glyph.advance + spacing).max(0.0)
+}
+fn text_width(glyphs: &[Glyph]) -> f64 {
+    glyphs
+        .iter()
+        .enumerate()
+        .map(|(i, g)| step(g, glyphs.get(i + 1)))
+        .sum()
+}
 fn layout_width(glyphs: &[Glyph], available: f64, hanging: bool) -> f64 {
-    let width: f64 = glyphs.iter().map(|g| g.advance).sum();
+    let width = text_width(glyphs);
     if hanging
         && width > available
         && let Some(last) = glyphs.last()
         && can_hang(last.ch)
-        && width - last.advance <= available
+        && text_width(&glyphs[..glyphs.len() - 1]) <= available
     {
-        width - last.advance
+        text_width(&glyphs[..glyphs.len() - 1])
     } else {
         width
     }
@@ -241,8 +259,18 @@ fn wrap(glyphs: &[Glyph], available: f64, enabled: bool, hanging: bool) -> Vec<V
         while !remaining.is_empty() {
             let mut sum = 0.0;
             let mut end = 0;
-            while end < remaining.len() && (sum + remaining[end].advance <= available || end == 0) {
-                sum += remaining[end].advance;
+            while end < remaining.len() {
+                let candidate = if end == 0 {
+                    remaining[end].advance
+                } else {
+                    sum - remaining[end - 1].advance
+                        + step(&remaining[end - 1], Some(&remaining[end]))
+                        + remaining[end].advance
+                };
+                if end > 0 && candidate > available {
+                    break;
+                }
+                sum = candidate;
                 end += 1;
             }
             // hangingPunct は句読点を 1 文字だけ枠外に置ける。禁則による追い出しより先に扱う。
@@ -377,6 +405,14 @@ pub(super) fn render(
         }) {
             warn(warnings, "箇条書き・段落インデントは未対応です");
         }
+        if all.windows(2).any(|pair| {
+            pair[0].style == pair[1].style && pair[0].advance + pair[0].style.spacing < 0.0
+        }) {
+            warn(
+                warnings,
+                "文字幅を超える負の字間は未対応のため送り幅を 0 に制限します",
+            );
+        }
         let empty_size = style(&defaults, false, theme, warnings).size;
         let natural = all
             .iter()
@@ -438,12 +474,29 @@ pub(super) fn render(
             while end < line.glyphs.len() && line.glyphs[end].style == *style {
                 end += 1;
             }
+            let positions = if style.spacing != 0.0 {
+                let mut position = x;
+                line.glyphs[start..end]
+                    .iter()
+                    .enumerate()
+                    .map(|(i, g)| {
+                        let result = position.to_string();
+                        position += step(
+                            g,
+                            line.glyphs
+                                .get(start + i + 1)
+                                .filter(|_| start + i + 1 < end),
+                        );
+                        result
+                    })
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            } else {
+                x.to_string()
+            };
             let value: String = line.glyphs[start..end].iter().map(|g| g.ch).collect();
-            svg.push_str(&format!("<tspan x=\"{x}\" font-family=\"{}\" font-size=\"{}\" fill=\"{}\" font-weight=\"{}\" font-style=\"{}\">{}</tspan>", escape(&style.face), style.size, style.color, if style.bold {"bold"} else {"normal"}, if style.italic {"italic"} else {"normal"}, escape(&value)));
-            x += line.glyphs[start..end]
-                .iter()
-                .map(|g| g.advance)
-                .sum::<f64>();
+            svg.push_str(&format!("<tspan x=\"{positions}\" font-family=\"{}\" font-size=\"{}\" fill=\"{}\" font-weight=\"{}\" font-style=\"{}\">{}</tspan>", escape(&style.face), style.size, style.color, if style.bold {"bold"} else {"normal"}, if style.italic {"italic"} else {"normal"}, escape(&value)));
+            x += text_width(&line.glyphs[start..end]);
             start = end;
         }
         svg.push_str("</text>");
@@ -467,6 +520,7 @@ mod tests {
                     color: "#000000".into(),
                     bold: false,
                     italic: false,
+                    spacing: 0.0,
                 },
             })
             .collect()
@@ -476,6 +530,113 @@ mod tests {
             .iter()
             .map(|l| l.iter().map(|g| g.ch).collect())
             .collect()
+    }
+    #[test]
+    fn signed_spacing_changes_width_and_wrap_without_trailing_space() {
+        let mut glyphs = sample("あいうえ");
+        for g in &mut glyphs {
+            g.style.spacing = -5.0;
+        }
+        assert_eq!(text_width(&glyphs), 25.0);
+        assert_eq!(strings(wrap(&glyphs, 20.0, true, false)), ["あいう", "え"]);
+        for g in &mut glyphs {
+            g.style.spacing = 2.0;
+        }
+        assert_eq!(text_width(&glyphs), 46.0);
+        assert_eq!(strings(wrap(&glyphs, 22.0, true, false)), ["あい", "うえ"]);
+        assert_eq!(text_width(&glyphs[..1]), 10.0);
+    }
+    #[test]
+    fn spacing_stops_at_style_boundary_and_explicit_break() {
+        let mut glyphs = sample("あ、、い");
+        glyphs[1].style.spacing = -5.0;
+        glyphs[2].style.spacing = -5.0;
+        assert_eq!(text_width(&glyphs), 35.0);
+        glyphs[2].style.color = "#ff0000".into();
+        assert_eq!(text_width(&glyphs), 40.0);
+        let mut glyphs = sample("あい\nうえ");
+        for g in &mut glyphs {
+            g.style.spacing = -5.0;
+        }
+        let lines = wrap(&glyphs, 100.0, true, false);
+        assert_eq!(strings(lines.clone()), ["あい", "うえ"]);
+        assert_eq!(text_width(&lines[0]), 15.0);
+        assert_eq!(text_width(&lines[1]), 15.0);
+    }
+    #[test]
+    fn hanging_uses_compressed_width() {
+        let mut glyphs = sample("あいう、え");
+        for g in &mut glyphs {
+            g.style.spacing = -5.0;
+        }
+        let lines = wrap(&glyphs, 20.0, true, true);
+        assert_eq!(strings(lines.clone()), ["あいう、", "え"]);
+        assert_eq!(layout_width(&lines[0], 20.0, true), 20.0);
+    }
+    #[test]
+    fn spacing_is_inherited_and_zero_cancels_it() {
+        let source = format!(
+            r#"<a:p xmlns:a="{A}"><a:defRPr spc="-600"/><a:rPr spc="0"/><a:rPr spc="300"/></a:p>"#
+        );
+        let doc = Document::parse(&source).unwrap();
+        let nodes: Vec<_> = doc
+            .root_element()
+            .children()
+            .filter(|n| n.is_element())
+            .collect();
+        let resolve =
+            |nodes: &[Node<'_, '_>]| style(nodes, true, &Theme::default(), &mut vec![]).spacing;
+        assert_eq!(resolve(&[nodes[0]]), -8.0);
+        assert_eq!(resolve(&[nodes[1], nodes[0]]), 0.0);
+        assert_eq!(resolve(&[nodes[2], nodes[0]]), 4.0);
+        assert_eq!(resolve(&[]), 0.0);
+    }
+    #[test]
+    fn svg_positions_use_spacing_and_alignment() {
+        // フォント未登録時の決定的な幅 10px を用い、SVG 出力まで検証する。
+        for (align, expected) in [
+            ("l", "0 5 10 15"),
+            ("ctr", "12.5 17.5 22.5 27.5"),
+            ("r", "25 30 35 40"),
+        ] {
+            let source = format!(
+                r#"<a:txBody xmlns:a="{A}"><a:bodyPr lIns="0" rIns="0"/><a:p><a:pPr algn="{align}"/><a:r><a:rPr sz="750" spc="-375"/><a:t>あ、、い</a:t></a:r></a:p></a:txBody>"#
+            );
+            let doc = Document::parse(&source).unwrap();
+            let mut svg = String::new();
+            render(
+                doc.root_element(),
+                50.0,
+                100.0,
+                &Theme::default(),
+                &Database::new(),
+                &mut svg,
+                &mut vec![],
+            );
+            assert!(svg.contains(&format!("<tspan x=\"{expected}\"")), "{svg}");
+        }
+    }
+    #[test]
+    fn excessive_negative_spacing_warns_instead_of_reversing_text() {
+        let source = format!(
+            r#"<a:txBody xmlns:a="{A}"><a:p><a:r><a:rPr sz="750" spc="-1500"/><a:t>あい</a:t></a:r></a:p></a:txBody>"#
+        );
+        let doc = Document::parse(&source).unwrap();
+        let mut warnings = vec![];
+        render(
+            doc.root_element(),
+            50.0,
+            100.0,
+            &Theme::default(),
+            &Database::new(),
+            &mut String::new(),
+            &mut warnings,
+        );
+        assert!(
+            warnings
+                .iter()
+                .any(|s| s.contains("文字幅を超える負の字間"))
+        );
     }
     #[test]
     fn closing_punctuation_does_not_begin_line() {
