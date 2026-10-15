@@ -29,6 +29,35 @@ fn explicit_character_spacing_matches_libreoffice() {
     compare_fixture("character-spacing");
 }
 
+#[test]
+#[ignore = "LibreOffice と日本語フォントが必要"]
+fn automatic_punctuation_compression_matches_both_modes() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let python = std::env::var_os("PPTX2IMG_TEST_PYTHON").unwrap_or_else(|| "python3".into());
+    let run_id = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let out = root
+        .join("target/visual-tests")
+        .join(format!("auto-punctuation-{}-{run_id}", std::process::id()));
+    let status = Command::new(python)
+        .arg(root.join("tests/visual/compare_auto_punctuation.py"))
+        .arg("--binary")
+        .arg(env!("CARGO_BIN_EXE_pptx2img"))
+        .arg("--fixture")
+        .arg(root.join("examples/auto-punctuation.pptx"))
+        .arg("--out")
+        .arg(&out)
+        .status()
+        .expect("比較テストを起動できません");
+    assert!(
+        status.success(),
+        "自動圧縮の比較に失敗しました: {}",
+        out.display()
+    );
+}
+
 fn compare_fixture(fixture: &str) {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let python = std::env::var_os("PPTX2IMG_TEST_PYTHON").unwrap_or_else(|| "python3".into());

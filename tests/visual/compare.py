@@ -79,6 +79,18 @@ def font_inventory() -> list[dict]:
     return records
 
 
+def compression_profile(enabled: bool) -> str:
+    # ユーザーの通常プロファイルに触れず、比較条件を明示的に固定する。
+    mode = 1 if enabled else 0
+    return f'''<?xml version="1.0" encoding="UTF-8"?>
+<oor:items xmlns:oor="http://openoffice.org/2001/registry">
+<item oor:path="/org.openoffice.Office.Common/AsianLayout">
+<prop oor:name="CompressCharacterDistance" oor:op="fuse"><value>{mode}</value></prop>
+<prop oor:name="IsKerningWesternTextOnly" oor:op="fuse"><value>true</value></prop>
+</item></oor:items>
+'''
+
+
 def run(args: argparse.Namespace) -> bool:
     out = args.out.resolve()
     out.mkdir(parents=True, exist_ok=False)
@@ -99,16 +111,26 @@ def run(args: argparse.Namespace) -> bool:
             "fonts": font_inventory(),
             "libreoffice": execute([soffice, "--version"], out, "libreoffice-version", env),
             "pptx2img": execute([str(binary), "--version"], out, "pptx2img-version", env),
+            "punctuation_compression": args.punctuation_compression,
+            "libreoffice_compress_character_distance": 1 if args.punctuation_compression else 0,
             "binary_sha256": digest(binary), "fixture_sha256": digest(fixture),
         }
         # 読み込む入力を証跡として固定し、両者に同一ファイルを渡す。
         copied = out / "input.pptx"
         shutil.copyfile(fixture, copied)
-        execute([str(binary), str(copied), "--out", str(out / "actual"), "--width", str(args.width)], out, "pptx2img", env)
+        command = [str(binary), str(copied), "--out", str(out / "actual"), "--width", str(args.width)]
+        if args.punctuation_compression:
+            command.append("--punctuation-compression")
+        execute(command, out, "pptx2img", env)
         manifest = json.loads((out / "actual/manifest.json").read_text())
         reference_dir = out / "reference"
         reference_dir.mkdir()
+        profile_xml = compression_profile(args.punctuation_compression)
+        (out / "libreoffice-profile.xcu").write_text(profile_xml)
         with tempfile.TemporaryDirectory(prefix="pptx2img-lo-profile-") as profile:
+            user = Path(profile) / "user"
+            user.mkdir()
+            (user / "registrymodifications.xcu").write_text(profile_xml)
             execute([soffice, f"-env:UserInstallation={Path(profile).resolve().as_uri()}", "--headless", "--convert-to", "pdf:impress_pdf_Export", "--outdir", str(reference_dir), str(copied)], out, "libreoffice", env)
         pdf_path = reference_dir / "input.pdf"
         if not pdf_path.is_file() or pdf_path.stat().st_size == 0:
@@ -166,6 +188,7 @@ def main() -> int:
     parser.add_argument("--fixture", type=Path, required=True)
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--soffice")
+    parser.add_argument("--punctuation-compression", action="store_true", help="両エンジンの自動句読点圧縮を有効にする")
     parser.add_argument("--width", type=int, default=1200, choices=range(64, 4097), metavar="64..4096")
     parser.add_argument("--pixel-tolerance", type=int, default=16, choices=range(256), metavar="0..255")
     parser.add_argument("--max-mae", type=fraction, default=0.02)

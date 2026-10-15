@@ -21,6 +21,8 @@ struct Style {
 struct Glyph {
     ch: char,
     advance: f64,
+    offset: f64,
+    compressed: bool,
     ascent: f64,
     descent: f64,
     leading: f64,
@@ -154,6 +156,8 @@ fn glyphs(
                         }
                         Glyph {
                             ch,
+                            offset: 0.0,
+                            compressed: false,
                             advance: f64::from(advance.unwrap_or(style.size as f32)),
                             ascent,
                             descent,
@@ -175,6 +179,8 @@ fn glyphs(
         .chars()
         .map(|ch| Glyph {
             ch,
+            offset: 0.0,
+            compressed: false,
             advance: style.size,
             ascent: style.size,
             descent: style.size * 0.2,
@@ -293,6 +299,93 @@ fn wrap(glyphs: &[Glyph], available: f64, enabled: bool, hanging: bool) -> Vec<V
     }
     result
 }
+// 全角約物の半角分の余白を上限に、行に必要な分だけ縮める。
+// 中点・感嘆符・疑問符・仮名はこのモードでは圧縮しない。
+fn opening(ch: char) -> bool {
+    "「『（［｛〈《【〔".contains(ch)
+}
+fn capacity(g: &Glyph) -> f64 {
+    if (opening(g.ch) || "、。，．」』）］｝〉》】〕：；".contains(g.ch))
+        && (g.advance - g.style.size).abs() < g.style.size * 0.05
+    {
+        g.advance / 2.0
+    } else {
+        0.0
+    }
+}
+fn compress_line(glyphs: &[Glyph], ratio: f64) -> Vec<Glyph> {
+    let leading = glyphs
+        .first()
+        .filter(|g| opening(g.ch))
+        .map(|g| capacity(g) * ratio)
+        .unwrap_or(0.0);
+    glyphs
+        .iter()
+        .enumerate()
+        .map(|(i, g)| {
+            let mut result = g.clone();
+            let reduction = capacity(g) * ratio;
+            result.advance -= reduction;
+            result.compressed = ratio > 0.0;
+            // 行頭の開き括弧は字形を左へ突き出さず、後続の位置も同じ量だけ戻す。
+            result.offset = if i == 0 {
+                0.0
+            } else {
+                leading - if opening(g.ch) { reduction } else { 0.0 }
+            };
+            result
+        })
+        .collect()
+}
+fn compress_wrap(glyphs: &[Glyph], available: f64, hanging: bool) -> Vec<Vec<Glyph>> {
+    let mut result = Vec::new();
+    for hard_line in glyphs.split(|g| g.ch == '\n') {
+        if hard_line.is_empty() {
+            result.push(vec![]);
+            continue;
+        }
+        let mut remaining = hard_line;
+        while !remaining.is_empty() {
+            let mut minimum = 0.0;
+            let mut end = 0;
+            while end < remaining.len() {
+                let next = minimum + remaining[end].advance - capacity(&remaining[end]);
+                if end > 0 && next > available {
+                    break;
+                }
+                minimum = next;
+                end += 1;
+            }
+            if hanging && end < remaining.len() && can_hang(remaining[end].ch) {
+                end += 1;
+            }
+            let candidate = end;
+            if end < remaining.len() {
+                end = (1..=end)
+                    .rev()
+                    .find(|&i| break_allowed(remaining[i - 1].ch, remaining[i].ch))
+                    .unwrap_or_else(|| {
+                        (end..remaining.len())
+                            .find(|&i| break_allowed(remaining[i - 1].ch, remaining[i].ch))
+                            .unwrap_or(remaining.len())
+                    });
+            }
+            let line = &remaining[..end];
+            let total: f64 = line.iter().map(capacity).sum();
+            let width = layout_width(line, available, hanging);
+            let ratio = if total == 0.0 {
+                0.0
+            } else if end < candidate {
+                1.0
+            } else {
+                ((width - available) / total).clamp(0.0, 1.0)
+            };
+            result.push(compress_line(line, ratio));
+            remaining = &remaining[end..];
+        }
+    }
+    result
+}
 fn spacing(node: Option<Node<'_, '_>>, tag: &str, natural: f64, default: f64) -> f64 {
     let Some(value) = node.and_then(|n| child(n, A, tag)) else {
         return default;
@@ -309,7 +402,7 @@ pub(super) fn render(
     w: f64,
     h: f64,
     theme: &Theme,
-    fonts: &Database,
+    options: &RenderOptions<'_>,
     svg: &mut String,
     warnings: &mut Vec<String>,
 ) {
@@ -317,6 +410,12 @@ pub(super) fn render(
         warnings,
         "文字組みは近似です。複雑な shaping・自動縮小・マスター文字スタイル・完全な Office 互換は未対応です",
     );
+    if options.punctuation_compression {
+        warn(
+            warnings,
+            "自動句読点圧縮は実験的な描画方針です。PPTX 内の指定ではありません",
+        );
+    }
     let bp = child(body, A, "bodyPr");
     if bp.is_some_and(|n| n.attribute("vert").is_some_and(|s| s != "horz")) {
         warn(warnings, "縦書きは未対応です");
@@ -361,7 +460,7 @@ pub(super) fn render(
                 all.extend(glyphs(
                     "\n",
                     style(&defaults, false, theme, warnings),
-                    fonts,
+                    options.fonts,
                     warnings,
                 ));
             } else if run.has_tag_name((A, "r")) || run.has_tag_name((A, "fld")) {
@@ -379,7 +478,7 @@ pub(super) fn render(
                         all.extend(glyphs(
                             &segment,
                             style(&nodes, last.unwrap(), theme, warnings),
-                            fonts,
+                            options.fonts,
                             warnings,
                         ));
                         segment.clear();
@@ -391,7 +490,7 @@ pub(super) fn render(
                     all.extend(glyphs(
                         &segment,
                         style(&nodes, last.unwrap_or(false), theme, warnings),
-                        fonts,
+                        options.fonts,
                         warnings,
                     ));
                 }
@@ -420,7 +519,19 @@ pub(super) fn render(
             .fold(0.0, f64::max)
             .max(empty_size);
         cursor += spacing(pp, "spcBef", natural, 0.0);
-        for glyph_line in wrap(&all, available, wrap_enabled, hanging) {
+        let compressed = options.punctuation_compression && wrap_enabled;
+        if compressed && all.iter().any(|g| g.style.spacing != 0.0) {
+            warn(
+                warnings,
+                "自動句読点圧縮と明示字間の併用は未対応のため明示字間を優先します",
+            );
+        }
+        let wrapped = if compressed && all.iter().all(|g| g.style.spacing == 0.0) {
+            compress_wrap(&all, available, hanging)
+        } else {
+            wrap(&all, available, wrap_enabled, hanging)
+        };
+        for glyph_line in wrapped {
             let width = layout_width(&glyph_line, available, hanging);
             if width > available + 0.01 {
                 warn(warnings, "文字がテキスト枠の横幅を超えています");
@@ -467,6 +578,7 @@ pub(super) fn render(
         let mut x = line.x;
         let y = line.baseline + vertical;
         svg.push_str(&format!("<text y=\"{y}\" xml:space=\"preserve\">"));
+        let positioned = line.glyphs.iter().any(|g| g.offset != 0.0 || g.compressed);
         let mut start = 0;
         while start < line.glyphs.len() {
             let style = &line.glyphs[start].style;
@@ -474,13 +586,13 @@ pub(super) fn render(
             while end < line.glyphs.len() && line.glyphs[end].style == *style {
                 end += 1;
             }
-            let positions = if style.spacing != 0.0 {
+            let positions = if style.spacing != 0.0 || positioned {
                 let mut position = x;
                 line.glyphs[start..end]
                     .iter()
                     .enumerate()
                     .map(|(i, g)| {
-                        let result = position.to_string();
+                        let result = (position + g.offset).to_string();
                         position += step(
                             g,
                             line.glyphs
@@ -510,6 +622,8 @@ mod tests {
             .chars()
             .map(|ch| Glyph {
                 ch,
+                offset: 0.0,
+                compressed: false,
                 advance: 10.0,
                 ascent: 8.0,
                 descent: 2.0,
@@ -530,6 +644,92 @@ mod tests {
             .iter()
             .map(|l| l.iter().map(|g| g.ch).collect())
             .collect()
+    }
+    #[test]
+    fn automatic_compression_uses_only_the_required_punctuation_space() {
+        let line = sample("あ、いう、え");
+        let result = compress_wrap(&line, 55.0, false);
+        assert_eq!(strings(result.clone()), ["あ、いう、え"]);
+        assert_eq!(text_width(&result[0]), 55.0);
+        assert_eq!(result[0][1].advance, 7.5);
+        assert_eq!(result[0][4].advance, 7.5);
+        assert_eq!(result[0][0].advance, 10.0);
+        assert_eq!(
+            strings(wrap(&line, 55.0, true, false)),
+            ["あ、いう、", "え"]
+        );
+    }
+    #[test]
+    fn spacious_lines_and_uncompressible_characters_are_unchanged() {
+        let line = sample("あ、いう。え");
+        let result = compress_wrap(&line, 80.0, false);
+        assert_eq!(text_width(&result[0]), 60.0);
+        assert!(result[0].iter().all(|g| !g.compressed && g.offset == 0.0));
+        let line = sample("あいうえお・？！");
+        assert!(line.iter().all(|g| capacity(g) == 0.0));
+        assert_eq!(
+            strings(compress_wrap(&line, 35.0, false)),
+            strings(wrap(&line, 35.0, true, false))
+        );
+    }
+    #[test]
+    fn compression_has_a_half_width_limit_and_keeps_explicit_breaks() {
+        let line = sample("あ、いう、え");
+        let result = compress_wrap(&line, 45.0, false);
+        assert!(
+            result
+                .iter()
+                .all(|line| line.iter().all(|g| g.advance >= 5.0))
+        );
+        assert_eq!(
+            strings(compress_wrap(&sample("あ、\n\nい。"), 30.0, false)),
+            ["あ、", "", "い。"]
+        );
+        let mut narrow = sample("、");
+        narrow[0].advance = 5.0;
+        assert_eq!(capacity(&narrow[0]), 0.0);
+    }
+    #[test]
+    fn opening_bracket_removes_leading_space_without_scaling_the_glyph() {
+        let line = compress_line(&sample("あ「い」"), 0.5);
+        assert_eq!(line[1].offset, -2.5);
+        assert_eq!(line[1].advance, 7.5);
+        assert_eq!(line[1].style.size, 10.0);
+        let leading = compress_line(&sample("「あ」"), 0.5);
+        assert_eq!(leading[0].offset, 0.0);
+    }
+    #[test]
+    fn compressed_positions_reach_svg_and_explicit_spacing_takes_priority() {
+        for (spc, wrap_mode, expected, warn_spacing) in [
+            ("0", "square", "0 10 17.5 27.5 37.5 45", false),
+            ("-75", "square", "0 9 18 27 36 45", true),
+            ("0", "none", "0", false),
+        ] {
+            let source = format!(
+                r#"<a:txBody xmlns:a="{A}"><a:bodyPr lIns="0" rIns="0" wrap="{wrap_mode}"/><a:p><a:r><a:rPr sz="750" spc="{spc}"/><a:t>あ、いう、え</a:t></a:r></a:p></a:txBody>"#
+            );
+            let doc = Document::parse(&source).unwrap();
+            let mut svg = String::new();
+            let mut warnings = vec![];
+            render(
+                doc.root_element(),
+                55.0,
+                100.0,
+                &Theme::default(),
+                &RenderOptions {
+                    fonts: &Database::new(),
+                    punctuation_compression: true,
+                },
+                &mut svg,
+                &mut warnings,
+            );
+            assert!(svg.contains(&format!("<tspan x=\"{expected}\"")), "{svg}");
+            assert_eq!(
+                warnings.iter().any(|s| s.contains("明示字間を優先")),
+                warn_spacing
+            );
+            assert!(warnings.iter().any(|s| s.contains("実験的な描画方針")));
+        }
     }
     #[test]
     fn signed_spacing_changes_width_and_wrap_without_trailing_space() {
@@ -609,7 +809,10 @@ mod tests {
                 50.0,
                 100.0,
                 &Theme::default(),
-                &Database::new(),
+                &RenderOptions {
+                    fonts: &Database::new(),
+                    punctuation_compression: false,
+                },
                 &mut svg,
                 &mut vec![],
             );
@@ -628,7 +831,10 @@ mod tests {
             50.0,
             100.0,
             &Theme::default(),
-            &Database::new(),
+            &RenderOptions {
+                fonts: &Database::new(),
+                punctuation_compression: false,
+            },
             &mut String::new(),
             &mut warnings,
         );

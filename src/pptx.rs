@@ -120,7 +120,12 @@ fn escape(s: &str) -> String {
         .replace('\'', "&apos;")
 }
 
-pub fn read(path: &Path, fonts: &resvg::usvg::fontdb::Database) -> Result<Deck> {
+pub struct RenderOptions<'a> {
+    pub fonts: &'a resvg::usvg::fontdb::Database,
+    pub punctuation_compression: bool,
+}
+
+pub fn read(path: &Path, options: &RenderOptions<'_>) -> Result<Deck> {
     let file = File::open(path).context("入力 PPTX を開けません")?;
     if file.metadata()?.len() > 128 * 1024 * 1024 {
         bail!("入力は 128 MiB 以下にしてください");
@@ -177,7 +182,7 @@ pub fn read(path: &Path, fonts: &resvg::usvg::fontdb::Database) -> Result<Deck> 
         if part.external || !part.kind.ends_with("/slide") {
             bail!("スライドの関連が不正です");
         }
-        slides.push(render_slide(&parts, &part.target, width, height, fonts)?);
+        slides.push(render_slide(&parts, &part.target, width, height, options)?);
     }
     if slides.is_empty() {
         bail!("スライドがありません");
@@ -238,7 +243,7 @@ fn render_slide(
     name: &str,
     width: f64,
     height: f64,
-    fonts: &resvg::usvg::fontdb::Database,
+    options: &RenderOptions<'_>,
 ) -> Result<Slide> {
     let doc = xml(parts, name)?;
     let rels = relationships(parts, name)?;
@@ -269,7 +274,7 @@ fn render_slide(
         match node.tag_name().name() {
             "nvGrpSpPr" | "grpSpPr" => {}
             "sp" | "pic" | "cxnSp" => {
-                render_shape(node, parts, &rels, &theme, fonts, &mut svg, &mut warnings)?
+                render_shape(node, parts, &rels, &theme, options, &mut svg, &mut warnings)?
             }
             other => warn(
                 &mut warnings,
@@ -293,7 +298,7 @@ fn render_shape(
     parts: &Parts,
     rels: &Relationships,
     theme: &Theme,
-    fonts: &resvg::usvg::fontdb::Database,
+    options: &RenderOptions<'_>,
     svg: &mut String,
     warnings: &mut Vec<String>,
 ) -> Result<()> {
@@ -379,7 +384,7 @@ fn render_shape(
             }
         }
         if let Some(body) = child(node, P, "txBody") {
-            text::render(body, w, h, theme, fonts, svg, warnings);
+            text::render(body, w, h, theme, options, svg, warnings);
         }
     }
     svg.push_str("</g>");

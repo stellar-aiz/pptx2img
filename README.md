@@ -60,7 +60,7 @@ cargo build --release --locked
 
 - レイアウト・マスターの図形・座標・背景・文字スタイルの完全な継承
 - プレースホルダー継承、テーマの描画スタイル行列と themeOverride
-- 完全な禁則・自動句読点圧縮・全記号のぶら下がり・複雑な文字 shaping・自動縮小
+- 完全な禁則・完全な自動句読点圧縮・全記号のぶら下がり・複雑な文字 shaping・自動縮小
 - あらゆるフォント・文字組みで Office と一致するベースライン
 - フォント代替の正確な追跡、Office との文字組み一致
 - 表、グラフ、SmartArt、グループ、自由図形、多くのプリセット図形
@@ -121,8 +121,8 @@ cargo fmt --check
 
 テーマ色・テーマフォントと基本的な折り返しは実装済みです。
 固定行間の初行位置と句読点のぶら下がりは比較テストで改善を確認しました。
-明示字間による句読点の詰めにも対応しました。自動圧縮の条件の特定と
-マスター図形継承は今後の課題です。
+明示字間による句読点の詰めと、任意で有効にする自動圧縮に対応しました。
+境界幅での文字組み一致とマスター図形継承は今後の課題です。
 PowerPoint が出した参照画像と同一フォントで比較する回帰テストを整備し、
 対応表現を増やします。生成側のプレビューとの自己一致だけでは、
 PPTX の表示互換性を検証できません。
@@ -234,11 +234,12 @@ DrawingML の [`spc` 属性](https://learn.microsoft.com/en-us/dotnet/api/docume
 文字自体を横に潰す処理ではありません。
 文字幅を超える負の字間は警告を出し、送り幅を 0 に制限します。
 
-**今回の対応は明示字間です。自動的な句読点圧縮を実装したわけではありません。**
+**この節は明示字間の検証記録です。後続の自動圧縮の対応は次節を参照してください。**
 調査用資料では、字間指定のない全角句読点は、狭い文字枠でも LibreOffice が
 自動圧縮せず禁則に沿って改行しました。`kern` を変更しても同じでした。
 これは検証した資料・環境での観測であり、すべての PPTX の一般則ではありません。
-自動圧縮を有効にする条件は未確認のため、字間未指定の文字幅は変えていません。
+その後、LibreOffice 側の圧縮設定を有効にすることで再現できました（次節）。
+既定動作では引き続き字間未指定の文字幅を変えません。
 
 比較資料は次の内容を含みます。
 
@@ -268,4 +269,66 @@ SVG の文字位置を検証し、ページ全体の平均だけに依存しま�
 
 ```sh
 python tests/visual/make_character_spacing.py examples/character-spacing.pptx
+```
+
+
+## 自動句読点圧縮（実験的）
+
+```sh
+./target/release/pptx2img input.pptx --out images --punctuation-compression
+```
+
+このオプションは**描画時の方針**です。PPTX 内の設定を検出したという意味では
+ありません。既定は無効で、選択を `manifest.json` の
+`punctuation_compression` に記録します。有効時の近似描画は警告にも残します。
+
+LibreOffice の [Asian Layout](https://help.libreoffice.org/latest/en-US/text/shared/optionen/01150100.html)
+には、圧縮なし・句読点のみ・句読点と仮名の選択があります。
+公開 API の [CharacterCompressionType](https://api.libreoffice.org/docs/idl/ref/CharacterCompressionType_8idl_source.html)
+ではそれぞれ 0 / 1 / 2 です。今回、同一の PPTX を異なる専用プロファイルで
+読み込み、`org.openoffice.Office.Common/AsianLayout/CompressCharacterDistance`
+を 0 から 1 に変えると、幅不足の行で句読点が詰まり改行が変わると確認しました。
+余裕のある行は変わりません。カーニングとは別の設定です。
+検証した PPTX の結果が環境設定で変わることを確認したものであり、すべての
+PowerPoint での既定値や、設定の PPTX への保存可否を断定するものではありません。
+
+### 対応内容と限界
+
+- 字間未指定またはゼロの横書き・折り返し行を対象に、全角句読点・括弧の
+  半角分の余白を上限として、行に必要な分を圧縮する。
+- 開き括弧の前、閉じ括弧・句読点の後の余白を調整し、字形は縮小しない。
+- 禁則による追い出し後に最大圧縮が残るケースも比較結果に合わせる。
+- 仮名、中点、感嘆符・疑問符は圧縮しない。`wrap="none"` では適用しない。
+- 非ゼロの明示字間との併用は未対応。その段落は明示字間を優先し警告する。
+- `examples/auto-punctuation.pptx` の 120pt など、文字がちょうど収まる
+  境界幅で改行差が残る。フォント計測の丸め等により変わり、完全一致ではない。
+  該当ケースも削除せず同じ比較資料に残している。
+
+### 比較テスト
+
+```sh
+PPTX2IMG_TEST_PYTHON="$PWD/.venv-visual/bin/python" \
+  cargo test --test libreoffice automatic_punctuation -- --ignored --nocapture
+```
+
+8 枚の同一資料を圧縮 OFF / ON で描画し、各モードで LibreOffice と比較します。
+比較器は専用の一時プロファイルへ設定を書き、ユーザーの通常設定は変更しません。
+`libreoffice-profile.xcu`、実行コマンド、入力ハッシュ、圧縮条件を証跡に保存します。
+通常の比較も圧縮 OFF を明示し、端末の既定値へ依存しないようにしました。
+
+MAE ≤ 0.02、差分画素率 ≤ 0.05 は変更していません。さらに次を検証します。
+
+- 自作側・LibreOffice 側の双方で、ON / OFF によって描画が変わること
+- 圧縮対象がないページは双方とも変わらないこと
+- 自作側だけ圧縮 OFF に戻すと、圧縮 ON の参照との比較が不合格になること
+
+2026-10-15、macOS / LibreOffice 26.2.5.2 / Hiragino Sans で、密な句読点の
+7 枚目は圧縮 ON の参照に対して MAE **0.03124 → 0.00637**、
+差分画素率 **4.14% → 1.60%**。閾値内でも局所的な改行差が残るため、
+単体テストの文字幅・字形位置・禁則・明示改行の検証も併用します。
+
+再生成（開発時のみ `python-pptx` が必要）：
+
+```sh
+python tests/visual/make_auto_punctuation.py examples/auto-punctuation.pptx
 ```

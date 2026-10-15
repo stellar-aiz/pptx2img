@@ -20,6 +20,9 @@ struct Args {
     /// 警告があれば画像を出力せず失敗する
     #[arg(long)]
     strict: bool,
+    /// 行幅が不足するとき句読点の余白を自動圧縮する（実験的・既定は無効）
+    #[arg(long)]
+    punctuation_compression: bool,
     /// システムフォントに加えて読み込むフォント（複数指定可）
     #[arg(long)]
     font_file: Vec<PathBuf>,
@@ -31,6 +34,7 @@ struct Manifest {
     status: &'static str,
     width: u32,
     height: u32,
+    punctuation_compression: bool,
     slides: Vec<SlideReport>,
 }
 #[derive(Serialize)]
@@ -58,7 +62,13 @@ fn run(args: Args) -> Result<()> {
             .load_font_file(path)
             .with_context(|| format!("フォントを読めません: {}", path.display()))?;
     }
-    let deck = pptx::read(&args.input, &options.fontdb)?;
+    let deck = pptx::read(
+        &args.input,
+        &pptx::RenderOptions {
+            fonts: &options.fontdb,
+            punctuation_compression: args.punctuation_compression,
+        },
+    )?;
     let height = (f64::from(args.width) * deck.height / deck.width).round();
     if !(1.0..=8192.0).contains(&height) {
         bail!("出力画像の高さが上限を超えています");
@@ -115,6 +125,7 @@ fn run(args: Args) -> Result<()> {
         },
         width: args.width,
         height,
+        punctuation_compression: args.punctuation_compression,
         slides: reports,
     };
     fs::write(
