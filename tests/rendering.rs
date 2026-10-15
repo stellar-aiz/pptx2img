@@ -407,3 +407,22 @@ fn missing_font_and_glyph_are_reported_separately() {
     }
     assert!(image(&out).pixels().iter().any(|p| p.red() < 128));
 }
+
+#[test]
+fn rounded_rectangle_adjustment_and_empty_outline() {
+    for (adjustment, corner_is_red) in [("val 0", true), ("val 50000", false)] {
+        let dir = tempfile::tempdir().unwrap();
+        let input = dir.path().join("rounded.pptx");
+        let out = dir.path().join("out");
+        let shapes = format!(
+            r#"<p:sp><p:spPr>{}<a:prstGeom prst="roundRect"><a:avLst><a:gd name="adj" fmla="{adjustment}"/></a:avLst></a:prstGeom><a:solidFill><a:srgbClr val="FF0000"/></a:solidFill><a:ln/></p:spPr></p:sp>"#,
+            transform(10, 10, 80, 40)
+        );
+        write_deck(&input, page("sld", "", "", &shapes), vec![]);
+        check(run(&input, &out, true));
+        let rendered = image(&out);
+        assert_eq!(rgb(&rendered, 50, 10), (255, 0, 0));
+        assert_eq!(rgb(&rendered, 50, 30), (255, 0, 0));
+        assert_eq!(rgb(&rendered, 11, 11) == (255, 0, 0), corner_is_red);
+    }
+}

@@ -422,11 +422,30 @@ fn render_shape(
         let line_width = line.map(|n| number(n, "w", 9525.0) / EMU).unwrap_or(1.0);
         let style = format!("fill=\"{fill}\" stroke=\"{stroke}\" stroke-width=\"{line_width}\"");
         if let Some(geometry) = props_chain.iter().find_map(|n| child(*n, A, "prstGeom")) {
-            if geometry.descendants().any(|n| n.has_tag_name((A, "gd"))) {
+            if geometry.attribute("prst") != Some("roundRect")
+                && geometry.descendants().any(|n| n.has_tag_name((A, "gd")))
+            {
                 warn(warnings, "図形の調整値は未対応です");
             }
             match geometry.attribute("prst").unwrap_or("") {
                 "rect" => svg.push_str(&format!("<rect width=\"{w}\" height=\"{h}\" {style}/>")),
+                "roundRect" => {
+                    let mut adjustment = 16667.0_f64;
+                    for guide in geometry.descendants().filter(|n| n.has_tag_name((A, "gd"))) {
+                        let value = guide
+                            .attribute("fmla")
+                            .and_then(|s| s.strip_prefix("val "))
+                            .and_then(|s| s.trim().parse::<f64>().ok())
+                            .filter(|v| v.is_finite());
+                        if let (Some("adj"), Some(value)) = (guide.attribute("name"), value) {
+                            adjustment = value;
+                        } else {
+                            warn(warnings, "角丸矩形の調整式は未対応です");
+                        }
+                    }
+                    let radius = w.min(h) * adjustment.clamp(0.0, 50000.0) / 100000.0;
+                    svg.push_str(&format!("<rect width=\"{w}\" height=\"{h}\" rx=\"{radius}\" ry=\"{radius}\" {style}/>"));
+                }
                 "ellipse" => svg.push_str(&format!(
                     "<ellipse cx=\"{}\" cy=\"{}\" rx=\"{}\" ry=\"{}\" {style}/>",
                     w / 2.0,
@@ -469,7 +488,7 @@ fn fill_line(node: Node<'_, '_>, theme: &Theme, warnings: &mut Warnings) -> Stri
             warn(warnings, format!("未対応の線属性: {}", n.tag_name().name()));
         }
     }
-    fill(node, "#000000", theme, warnings)
+    fill(node, "none", theme, warnings)
 }
 fn render_image(
     node: Node<'_, '_>,
