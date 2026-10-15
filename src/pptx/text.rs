@@ -1,5 +1,5 @@
 //! フォントの公称 advance と行メトリクスによる横書き配置。
-//! 複雑な shaping、ぶら下がり、自動縮小などは未対応として警告する。
+//! 句読点のぶら下がりと固定行送りを解釈する。複雑な shaping などは未対応。
 use super::*;
 use resvg::usvg::fontdb::{Database, Family, Query, Style as FontStyle, Weight};
 use skrifa::raw::TableProvider;
@@ -189,7 +189,48 @@ fn break_allowed(left: char, right: char) -> bool {
         && !(left.is_ascii_alphanumeric() && right.is_ascii_alphanumeric())
         && !matches!(right as u32, 0x0300..=0x036f | 0x3099..=0x309a | 0xfe00..=0xfe0f)
 }
-fn wrap(glyphs: &[Glyph], available: f64, enabled: bool) -> Vec<Vec<Glyph>> {
+fn paragraph_hanging(nodes: [Option<Node<'_, '_>>; 3], inherited: bool) -> bool {
+    nodes
+        .into_iter()
+        .flatten()
+        .find_map(|n| theme::bool_attr(n, "hangingPunct"))
+        .unwrap_or(inherited)
+}
+fn can_hang(ch: char) -> bool {
+    "、。，．".contains(ch)
+}
+fn layout_width(glyphs: &[Glyph], available: f64, hanging: bool) -> f64 {
+    let width: f64 = glyphs.iter().map(|g| g.advance).sum();
+    if hanging
+        && width > available
+        && let Some(last) = glyphs.last()
+        && can_hang(last.ch)
+        && width - last.advance <= available
+    {
+        width - last.advance
+    } else {
+        width
+    }
+}
+fn baseline_offset(
+    paragraph: Option<Node<'_, '_>>,
+    ascent: f64,
+    natural: f64,
+    advance: f64,
+) -> f64 {
+    let fixed = paragraph
+        .and_then(|n| child(n, A, "lnSpc"))
+        .and_then(|n| child(n, A, "spcPts"))
+        .is_some();
+    // 固定行送りはベースライン下の領域を保ち、上側の空きを増減する。
+    // 百分率は次行までの距離を変えるが、初行の ascent は変えない。
+    if fixed {
+        ascent + advance - natural
+    } else {
+        ascent
+    }
+}
+fn wrap(glyphs: &[Glyph], available: f64, enabled: bool, hanging: bool) -> Vec<Vec<Glyph>> {
     let mut result = Vec::new();
     for hard_line in glyphs.split(|g| g.ch == '\n') {
         if !enabled || hard_line.is_empty() {
@@ -202,6 +243,10 @@ fn wrap(glyphs: &[Glyph], available: f64, enabled: bool) -> Vec<Vec<Glyph>> {
             let mut end = 0;
             while end < remaining.len() && (sum + remaining[end].advance <= available || end == 0) {
                 sum += remaining[end].advance;
+                end += 1;
+            }
+            // hangingPunct は句読点を 1 文字だけ枠外に置ける。禁則による追い出しより先に扱う。
+            if hanging && end < remaining.len() && can_hang(remaining[end].ch) {
                 end += 1;
             }
             if end < remaining.len() {
@@ -254,6 +299,14 @@ pub(super) fn render(
     let bottom = bp.map(|n| number(n, "bIns", 45720.0) / EMU).unwrap_or(4.8);
     let wrap_enabled = bp.and_then(|n| n.attribute("wrap")) != Some("none");
     let available = (w - left - right).max(1.0);
+    let placeholder = body
+        .parent()
+        .and_then(|n| n.descendants().find(|n| n.has_tag_name((P, "ph"))));
+    let style_kind = match placeholder.and_then(|n| n.attribute("type")) {
+        Some("title" | "ctrTitle") => "titleStyle",
+        Some("body" | "obj" | "subTitle") => "bodyStyle",
+        _ => "otherStyle",
+    };
     let mut lines = Vec::new();
     let mut cursor = 0.0;
     for paragraph in body.children().filter(|n| n.has_tag_name((A, "p"))) {
@@ -264,7 +317,12 @@ pub(super) fn render(
             .min(8);
         let level_tag = format!("lvl{}pPr", level + 1);
         let list = child(body, A, "lstStyle").and_then(|n| child(n, A, &level_tag));
-        let defaults: Vec<_> = [pp, list]
+        let list_default = child(body, A, "lstStyle").and_then(|n| child(n, A, "defPPr"));
+        let hanging = paragraph_hanging(
+            [pp, list, list_default],
+            theme.hanging_punctuation(style_kind, level),
+        );
+        let defaults: Vec<_> = [pp, list, list_default]
             .into_iter()
             .flatten()
             .filter_map(|n| child(n, A, "defRPr"))
@@ -326,8 +384,8 @@ pub(super) fn render(
             .fold(0.0, f64::max)
             .max(empty_size);
         cursor += spacing(pp, "spcBef", natural, 0.0);
-        for glyph_line in wrap(&all, available, wrap_enabled) {
-            let width: f64 = glyph_line.iter().map(|g| g.advance).sum();
+        for glyph_line in wrap(&all, available, wrap_enabled, hanging) {
+            let width = layout_width(&glyph_line, available, hanging);
             if width > available + 0.01 {
                 warn(warnings, "文字がテキスト枠の横幅を超えています");
             }
@@ -351,7 +409,7 @@ pub(super) fn render(
             lines.push(Line {
                 glyphs: glyph_line,
                 x,
-                baseline: cursor + ascent,
+                baseline: cursor + baseline_offset(pp, ascent, line_height, advance),
             });
             cursor += advance;
         }
@@ -422,30 +480,86 @@ mod tests {
     #[test]
     fn closing_punctuation_does_not_begin_line() {
         assert_eq!(
-            strings(wrap(&sample("あいう、え"), 30.0, true)),
+            strings(wrap(&sample("あいう、え"), 30.0, true, false)),
             ["あい", "う、え"]
         );
     }
     #[test]
     fn opening_punctuation_does_not_end_line() {
         assert_eq!(
-            strings(wrap(&sample("あい「うえ」"), 30.0, true)),
+            strings(wrap(&sample("あい「うえ」"), 30.0, true, false)),
             ["あい", "「う", "え」"]
         );
     }
     #[test]
     fn explicit_break_and_empty_line_are_preserved() {
         assert_eq!(
-            strings(wrap(&sample("あ\n\nい"), 100.0, true)),
+            strings(wrap(&sample("あ\n\nい"), 100.0, true, false)),
             ["あ", "", "い"]
         );
     }
     #[test]
     fn no_wrap_keeps_long_line() {
         assert_eq!(
-            strings(wrap(&sample("あいうえ"), 10.0, false)),
+            strings(wrap(&sample("あいうえ"), 10.0, false, false)),
             ["あいうえ"]
         );
+    }
+    #[test]
+    fn enabled_hanging_keeps_comma_with_previous_line() {
+        let lines = wrap(&sample("あいう、え"), 30.0, true, true);
+        assert_eq!(strings(lines.clone()), ["あいう、", "え"]);
+        assert_eq!(layout_width(&lines[0], 30.0, true), 30.0);
+        assert_eq!(layout_width(&lines[0], 30.0, false), 40.0);
+    }
+    #[test]
+    fn hanging_does_not_allow_arbitrary_letters_to_overflow() {
+        assert_eq!(
+            strings(wrap(&sample("あいうえお"), 30.0, true, true)),
+            ["あいう", "えお"]
+        );
+        assert_eq!(
+            strings(wrap(&sample("あいう、、え"), 30.0, true, true)),
+            ["あい", "う、、", "え"]
+        );
+    }
+    #[test]
+    fn explicit_false_overrides_inherited_hanging() {
+        let source = format!(
+            r#"<a:p xmlns:a="{A}"><a:pPr hangingPunct="0"/><a:lvl1pPr hangingPunct="true"/><a:defPPr hangingPunct="0"/></a:p>"#
+        );
+        let doc = Document::parse(&source).unwrap();
+        let root = doc.root_element();
+        let pp = child(root, A, "pPr");
+        let level = child(root, A, "lvl1pPr");
+        let default = child(root, A, "defPPr");
+        assert!(!paragraph_hanging([pp, level, default], true));
+        assert!(paragraph_hanging([None, level, default], false));
+        assert!(!paragraph_hanging([None, None, default], true));
+        assert!(paragraph_hanging([None, None, None], true));
+    }
+    #[test]
+    fn fixed_spacing_changes_first_baseline_but_percentage_does_not() {
+        let source = format!(
+            r#"<a:p xmlns:a="{A}"><a:pPr><a:lnSpc><a:spcPts val="1800"/></a:lnSpc></a:pPr><a:pPr><a:lnSpc><a:spcPct val="200000"/></a:lnSpc></a:pPr></a:p>"#
+        );
+        let doc = Document::parse(&source).unwrap();
+        let props: Vec<_> = doc
+            .root_element()
+            .children()
+            .filter(|n| n.is_element())
+            .collect();
+        // ascent 20 / descent 5 のセルを 24px の固定行送りに置く。下端 5px を保持。
+        let fixed = spacing(Some(props[0]), "lnSpc", 25.0, 25.0);
+        assert_eq!(fixed, 24.0);
+        assert_eq!(baseline_offset(Some(props[0]), 20.0, 25.0, fixed), 19.0);
+        let percentage = spacing(Some(props[1]), "lnSpc", 25.0, 25.0);
+        assert_eq!(percentage, 50.0);
+        assert_eq!(
+            baseline_offset(Some(props[1]), 20.0, 25.0, percentage),
+            20.0
+        );
+        assert_eq!(baseline_offset(None, 20.0, 25.0, 25.0), 20.0);
     }
     #[test]
     fn inherited_run_properties_are_merged_per_attribute() {

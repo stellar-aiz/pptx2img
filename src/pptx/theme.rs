@@ -6,10 +6,21 @@ pub(super) struct Theme {
     colors: HashMap<String, String>,
     mapping: HashMap<String, String>,
     fonts: HashMap<String, String>,
+    hanging: HashMap<String, [Option<bool>; 9]>,
 }
 impl Theme {
     pub(super) fn load(parts: &Parts, slide: &str, warnings: &mut Vec<String>) -> Result<Self> {
         let mut result = Self::default();
+        let roots = relationships(parts, "")?;
+        if let Some(presentation) = roots
+            .values()
+            .find(|r| r.kind.ends_with("/officeDocument") && !r.external)
+        {
+            let doc = xml(parts, &presentation.target)?;
+            if let Some(defaults) = child(doc.root_element(), P, "defaultTextStyle") {
+                result.read_hanging("default", defaults);
+            }
+        }
         let mut chain = vec![slide.to_string()];
         for kind in ["/slideLayout", "/slideMaster"] {
             let rels = relationships(parts, chain.last().unwrap())?;
@@ -36,6 +47,13 @@ impl Theme {
             }
             if doc.root_element().has_tag_name((P, "sldMaster")) {
                 master_mapping = result.mapping.clone();
+                if let Some(styles) = child(doc.root_element(), P, "txStyles") {
+                    for kind in ["titleStyle", "bodyStyle", "otherStyle"] {
+                        if let Some(style) = child(styles, P, kind) {
+                            result.read_hanging(kind, style);
+                        }
+                    }
+                }
             }
             if child(doc.root_element(), P, "clrMapOvr")
                 .and_then(|n| child(n, A, "masterClrMapping"))
@@ -68,6 +86,26 @@ impl Theme {
             result.read_theme(doc.root_element());
         }
         Ok(result)
+    }
+    fn read_hanging(&mut self, key: &str, style: Node<'_, '_>) {
+        let fallback = child(style, A, "defPPr").and_then(|n| bool_attr(n, "hangingPunct"));
+        let values = std::array::from_fn(|level| {
+            child(style, A, &format!("lvl{}pPr", level + 1))
+                .and_then(|n| bool_attr(n, "hangingPunct"))
+                .or(fallback)
+        });
+        self.hanging.insert(key.into(), values);
+    }
+    pub(super) fn hanging_punctuation(&self, kind: &str, level: usize) -> bool {
+        self.hanging
+            .get(kind)
+            .and_then(|levels| levels[level.min(8)])
+            .or_else(|| {
+                self.hanging
+                    .get("default")
+                    .and_then(|levels| levels[level.min(8)])
+            })
+            .unwrap_or(false)
     }
     fn read_theme(&mut self, root: Node<'_, '_>) {
         if let Some(scheme) = root
@@ -143,6 +181,13 @@ impl Theme {
         self.colors.get(mapped).map(String::as_str)
     }
 }
+pub(super) fn bool_attr(node: Node<'_, '_>, key: &str) -> Option<bool> {
+    match node.attribute(key) {
+        Some("1" | "true") => Some(true),
+        Some("0" | "false") => Some(false),
+        _ => None,
+    }
+}
 pub(super) fn valid_rgb(value: &str) -> bool {
     value.len() == 6 && value.bytes().all(|c| c.is_ascii_hexdigit())
 }
@@ -150,6 +195,21 @@ pub(super) fn valid_rgb(value: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn master_levels_override_presentation_defaults_without_losing_false() {
+        let source = format!(
+            r#"<a:root xmlns:a="{A}"><a:defaultTextStyle><a:defPPr hangingPunct="0"/><a:lvl1pPr hangingPunct="1"/></a:defaultTextStyle><a:otherStyle><a:lvl1pPr hangingPunct="0"/><a:lvl2pPr hangingPunct="1"/></a:otherStyle></a:root>"#
+        );
+        let doc = Document::parse(&source).unwrap();
+        let root = doc.root_element();
+        let mut theme = Theme::default();
+        theme.read_hanging("default", child(root, A, "defaultTextStyle").unwrap());
+        theme.read_hanging("otherStyle", child(root, A, "otherStyle").unwrap());
+        assert!(!theme.hanging_punctuation("otherStyle", 0));
+        assert!(theme.hanging_punctuation("otherStyle", 1));
+        assert!(!theme.hanging_punctuation("otherStyle", 2));
+        assert!(theme.hanging_punctuation("titleStyle", 0));
+    }
     #[test]
     fn theme_resolves_system_color_japanese_font_and_mapping() {
         let source = format!(

@@ -247,7 +247,7 @@ fn render_slide(
     if rels.values().any(|r| r.kind.ends_with("/slideLayout")) {
         warn(
             &mut warnings,
-            "レイアウト・マスターの図形・座標・文字スタイル継承は未対応です",
+            "レイアウト・マスターの図形・座標・文字スタイルの完全な継承は未対応です",
         );
     }
     let common = child(doc.root_element(), P, "cSld").context("スライド内容がありません")?;
