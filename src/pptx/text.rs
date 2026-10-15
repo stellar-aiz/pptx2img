@@ -254,6 +254,15 @@ fn baseline_offset(
         ascent
     }
 }
+// LibreOffice 比較で確認したレイアウト単位（1/100 mm）。
+// 枠と行全体は丸め、圧縮可能な余白は各文字で切り捨ててから合計する。
+const LAYOUT_UNITS_PER_PX: f64 = 2540.0 / 96.0;
+fn layout_units(width: f64) -> f64 {
+    (width * LAYOUT_UNITS_PER_PX).round()
+}
+fn fits_line(width: f64, compressed_units: f64, available: f64) -> bool {
+    layout_units(width) - compressed_units <= layout_units(available)
+}
 fn wrap(glyphs: &[Glyph], available: f64, enabled: bool, hanging: bool) -> Vec<Vec<Glyph>> {
     let mut result = Vec::new();
     for hard_line in glyphs.split(|g| g.ch == '\n') {
@@ -261,6 +270,8 @@ fn wrap(glyphs: &[Glyph], available: f64, enabled: bool, hanging: bool) -> Vec<V
             result.push(hard_line.to_vec());
             continue;
         }
+        // 明示字間が混在する行は別の丸め特性を持つため、従来の幅判定を保つ。
+        let quantized = hard_line.iter().all(|g| g.style.spacing == 0.0);
         let mut remaining = hard_line;
         while !remaining.is_empty() {
             let mut sum = 0.0;
@@ -273,7 +284,12 @@ fn wrap(glyphs: &[Glyph], available: f64, enabled: bool, hanging: bool) -> Vec<V
                         + step(&remaining[end - 1], Some(&remaining[end]))
                         + remaining[end].advance
                 };
-                if end > 0 && candidate > available {
+                let fits = if quantized {
+                    fits_line(candidate, 0.0, available)
+                } else {
+                    candidate <= available
+                };
+                if end > 0 && !fits {
                     break;
                 }
                 sum = candidate;
@@ -346,14 +362,18 @@ fn compress_wrap(glyphs: &[Glyph], available: f64, hanging: bool) -> Vec<Vec<Gly
         }
         let mut remaining = hard_line;
         while !remaining.is_empty() {
-            let mut minimum = 0.0;
+            let mut natural = 0.0;
+            let mut compressed_units = 0.0;
             let mut end = 0;
             while end < remaining.len() {
-                let next = minimum + remaining[end].advance - capacity(&remaining[end]);
-                if end > 0 && next > available {
+                let next = natural + remaining[end].advance;
+                let next_compressed =
+                    compressed_units + (capacity(&remaining[end]) * LAYOUT_UNITS_PER_PX).floor();
+                if end > 0 && !fits_line(next, next_compressed, available) {
                     break;
                 }
-                minimum = next;
+                natural = next;
+                compressed_units = next_compressed;
                 end += 1;
             }
             if hanging && end < remaining.len() && can_hang(remaining[end].ch) {
@@ -644,6 +664,52 @@ mod tests {
             .iter()
             .map(|l| l.iter().map(|g| g.ch).collect())
             .collect()
+    }
+    #[test]
+    fn rounded_line_width_changes_only_at_layout_unit_boundary() {
+        let mut glyphs = sample("あいうえおか");
+        for glyph in &mut glyphs {
+            glyph.advance = 32.0;
+            glyph.style.size = 32.0;
+        }
+        assert_eq!(
+            strings(wrap(&glyphs, 143.98 * 4.0 / 3.0, true, false)),
+            ["あいうえお", "か"]
+        );
+        assert_eq!(
+            strings(wrap(&glyphs, 143.99 * 4.0 / 3.0, true, false)),
+            ["あいうえおか"]
+        );
+    }
+    #[test]
+    fn explicit_spacing_keeps_unrounded_fit_at_boundary() {
+        let mut glyphs = sample("あいう");
+        glyphs[0].style.spacing = 0.01;
+        glyphs[1].style.spacing = 0.01;
+        let width = text_width(&glyphs);
+        assert_eq!(
+            strings(wrap(&glyphs, width - 0.001, true, false)),
+            ["あい", "う"]
+        );
+        assert_eq!(strings(wrap(&glyphs, width, true, false)), ["あいう"]);
+    }
+    #[test]
+    fn compression_capacity_is_truncated_per_character() {
+        for (size_pt, below, fits) in [(24.0, 120.0, 120.01), (18.0, 90.01, 90.02)] {
+            let mut glyphs = sample("あ、いう、え");
+            for glyph in &mut glyphs {
+                glyph.advance = size_pt * 4.0 / 3.0;
+                glyph.style.size = glyph.advance;
+            }
+            assert_eq!(
+                strings(compress_wrap(&glyphs, below * 4.0 / 3.0, false)).len(),
+                2
+            );
+            assert_eq!(
+                strings(compress_wrap(&glyphs, fits * 4.0 / 3.0, false)),
+                ["あ、いう、え"]
+            );
+        }
     }
     #[test]
     fn automatic_compression_uses_only_the_required_punctuation_space() {

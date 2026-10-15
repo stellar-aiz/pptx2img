@@ -300,9 +300,8 @@ PowerPoint での既定値や、設定の PPTX への保存可否を断定する
 - 禁則による追い出し後に最大圧縮が残るケースも比較結果に合わせる。
 - 仮名、中点、感嘆符・疑問符は圧縮しない。`wrap="none"` では適用しない。
 - 非ゼロの明示字間との併用は未対応。その段落は明示字間を優先し警告する。
-- `examples/auto-punctuation.pptx` の 120pt など、文字がちょうど収まる
-  境界幅で改行差が残る。フォント計測の丸め等により変わり、完全一致ではない。
-  該当ケースも削除せず同じ比較資料に残している。
+- 境界幅の改行判定を改善したが、フォント計測の丸めや圧縮量には差が残る。
+  下記の境界幅の比較資料で、確認済みの範囲と未解決ケースを分けて記録する。
 
 ### 比較テスト
 
@@ -332,3 +331,51 @@ MAE ≤ 0.02、差分画素率 ≤ 0.05 は変更していません。さらに�
 ```sh
 python tests/visual/make_auto_punctuation.py examples/auto-punctuation.pptx
 ```
+
+
+### 境界幅での改行（2026-10-15）
+
+字間ゼロの行では、行と枠の幅を 1/100 mm 単位に丸め、句読点ごとの圧縮可能量を同じ単位で
+切り捨ててから足す判定へ変更しました。LibreOffice 26.2.5.2 / macOS /
+Hiragino Sans の比較結果から得た近似であり、OOXML 全般の規則とは断定しません。
+例えば 24pt の「あ、いう、え」は圧縮 ON で幅 120pt では折り返し、
+120.01pt では一行になります。18pt では 90.01pt / 90.02pt が境界です。
+
+`examples/boundary-widths.pptx` は、18pt・24pt の通常文字と句読点について、
+境界の前後 ±0.1pt 内を 0.01pt の差も含めて調べる自作の 45 ページです。
+圧縮 OFF / ON の計 90 条件を LibreOffice と比較します。
+既存の MAE と差分画素率に加え、文字の行数と各行に占める描画量の割合を
+比較します。後者は全体の濃さで正規化し、割合差 0.02 以下を要求します。
+OCR ではなく、白背景・黒文字・単一文字枠の専用資料での回帰検出です。
+同じ二行のまま一文字が移る差や空画像も検出する単体テストがあります。
+`line-break-report.json` に条件、行の範囲、描画量の割合、判定を残します。
+
+```sh
+PPTX2IMG_TEST_PYTHON="$PWD/.venv-visual/bin/python" \
+  cargo test --test libreoffice boundary_widths -- --ignored --nocapture
+python tests/visual/make_boundary_widths.py examples/boundary-widths.pptx
+```
+
+調査時の 12pt・18pt・24pt の 63 ページ、圧縮 OFF / ON の計 126 条件では、
+改行の不一致が変更前 27 件から変更後 2 件に減りました。
+既存の画像比較だけでは変更前も全件合格していたため、行単位の検査を追加しています。
+
+未解決ケースは `examples/boundary-font-metrics.pptx` に保持しています。
+12pt・圧縮 OFF・「あ、いう、え」・幅 59.98pt / 59.99pt の改行差、
+20pt・21.5pt・32pt のフォント幅計測に由来する境界差を含む 72 ページです。
+次の手動比較は現時点では不合格になります。合格する回帰テストには混ぜず、
+不一致を無視する例外や閾値の緩和も入れていません。
+
+```sh
+python tests/visual/compare_boundary_widths.py \
+  --binary target/release/pptx2img \
+  --fixture examples/boundary-font-metrics.pptx --out /tmp/font-metrics-comparison
+python tests/visual/make_boundary_widths.py examples/boundary-font-metrics.pptx \
+  --sizes 12 20 21.5 32
+```
+
+また、改行が一致しても境界付近での句読点の圧縮量や字形位置は完全一致しません。
+単一書体・余白なしの専用資料で確認した結果であり、混在書体や枠の余白を含めた
+すべての丸め処理を再現したものではありません。非ゼロの明示字間を含む行は
+既存の判定を維持し、既存の字間比較テストで回帰を確認します。
+実行時依存の追加はありません。
