@@ -178,3 +178,84 @@ fn default_output_is_next_to_input_and_explicit_output_takes_precedence() {
     assert!(run(&input, &explicit, true).status.success());
     assert!(explicit.join("manifest.json").is_file());
 }
+
+#[test]
+fn library_matches_cli_pixels_and_manifest() {
+    use pptx2img::{ConvertOptions, convert};
+    let dir = tempfile::tempdir().unwrap();
+    let input = dir.path().join("input.pptx");
+    fixture(&input, "<p:graphicFrame/>");
+    let cli_out = dir.path().join("cli");
+    let lib_out = dir.path().join("lib");
+    assert!(run(&input, &cli_out, false).status.success());
+    let settings = ConvertOptions {
+        width: 100,
+        ..Default::default()
+    };
+    let report = convert(&input, &lib_out, &settings).unwrap();
+    assert_eq!(report.slides.len(), 2);
+    assert!(!report.slides[0].diagnostics.is_empty());
+    for name in ["slide-001.png", "slide-002.png", "manifest.json"] {
+        assert_eq!(
+            fs::read(cli_out.join(name)).unwrap(),
+            fs::read(lib_out.join(name)).unwrap()
+        );
+    }
+    assert_eq!(
+        serde_json::to_value(&report).unwrap(),
+        serde_json::from_slice::<serde_json::Value>(
+            &fs::read(lib_out.join("manifest.json")).unwrap()
+        )
+        .unwrap()
+    );
+    assert!(convert(&input, &lib_out, &settings).is_err());
+    assert_eq!(
+        fs::read(cli_out.join("manifest.json")).unwrap(),
+        fs::read(lib_out.join("manifest.json")).unwrap()
+    );
+}
+
+#[test]
+fn library_returns_strict_diagnostics_and_validates_width() {
+    use pptx2img::{ConvertOptions, DiagnosticCode, StrictModeError, convert};
+    let dir = tempfile::tempdir().unwrap();
+    let input = dir.path().join("input.pptx");
+    let out = dir.path().join("images");
+    fixture(&input, "<p:graphicFrame/>");
+    let settings = ConvertOptions {
+        strict: true,
+        no_system_fonts: true,
+        ..Default::default()
+    };
+    let error = convert(&input, &out, &settings).unwrap_err();
+    let strict = error.downcast_ref::<StrictModeError>().unwrap();
+    assert!(
+        strict.slides[0]
+            .warnings
+            .iter()
+            .any(|w| w.contains("graphicFrame"))
+    );
+    assert!(
+        strict.slides[0]
+            .diagnostics
+            .iter()
+            .any(|d| d.code == DiagnosticCode::Omitted)
+    );
+    assert!(!out.exists());
+    for width in [0, 63, 4097, u32::MAX] {
+        let settings = ConvertOptions {
+            width,
+            ..Default::default()
+        };
+        assert!(
+            convert(&input, &out, &settings)
+                .unwrap_err()
+                .to_string()
+                .contains("横幅")
+        );
+        assert!(!out.exists());
+    }
+    fs::write(&input, "broken").unwrap();
+    assert!(convert(&input, &out, &ConvertOptions::default()).is_err());
+    assert!(!out.exists());
+}

@@ -1,6 +1,6 @@
 # pptx2img
 
-PPTX を直接読み、各スライドを PNG にする独立 CLI。
+PPTX を直接読み、各スライドを PNG にする独立 CLI・Rust ライブラリ。
 LibreOffice、Microsoft Office、document-skills、ブラウザー、
 Python / Node ランタイムを実行時に必要としません。
 
@@ -40,6 +40,58 @@ cargo build --release --locked
 これは表示互換性の保証を意味しません。
 `--strict` で警告があれば終了コード 1、出力先は作成しません。
 テキストを含むスライドは、現時点では必ず近似描画の警告になります。
+
+## Rust ライブラリとして使う
+
+CLI と同じパッケージが library crate も提供します。
+ローカルのプロジェクトから使う場合は、依存を追加してください。
+以下はローカルパスでの利用例であり、crates.io への公開は前提にしません。
+
+```toml
+[dependencies]
+pptx2img = { path = "../pptx2img" }
+```
+
+```rust,no_run
+use pptx2img::{convert, ConvertOptions, StrictModeError};
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let options = ConvertOptions {
+        width: 1600,
+        ..Default::default()
+    };
+    match convert("slides.pptx", "images", &options) {
+        Ok(report) => {
+            for slide in &report.slides {
+                for warning in &slide.warnings {
+                    eprintln!("スライド {}: {warning}", slide.slide);
+                }
+            }
+        }
+        Err(error) => {
+            if let Some(strict) = error.downcast_ref::<StrictModeError>() {
+                eprintln!("停止時の診断: {:?}", strict.slides);
+            }
+            return Err(error.into());
+        }
+    }
+    Ok(())
+}
+```
+
+`convert` は同期 API です。PNG と `manifest.json` を書き出し、
+manifest と同じ内容を持つ `ConversionReport` を返します。
+既存の出力先は上書きしません。幅は CLI と同じ 64〜4096 ピクセルです。
+ライブラリ自身は標準出力・標準エラーへメッセージを書き込みません。
+警告・構造化診断は `report.slides` から取得できます。
+診断コードは公開 enum `DiagnosticCode` で判定できます。
+
+`strict: true` で警告を検出すると、出力先を作らずエラーを返します。
+`StrictModeError.slides` に停止時の警告・診断が入り、
+その `image` は未出力の予定ファイル名です。
+その他のエラーも `anyhow::Error` で返します。
+途中の I/O エラーでは画像が残ることがあります。
+初期プロトタイプのため、公開 API は今後変更される可能性があります。
 
 ## 対応範囲
 
@@ -93,7 +145,8 @@ PPTX (ZIP/XML)
   → OOXML 解析・スライド順序・座標解決（src/pptx.rs）
   → 内部 SVG
   → resvg / usvg / tiny-skia
-  → PNG + manifest（src/main.rs）
+  → PNG + manifest（src/lib.rs）
+  ↑ CLI の引数解析・メッセージ表示（src/main.rs）
 ```
 
 ### 着想とコードの出自

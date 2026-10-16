@@ -8,7 +8,7 @@ mod diagnostics;
 mod layout;
 mod objects;
 mod text;
-pub use diagnostics::Diagnostic;
+pub use diagnostics::{Code as DiagnosticCode, Diagnostic};
 use diagnostics::{Code, Target, Warnings};
 mod theme;
 use theme::Theme;
