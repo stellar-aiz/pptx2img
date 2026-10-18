@@ -552,3 +552,65 @@ fn shape_autofit_expands_fill_and_text_around_the_anchor() {
         );
     }
 }
+
+#[test]
+fn bullet_font_mapping_color_and_local_none_reach_pixels() {
+    for disabled in [false, true] {
+        let dir = tempfile::tempdir().unwrap();
+        let input = dir.path().join("bullet.pptx");
+        let out = dir.path().join("out");
+        let none = if disabled { "<a:buNone/>" } else { "" };
+        let body = format!(
+            r#"<p:txBody><a:bodyPr lIns="0" tIns="0" rIns="0" bIns="0"/><a:lstStyle><a:lvl1pPr marL="190500" indent="-190500"><a:buChar char="•"/><a:buFont typeface="要求記号書体"/><a:buSzPct val="150000"/><a:buClr><a:srgbClr val="0000FF"/></a:buClr><a:defRPr sz="1200"><a:latin typeface="Pptx2img Metrics Test"/></a:defRPr></a:lvl1pPr></a:lstStyle><a:p><a:pPr>{none}</a:pPr><a:r><a:t>AAAA AAAA AAAA</a:t></a:r></a:p></p:txBody>"#
+        );
+        write_deck(
+            &input,
+            page(
+                "sld",
+                "",
+                "",
+                &placeholder(1, "title", &transform(0, 0, 100, 100), &body),
+            ),
+            vec![],
+        );
+        let report = pptx2img::convert(
+            &input,
+            &out,
+            &pptx2img::ConvertOptions {
+                width: 100,
+                no_system_fonts: true,
+                font_file: vec![
+                    Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/metrics.ttf"),
+                    Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/bullets.ttf"),
+                ],
+                font_mapping: std::collections::HashMap::from([(
+                    "要求記号書体".into(),
+                    "Pptx Bullets".into(),
+                )]),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let img = image(&out);
+        let mut blue = 0;
+        for y in 0..100 {
+            for x in 0..100 {
+                let (r, g, b) = rgb(&img, x, y);
+                if b > 200 && r < 100 && g < 100 {
+                    blue += 1;
+                    assert!(x < 20);
+                }
+            }
+        }
+        assert_eq!(blue > 0, !disabled);
+        assert_eq!(
+            report.slides[0].diagnostics.iter().any(|d| d
+                .font
+                .as_ref()
+                .is_some_and(
+                    |f| f.requested_family == "要求記号書体" && f.reason == "explicit_mapping"
+                )),
+            !disabled
+        );
+    }
+}

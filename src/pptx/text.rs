@@ -1,5 +1,6 @@
 //! フォントの公称 advance と行メトリクスによる横書き配置。
 //! 句読点のぶら下がりと固定行送りを解釈する。複雑な shaping などは未対応。
+mod bullets;
 use super::fonts::Resolver;
 use super::*;
 #[cfg(test)]
@@ -597,6 +598,7 @@ pub(super) fn render<'a>(
     let presentation_style = presentation
         .as_ref()
         .and_then(|doc| child(doc.root_element(), P, "defaultTextStyle"));
+    let mut counters = bullets::Counters::default();
     let mut lines = Vec::new();
     let mut cursor = 0.0;
     for paragraph in body.children().filter(|n| n.has_tag_name((A, "p"))) {
@@ -689,13 +691,47 @@ pub(super) fn render<'a>(
                 }
             }
         }
-        if paragraph_props.iter().any(|n| {
-            n.children()
-                .any(|n| matches!(n.tag_name().name(), "buChar" | "buAutoNum"))
-                || n.attribute("marL").is_some()
-                || n.attribute("indent").is_some()
-        }) {
-            warn(warnings, "箇条書き・段落インデントは未対応です");
+        let marker = counters.label(&paragraph_props, level, warnings);
+        let marker_glyphs = marker
+            .as_deref()
+            .map(|text| {
+                let first_run = paragraph
+                    .children()
+                    .find(|n| n.has_tag_name((A, "r")) || n.has_tag_name((A, "fld")));
+                let marker_nodes: Vec<_> = first_run
+                    .and_then(|n| child(n, A, "rPr"))
+                    .into_iter()
+                    .chain(defaults.iter().copied())
+                    .collect();
+                let marker_style = text_style(
+                    &marker_nodes,
+                    all.first().is_some_and(|g| is_east_asian(g.ch)),
+                    warnings,
+                );
+                let marker_style = bullets::style(
+                    &paragraph_props,
+                    marker_style,
+                    autofit.scale,
+                    theme,
+                    warnings,
+                );
+                glyphs(text, marker_style, resolver, warnings)
+            })
+            .unwrap_or_default();
+        let margin_left = prop_number(&paragraph_props, "marL", 0.0) / EMU;
+        let margin_right = prop_number(&paragraph_props, "marR", 0.0) / EMU;
+        let indent = prop_number(&paragraph_props, "indent", 0.0) / EMU;
+        let paragraph_left = left + margin_left;
+        let paragraph_width = (available - margin_left - margin_right).max(1.0);
+        let first_indent = if marker.is_some() { 0.0 } else { indent };
+        if marker.is_some() && text_width(&marker_glyphs) > -indent && !marker_glyphs.is_empty() {
+            warn(
+                warnings,
+                "箇条書き記号と本文の間隔が不足しています。marL/indentを確認してください",
+            );
+        }
+        if marker.is_some() && attr(&paragraph_props, "algn").is_some_and(|a| a != "l") {
+            warn(warnings, "左揃え以外の箇条書き記号位置は近似です");
         }
         if all.windows(2).any(|pair| {
             pair[0].style == pair[1].style && pair[0].advance + pair[0].style.spacing < 0.0
@@ -737,28 +773,52 @@ pub(super) fn render<'a>(
                 "自動句読点圧縮と明示字間の併用は未対応のため明示字間を優先します",
             );
         }
-        let wrapped = if compressed && all.iter().all(|g| g.style.spacing == 0.0) {
-            compress_wrap(&all, available, hanging)
-        } else {
-            wrap(&all, available, wrap_enabled, hanging)
+        let wrap_lines = |glyphs: &[Glyph], width| {
+            if compressed && all.iter().all(|g| g.style.spacing == 0.0) {
+                compress_wrap(glyphs, width, hanging)
+            } else {
+                wrap(glyphs, width, wrap_enabled, hanging)
+            }
         };
-        for glyph_line in wrapped {
-            let width = layout_width(&glyph_line, available, hanging);
-            if width > available + 0.01 {
+        let mut wrapped = wrap_lines(&all, (paragraph_width - first_indent).max(1.0));
+        if first_indent != 0.0 && wrapped.len() > 1 {
+            let first = wrapped.remove(0);
+            let consumed = first.len();
+            let rest = if all.get(consumed).is_some_and(|g| g.ch == '\n') {
+                consumed + 1
+            } else {
+                consumed
+            };
+            wrapped = std::iter::once(first)
+                .chain(wrap_lines(&all[rest..], paragraph_width))
+                .collect();
+        }
+        for (line_index, glyph_line) in wrapped.into_iter().enumerate() {
+            let line_indent = if line_index == 0 { first_indent } else { 0.0 };
+            let line_available = paragraph_width - line_indent;
+            let width = layout_width(&glyph_line, line_available, hanging);
+            if width > line_available + 0.01 {
                 warnings.push(Code::TextOverflow, "文字がテキスト枠の横幅を超えています");
             }
-            let ascent = if glyph_line.is_empty() {
-                empty_ascent
-            } else {
-                glyph_line.iter().map(|g| g.ascent).fold(0.0, f64::max)
-            };
-            let descent = glyph_line.iter().map(|g| g.descent).fold(0.0, f64::max);
-            let leading = glyph_line.iter().map(|g| g.leading).fold(0.0, f64::max);
-            let line_height = if glyph_line.is_empty() {
-                empty_height
-            } else {
-                ascent + descent + leading
-            };
+            let metrics = glyph_line
+                .iter()
+                .chain(marker_glyphs.iter().filter(|_| line_index == 0));
+            let ascent = metrics.clone().map(|g| g.ascent).fold(
+                if glyph_line.is_empty() {
+                    empty_ascent
+                } else {
+                    0.0
+                },
+                f64::max,
+            );
+            let descent = metrics.clone().map(|g| g.descent).fold(0.0, f64::max);
+            let leading = metrics.map(|g| g.leading).fold(0.0, f64::max);
+            let line_height =
+                if glyph_line.is_empty() && (line_index != 0 || marker_glyphs.is_empty()) {
+                    empty_height
+                } else {
+                    ascent + descent + leading
+                };
             let fixed = spacing_node("lnSpc")
                 .and_then(|n| child(n, A, "lnSpc"))
                 .and_then(|n| child(n, A, "spcPts"))
@@ -771,15 +831,23 @@ pub(super) fn render<'a>(
                 })
             .max(0.0);
             let x = match attr(&paragraph_props, "algn") {
-                Some("ctr") => left + (available - width) / 2.0,
-                Some("r") => left + available - width,
-                _ => left,
+                Some("ctr") => paragraph_left + line_indent + (line_available - width) / 2.0,
+                Some("r") => paragraph_left + line_indent + line_available - width,
+                _ => paragraph_left + line_indent,
             };
+            let baseline =
+                cursor + baseline_offset(spacing_node("lnSpc"), ascent, line_height, advance);
+            if line_index == 0 && !marker_glyphs.is_empty() {
+                lines.push(Line {
+                    glyphs: marker_glyphs.clone(),
+                    x: paragraph_left + indent,
+                    baseline,
+                });
+            }
             lines.push(Line {
                 glyphs: glyph_line,
                 x,
-                baseline: cursor
-                    + baseline_offset(spacing_node("lnSpc"), ascent, line_height, advance),
+                baseline,
             });
             cursor += advance;
         }
@@ -1536,5 +1604,94 @@ mod tests {
                     .any(|d| d.code == Code::TextOverflow)
             );
         }
+    }
+    #[test]
+    fn bullets_and_wrapped_lines_have_separate_starts() {
+        for (level, margin, marker_x) in [(0, 190500, 0.0), (1, 381000, 20.0)] {
+            let paragraph = format!(
+                r#"<a:p><a:pPr lvl="{level}" marL="{margin}" indent="-190500"><a:buFont typeface="Pptx2img Metrics Test"/><a:buChar char="A"/></a:pPr><a:r><a:t>AAAA AAAA AAAA AAAA AAAA</a:t></a:r></a:p>"#
+            );
+            let (svg, _) = inherited_fixture(&paragraph, "900");
+            let root = format!("<svg>{svg}</svg>");
+            let doc = Document::parse(&root).unwrap();
+            let spans: Vec<_> = doc
+                .descendants()
+                .filter(|n| n.has_tag_name("tspan"))
+                .collect();
+            let x = |n: Node<'_, '_>| {
+                n.attribute("x")
+                    .unwrap()
+                    .split_whitespace()
+                    .next()
+                    .unwrap()
+                    .parse::<f64>()
+                    .unwrap()
+            };
+            assert_eq!(spans[0].text(), Some("A"));
+            assert_eq!(x(spans[0]), marker_x);
+            assert!(spans.len() > 2);
+            for span in &spans[1..] {
+                assert_eq!(x(*span), margin as f64 / EMU);
+            }
+        }
+    }
+    #[test]
+    fn non_bullet_indent_only_moves_first_line_and_keeps_hard_breaks() {
+        let paragraph = r#"<a:p><a:pPr marL="190500" indent="190500"><a:buNone/></a:pPr><a:r><a:t>AAAA AAAA AAAA AAAA</a:t></a:r><a:br/><a:r><a:t>AAAA</a:t></a:r></a:p>"#;
+        let (svg, _) = inherited_fixture(paragraph, "900");
+        let root = format!("<svg>{svg}</svg>");
+        let doc = Document::parse(&root).unwrap();
+        let spans: Vec<_> = doc
+            .descendants()
+            .filter(|n| n.has_tag_name("tspan"))
+            .collect();
+        assert!(spans.len() > 2);
+        for (i, span) in spans.iter().enumerate() {
+            let x: f64 = span
+                .attribute("x")
+                .unwrap()
+                .split_whitespace()
+                .next()
+                .unwrap()
+                .parse()
+                .unwrap();
+            assert_eq!(x, if i == 0 { 40.0 } else { 20.0 });
+        }
+        assert_eq!(
+            spans.iter().filter_map(|n| n.text()).collect::<String>(),
+            "AAAA AAAA AAAA AAAAAAAA"
+        );
+        assert_eq!(spans.last().unwrap().text(), Some("AAAA"));
+    }
+    #[test]
+    fn inherited_bullet_can_be_cancelled_and_size_color_follow_choice() {
+        let xml = format!(
+            r#"<a:root xmlns:a="{A}"><a:pPr><a:buNone/><a:buFontTx/><a:buSzTx/><a:buClrTx/></a:pPr><a:lvl1pPr><a:buChar char="A"/><a:buFont typeface="不在"/><a:buSzPct val="200000"/><a:buClr><a:srgbClr val="FF0000"/></a:buClr></a:lvl1pPr></a:root>"#
+        );
+        let doc = Document::parse(&xml).unwrap();
+        let nodes: Vec<_> = doc
+            .root_element()
+            .children()
+            .filter(|n| n.is_element())
+            .collect();
+        let base = sample("A")[0].style.clone();
+        let mut warnings = Warnings::default();
+        let unchanged =
+            bullets::style(&nodes, base.clone(), 0.55, &Theme::default(), &mut warnings);
+        assert_eq!(unchanged, base);
+        let changed = bullets::style(
+            &nodes[1..],
+            base.clone(),
+            0.55,
+            &Theme::default(),
+            &mut warnings,
+        );
+        assert_eq!(changed.size, base.size * 2.0);
+        assert_eq!(changed.color, "#FF0000");
+        assert_eq!(changed.face, "不在");
+        assert_eq!(
+            bullets::Counters::default().label(&nodes, 0, &mut warnings),
+            None
+        );
     }
 }
