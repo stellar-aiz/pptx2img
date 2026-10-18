@@ -668,3 +668,50 @@ fn preset_autofit_matches_explicit_expanded_geometry_for_each_anchor() {
         );
     }
 }
+
+#[test]
+fn preset_autofit_bounds_degenerate_areas_and_keeps_final_diagnostics_once() {
+    for (height, adjustment, limited) in [(0, 50000, false), (10, 0, true), (10, 1, true)] {
+        let d = tempfile::tempdir().unwrap();
+        let input = d.path().join("bounded.pptx");
+        let out = d.path().join("out");
+        let shape = format!(
+            r#"<p:sp><p:nvSpPr><p:cNvPr id="2" name="境界検証"/></p:nvSpPr><p:spPr>{}<a:prstGeom prst="rightArrow"><a:avLst><a:gd name="adj1" fmla="val {adjustment}"/></a:avLst></a:prstGeom><a:solidFill><a:srgbClr val="00FF00"/></a:solidFill></p:spPr><p:txBody><a:bodyPr lIns="0" rIns="0" tIns="0" bIns="0"><a:spAutoFit/></a:bodyPr><a:p><a:pPr><a:defRPr sz="600"><a:latin typeface="要求不在"/></a:defRPr></a:pPr><a:r><a:t>A</a:t></a:r><a:br/><a:r><a:t>A</a:t></a:r><a:br/><a:r><a:t>A</a:t></a:r></a:p></p:txBody></p:sp>"#,
+            transform(0, 10, 100, height)
+        );
+        write_deck(&input, page("sld", "", "", &shape), vec![]);
+        check(run(&input, &out, false));
+        let manifest: serde_json::Value =
+            serde_json::from_slice(&fs::read(out.join("manifest.json")).unwrap()).unwrap();
+        let records = manifest["slides"][0]["diagnostics"].as_array().unwrap();
+        assert_eq!(
+            records
+                .iter()
+                .filter(|d| d["message"].as_str().unwrap().contains("自動拡張が上限"))
+                .count(),
+            usize::from(limited)
+        );
+        assert_eq!(
+            records
+                .iter()
+                .filter(|d| d["code"] == "font_substitution")
+                .count(),
+            1
+        );
+        assert_eq!(
+            records
+                .iter()
+                .filter(|d| d["message"].as_str().unwrap().contains("文字組みは近似"))
+                .count(),
+            1
+        );
+        assert!(records.iter().all(|d| d["object_id"] == "2"));
+        if !limited {
+            // ゼロ高さからでも文字高24pxを収める48pxの矢印へ拡張する。
+            let img = image(&out);
+            assert_eq!(rgb(&img, 10, 25), (0, 255, 0));
+            assert_eq!(rgb(&img, 10, 47), (255, 255, 255));
+            assert!(!records.iter().any(|d| d["code"] == "text_overflow"));
+        }
+    }
+}
