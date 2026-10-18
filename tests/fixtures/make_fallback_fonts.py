@@ -9,7 +9,9 @@ for family, chars, weight, italic, filename in [
     ('Pptx CJK', 'A あ', 700, False, 'cjk-bold'),
     ('Pptx CJK', 'A あ', 400, True, 'cjk-italic'),
     ('Pptx Other', 'A あ', 400, False, 'other'),
+    ('Pptx Bullets', 'Aあ •.()0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ', 400, False, 'bullets'),
 ]:
+    chars = list(dict.fromkeys(chars))
     builder = FontBuilder(1000, isTTF=True)
     names = ['.notdef'] + [f'u{ord(ch):04x}' for ch in chars]
     builder.setupGlyphOrder(names)
