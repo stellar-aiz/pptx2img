@@ -1,7 +1,9 @@
 //! フォントの公称 advance と行メトリクスによる横書き配置。
 //! 句読点のぶら下がりと固定行送りを解釈する。複雑な shaping などは未対応。
+use super::fonts::Resolver;
 use super::*;
-use resvg::usvg::fontdb::{Database, Family, Query, Style as FontStyle, Weight};
+#[cfg(test)]
+use resvg::usvg::fontdb::Database;
 use skrifa::raw::TableProvider;
 use skrifa::{
     FontRef, MetadataProvider,
@@ -86,43 +88,19 @@ fn measurement_size(css_px: f64) -> f64 {
     (hundredth_mm * 600.0 / 2540.0).round().max(1.0) * 96.0 / 600.0
 }
 
-fn glyphs(value: &str, mut style: Style, fonts: &Database, warnings: &mut Warnings) -> Vec<Glyph> {
-    let families = [if style.face == "sans-serif" {
-        Family::SansSerif
-    } else {
-        Family::Name(&style.face)
-    }];
-    let query = Query {
-        families: &families,
-        weight: if style.bold {
-            Weight::BOLD
-        } else {
-            Weight::NORMAL
-        },
-        style: if style.italic {
-            FontStyle::Italic
-        } else {
-            FontStyle::Normal
-        },
-        ..Default::default()
-    };
+fn glyphs(
+    value: &str,
+    mut style: Style,
+    resolver: &Resolver<'_>,
+    warnings: &mut Warnings,
+) -> Vec<Glyph> {
+    let fonts = resolver.database;
+    let requested = style.face.clone();
     let id = fonts
         .faces()
         .find(|f| format!("pptx2img-face-{}", f.id) == style.face)
         .map(|f| f.id)
-        .or_else(|| fonts.query(&query))
-        .or_else(|| {
-            warnings.push(
-                Code::FontSubstitution,
-                format!("指定フォントがないため代替します: {}", style.face),
-            );
-            fonts
-                .query(&Query {
-                    families: &[Family::SansSerif],
-                    ..query
-                })
-                .or_else(|| fonts.faces().next().map(|f| f.id))
-        });
+        .or_else(|| resolver.select(&style.face, value, style.bold, style.italic, warnings));
     if let Some(id) = id {
         style.face = format!("pptx2img-face-{id}");
         if let Some(Some(result)) = fonts.with_face_data(id, |data, index| {
@@ -162,24 +140,17 @@ fn glyphs(value: &str, mut style: Style, fonts: &Database, warnings: &mut Warnin
                     .map(|ch| {
                         let advance = map.map(ch).and_then(|id| gm.advance_width(id));
                         if advance.is_none() && ch != '\n' {
-                            let mut database = std::sync::Arc::new(fonts.clone());
-                            let fallback = resvg::usvg::FontResolver::default_fallback_selector()(
+                            let fallback = resolver.fallback(
+                                &requested,
                                 ch,
-                                &[id],
-                                &mut database,
+                                style.bold,
+                                style.italic,
+                                warnings,
                             );
                             if let Some(fallback) = fallback {
-                                let name = fonts
-                                    .face(fallback)
-                                    .map(|f| f.post_script_name.as_str())
-                                    .unwrap_or("");
-                                warnings.push(
-                                    Code::FontSubstitution,
-                                    format!("文字 U+{:04X} を {name} で代替します", ch as u32),
-                                );
                                 let mut replacement = style.clone();
                                 replacement.face = format!("pptx2img-face-{fallback}");
-                                return glyphs(&ch.to_string(), replacement, fonts, warnings)
+                                return glyphs(&ch.to_string(), replacement, resolver, warnings)
                                     .remove(0);
                             }
                             warnings.push(
@@ -507,6 +478,7 @@ pub(super) fn render<'a>(
             "自動句読点圧縮は実験的な描画方針です。PPTX 内の指定ではありません",
         );
     }
+    let resolver = &options.fonts;
     let body_props: Vec<_> = bodies
         .iter()
         .filter_map(|n| child(*n, A, "bodyPr"))
@@ -590,7 +562,7 @@ pub(super) fn render<'a>(
                 all.extend(glyphs(
                     "\n",
                     style(&defaults, false, theme, warnings),
-                    options.fonts,
+                    resolver,
                     warnings,
                 ));
             } else if run.has_tag_name((A, "r")) || run.has_tag_name((A, "fld")) {
@@ -608,7 +580,7 @@ pub(super) fn render<'a>(
                         all.extend(glyphs(
                             &segment,
                             style(&nodes, last.unwrap(), theme, warnings),
-                            options.fonts,
+                            resolver,
                             warnings,
                         ));
                         segment.clear();
@@ -620,7 +592,7 @@ pub(super) fn render<'a>(
                     all.extend(glyphs(
                         &segment,
                         style(&nodes, last.unwrap_or(false), theme, warnings),
-                        options.fonts,
+                        resolver,
                         warnings,
                     ));
                 }
@@ -847,13 +819,23 @@ mod tests {
             style.face = "Pptx2img Metrics Test".into();
             style.size = size_pt * 4.0 / 3.0;
             let mut warnings = Warnings::default();
-            let measured = glyphs("あA \u{301}", style.clone(), &fonts, &mut warnings);
+            let measured = glyphs(
+                "あA \u{301}",
+                style.clone(),
+                &Resolver::new(&fonts, &HashMap::new()),
+                &mut warnings,
+            );
             assert!(warnings.is_empty(), "{warnings:?}");
             for (glyph, expected) in measured.iter().zip([full, full / 2.0, full / 4.0, 0.0]) {
                 assert!((glyph.advance - expected).abs() < 1e-10);
                 assert_eq!(glyph.style.size, style.size);
             }
-            let missing = glyphs("未", style.clone(), &fonts, &mut warnings);
+            let missing = glyphs(
+                "未",
+                style.clone(),
+                &Resolver::new(&fonts, &HashMap::new()),
+                &mut warnings,
+            );
             assert_eq!(missing[0].advance, style.size);
             assert!(warnings.iter().any(|w| w.contains("U+672A")));
         }
@@ -970,7 +952,7 @@ mod tests {
                 100.0,
                 &Theme::default(),
                 &RenderOptions {
-                    fonts: &Database::new(),
+                    fonts: Resolver::new(&Database::new(), &HashMap::new()),
                     punctuation_compression: true,
                 },
                 &mut svg,
@@ -1064,7 +1046,7 @@ mod tests {
                 100.0,
                 &Theme::default(),
                 &RenderOptions {
-                    fonts: &Database::new(),
+                    fonts: Resolver::new(&Database::new(), &HashMap::new()),
                     punctuation_compression: false,
                 },
                 &mut svg,
@@ -1086,7 +1068,7 @@ mod tests {
             100.0,
             &Theme::default(),
             &RenderOptions {
-                fonts: &Database::new(),
+                fonts: Resolver::new(&Database::new(), &HashMap::new()),
                 punctuation_compression: false,
             },
             &mut String::new(),

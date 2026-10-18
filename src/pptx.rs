@@ -5,10 +5,12 @@ use roxmltree::{Document, Node};
 use std::{collections::HashMap, fs::File, io::Read, path::Path};
 
 mod diagnostics;
+mod fonts;
+pub(crate) use fonts::Resolver as FontResolver;
 mod layout;
 mod objects;
 mod text;
-pub use diagnostics::{Code as DiagnosticCode, Diagnostic};
+pub use diagnostics::{Code as DiagnosticCode, Diagnostic, FontResolution};
 use diagnostics::{Code, Target, Warnings};
 mod theme;
 use theme::Theme;
@@ -124,7 +126,7 @@ fn escape(s: &str) -> String {
 }
 
 pub struct RenderOptions<'a> {
-    pub fonts: &'a resvg::usvg::fontdb::Database,
+    pub fonts: FontResolver<'a>,
     pub punctuation_compression: bool,
 }
 

@@ -9,7 +9,7 @@
 mod pptx;
 
 use anyhow::{Context, Result, bail};
-pub use pptx::{Diagnostic, DiagnosticCode};
+pub use pptx::{Diagnostic, DiagnosticCode, FontResolution};
 use serde::Serialize;
 use std::{
     fs,
@@ -29,6 +29,8 @@ pub struct ConvertOptions {
     pub font_file: Vec<PathBuf>,
     /// システムフォントを読み込まない。
     pub no_system_fonts: bool,
+    /// 要求 family から代替 family への明示対応（一段のみ）。
+    pub font_mapping: std::collections::HashMap<String, String>,
 }
 impl Default for ConvertOptions {
     fn default() -> Self {
@@ -38,6 +40,7 @@ impl Default for ConvertOptions {
             punctuation_compression: false,
             font_file: Vec::new(),
             no_system_fonts: false,
+            font_mapping: Default::default(),
         }
     }
 }
@@ -146,7 +149,7 @@ fn convert_inner(
     let deck = pptx::read(
         &input,
         &pptx::RenderOptions {
-            fonts: &options.fontdb,
+            fonts: pptx::FontResolver::new(&options.fontdb, &settings.font_mapping),
             punctuation_compression: settings.punctuation_compression,
         },
     )?;
