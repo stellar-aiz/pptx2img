@@ -7,6 +7,7 @@ use std::{collections::HashMap, fs::File, io::Read, path::Path};
 mod diagnostics;
 mod geometry;
 mod layout;
+mod lines;
 mod objects;
 mod text;
 pub use diagnostics::{Code as DiagnosticCode, Diagnostic};
@@ -421,7 +422,12 @@ fn render_shape(
             .map(|n| fill_line(n, theme, warnings))
             .unwrap_or_else(|| "none".into());
         let line_width = line.map(|n| number(n, "w", 9525.0) / EMU).unwrap_or(1.0);
-        let style = format!("fill=\"{fill}\" stroke=\"{stroke}\" stroke-width=\"{line_width}\"");
+        let decorations = line
+            .map(|n| lines::decorations(n, &stroke, line_width, svg, warnings))
+            .unwrap_or_default();
+        let style = format!(
+            "{decorations} fill=\"{fill}\" stroke=\"{stroke}\" stroke-width=\"{line_width}\""
+        );
         let mut text_rect = (0.0, 0.0, w, h);
         if let Some(geometry) = props_chain.iter().find_map(|n| child(*n, A, "prstGeom")) {
             if let Some(preset) = geometry::preset(geometry, w, h, &style, warnings) {
@@ -461,7 +467,12 @@ fn render_shape(
                         w / 2.0,
                         h / 2.0
                     )),
-                    "line" => svg.push_str(&format!("<line x2=\"{w}\" y2=\"{h}\" {style}/>")),
+                    "bentConnector2" => {
+                        svg.push_str(&format!("<path d=\"M0 0 H{w} V{h}\" {style}/>"))
+                    }
+                    "line" | "straightConnector1" => {
+                        svg.push_str(&format!("<line x2=\"{w}\" y2=\"{h}\" {style}/>"))
+                    }
                     other => {
                         warnings.push(Code::Omitted, format!("未対応のプリセット図形: {other}"))
                     }
@@ -500,7 +511,17 @@ fn render_shape(
 }
 fn fill_line(node: Node<'_, '_>, theme: &Theme, warnings: &mut Warnings) -> String {
     for n in node.children().filter(|n| n.is_element()) {
-        if !matches!(n.tag_name().name(), "solidFill" | "noFill") {
+        if !matches!(
+            n.tag_name().name(),
+            "solidFill"
+                | "noFill"
+                | "prstDash"
+                | "headEnd"
+                | "tailEnd"
+                | "round"
+                | "bevel"
+                | "miter"
+        ) {
             warn(warnings, format!("未対応の線属性: {}", n.tag_name().name()));
         }
     }

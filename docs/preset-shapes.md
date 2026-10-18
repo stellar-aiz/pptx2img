@@ -25,3 +25,14 @@ python tests/visual/compare.py --fixture /tmp/presets.pptx \
 調整値・回転・反転ページは MAE 0.001012／差分率0.473%。
 既存の MAE 0.02・差分率5%・画素差許容16を変更していない。
 文字組みとテーマ背景の既知の診断は残る。Office 完全互換の証明ではない。
+
+## 線とコネクタ
+
+straightConnector1 と bentConnector2、11種類の prstDash、5種類の
+headEnd/tailEnd、cap と join を扱う。線幅を単位に線種と端部寸法を決める。
+端部と線本体は重ね描きなので、小さい矢印やstealthの接合部に既知差があり、
+approximation診断を残す。custDashなどは未対応警告を維持する。
+
+自作資料: `python tests/visual/make_lines.py /tmp/lines.pptx`。
+LibreOffice比較3ページは既存閾値内（MAE 0.004429、0.005158、0.001855、
+差分率0.764%、2.025%、0.827%）。これは接合部の完全一致を意味しない。

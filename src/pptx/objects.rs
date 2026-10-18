@@ -210,7 +210,14 @@ impl<'d> Renderer<'_, 'd> {
                             if let Some(line) = child(props, A, edge) {
                                 let color = fill_line(line, self.theme, self.warnings);
                                 let width = number(line, "w", 9525.0) / EMU;
-                                self.svg.push_str(&format!("<line x1=\"{x1}\" y1=\"{y1}\" x2=\"{x2}\" y2=\"{y2}\" stroke=\"{color}\" stroke-width=\"{width}\"/>"));
+                                let decorations = lines::decorations(
+                                    line,
+                                    &color,
+                                    width,
+                                    self.svg,
+                                    self.warnings,
+                                );
+                                self.svg.push_str(&format!("<line {decorations} x1=\"{x1}\" y1=\"{y1}\" x2=\"{x2}\" y2=\"{y2}\" stroke=\"{color}\" stroke-width=\"{width}\"/>"));
                             }
                         }
                         for n in props.children().filter(|n| n.is_element()) {
