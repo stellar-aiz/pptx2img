@@ -658,3 +658,70 @@ Python 比較器 14 件、LibreOffice 比較 8 系統が合格しました。
 `cargo fmt --check`、`cargo clippy --locked --all-targets -- -D warnings`、
 `actionlint` も合格しています。既存の画像・改行・行内位置の閾値は変更していません。
 PowerPoint の参照画像との照合は未確認です。GitHub 上の CI 結果は PR のチェック欄を参照してください。
+
+### 不足フォントと明示的な代替
+
+`--font-file /path/font.ttf` で利用権のあるフォントを追加できます。
+`--font-map 'Meiryo UI=Noto Sans CJK JP'` は要求書体を別 family に対応させます。
+複数指定でき、同じ要求名の再指定は最後を採用します。対応は一段のみで、
+循環する指定でも連鎖探索しません。Rust API では `ConvertOptions.font_mapping`
+に同じ対応を設定します。代替先が存在しない場合は診断して自動選択へ戻ります。
+フォントの自動取得・再配布は行いません。
+
+自動選択は対象文字の対応範囲、斜体の一致、太さの差、次の family 順で評価します。
+Noto Sans CJK JP、Noto Sans JP、Yu Gothic、Hiragino Sans、Meiryo、
+Arial Unicode MS、Arial、その他。同順位は PostScript 名・family 名・face index
+の順で安定させます。指定 family 内の選択も文字の対応範囲を考慮します。
+欠字は同じ規則で別 face を探し、全候補で描けない字は `missing_glyph` を残します。
+
+manifest の `slides[].diagnostics[].font` は要求 family、実 family、PostScript 名、
+face index、理由を保持し、診断の `part`・`object_id` とスライド番号から影響箇所を
+取得できます。理由は `family_missing`（書体不在）、`explicit_mapping`（明示指定）、
+`mapped_family_missing`（代替指定先不在）、`glyph_fallback`（字形不足）、
+`style_approximation`（太さ・斜体不一致）です。CLI は書体ごとにまとめて表示します。
+計測と描画は同一 face を使いますが、代替後も元書体との文字幅・行高差は残ります。
+
+### 本文の既定書式
+
+通常のテキストボックス（`txBox=1`）では `presentation/defaultTextStyle` を使います。
+プレースホルダーは従来どおりレイアウト・マスターの書式を継承し、図形内文字は
+`otherStyle` を参照します。run・段落・リストの明示値が既定値に優先します。
+空段落は `endParaRPr` のサイズとフォントメトリクスで行高を決めます。
+
+仕様の入口は [MicrosoftのdefaultTextStyle解説](https://learn.microsoft.com/en-us/office/open-xml/presentation/working-with-presentations)。
+`examples/text-inheritance.pptx` は自作の同一Arial・明示18pt／継承18ptの比較資料です。
+LibreOfficeでも両者は18ptです。縦位置・行送りの画像差は残り、既存比較閾値を
+超えるため完全互換とは扱いません。枠に収まらない文字は切り捨てず診断を残します。
+
+### 保存済み自動調整
+
+`normAutofit` の `fontScale`（未指定100%）を全runの計測・折り返し・描画へ
+適用します。`lnSpcReduction`（未指定0%）は百分率行間から減算し、例えば
+120%-20%=100%になります。固定ptの行間は減らしません。
+子の `noAutofit` は親の自動調整を解除します。保存率の動的な再探索は行いません。
+
+`spAutoFit` は横書き・固定幅で必要な高さまで枠を拡張し、上端・中央・下端の
+アンカーと余白を保持します。表セル・縦書き、折り返しなしの横方向拡張は未対応で
+警告します。縦書きや表の行高まで対応済みとは扱いません。
+自作資料は `examples/text-autofit.pptx`、再生成コードは
+`tests/visual/make_text_autofit.py` です。
+
+[NormalAutoFitの仕様](https://learn.microsoft.com/en-us/dotnet/api/documentformat.openxml.drawing.normalautofit)と
+[OfficeのspAutoFit解釈](https://learn.microsoft.com/en-us/openspecs/office_standards/ms-oe376/19d31037-28bf-4693-85be-3a37bfe82d51)を参照。
+LibreOffice 26.2.5.2はこの自作資料の保存縮小率を再計算し、保存枠も自動拡張しないため、
+全画素比較には差が残ります。既存の閾値を緩めず差分を記録します。
+
+### 箇条書きと段落の字下げ
+
+`buChar` と `buAutoNum` の記号・番号を本文とは別に配置します。
+記号位置は `marL+indent`、本文と折り返し行の開始は `marL`、右余白は `marR` です。
+段落・リスト・マスターから書式を継承し、`buNone` で解除できます。
+記号の書体・サイズ・色も継承し、不足書体の対応は本文と共通です。
+
+自動番号は算用数字・英字・ローマ数字と句点／閉じ括弧／両括弧／装飾なしに対応します。
+番号は階層ごとに数え、段落に直接指定した `startAt` で再開始します。
+リストから継承する開始番号は列の初回だけに使います。画像記号は未対応、
+その他の番号形式と左揃え以外の記号位置は警告付き近似です。
+自作比較資料は `examples/text-bullets.pptx`、再生成コードは
+`tests/visual/make_text_bullets.py` です。LibreOfficeと番号・階層・折り返しを
+照合していますが、縦位置と行送りの差は既存画像比較閾値を超えています。

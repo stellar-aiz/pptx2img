@@ -426,3 +426,245 @@ fn rounded_rectangle_adjustment_and_empty_outline() {
         assert_eq!(rgb(&rendered, 11, 11) == (255, 0, 0), corner_is_red);
     }
 }
+
+#[test]
+fn font_mapping_matches_api_and_cli_and_aggregates_targets() {
+    let dir = tempfile::tempdir().unwrap();
+    let input = dir.path().join("mapping.pptx");
+    let body = r#"<p:txBody><a:bodyPr/><a:p><a:r><a:rPr><a:latin typeface="要求書体"/><a:ea typeface="要求書体"/></a:rPr><a:t>Aあ</a:t></a:r></a:p></p:txBody>"#;
+    write_deck(
+        &input,
+        page(
+            "sld",
+            "",
+            "",
+            &(placeholder(7, "title", &transform(0, 0, 100, 40), body)
+                + &placeholder(8, "title", &transform(0, 50, 100, 40), body)),
+        ),
+        vec![],
+    );
+    let font = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/cjk.ttf");
+    let cli_out = dir.path().join("cli");
+    let cli = Command::new(env!("CARGO_BIN_EXE_pptx2img"))
+        .arg(&input)
+        .arg("--out")
+        .arg(&cli_out)
+        .args([
+            "--width",
+            "100",
+            "--no-system-fonts",
+            "--font-map",
+            "要求書体=Pptx CJK",
+            "--font-file",
+        ])
+        .arg(&font)
+        .output()
+        .unwrap();
+    let stderr = String::from_utf8_lossy(&cli.stderr);
+    assert_eq!(
+        stderr.matches("フォント代替: 要求書体").count(),
+        1,
+        "{stderr}"
+    );
+    check(cli);
+    let api_out = dir.path().join("api");
+    let report = pptx2img::convert(
+        &input,
+        &api_out,
+        &pptx2img::ConvertOptions {
+            width: 100,
+            no_system_fonts: true,
+            font_file: vec![font],
+            font_mapping: std::collections::HashMap::from([("要求書体".into(), "Pptx CJK".into())]),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    assert_eq!(
+        fs::read(cli_out.join("slide-001.png")).unwrap(),
+        fs::read(api_out.join("slide-001.png")).unwrap()
+    );
+    let diagnostics: Vec<_> = report.slides[0]
+        .diagnostics
+        .iter()
+        .filter(|d| d.font.is_some())
+        .collect();
+    assert_eq!(diagnostics.len(), 2);
+    assert_eq!(
+        diagnostics[0].font.as_ref().unwrap().reason,
+        "explicit_mapping"
+    );
+    assert_eq!(diagnostics[0].object_id.as_deref(), Some("7"));
+    assert_eq!(diagnostics[1].object_id.as_deref(), Some("8"));
+}
+
+#[test]
+fn missing_glyph_strict_leaves_no_output() {
+    let dir = tempfile::tempdir().unwrap();
+    let input = dir.path().join("missing.pptx");
+    let out = dir.path().join("strict");
+    write_deck(
+        &input,
+        page(
+            "sld",
+            "",
+            "",
+            &placeholder(
+                1,
+                "title",
+                &transform(0, 0, 100, 100),
+                r#"<p:txBody><a:bodyPr/><a:p><a:r><a:rPr><a:ea typeface="Pptx2img Metrics Test"/></a:rPr><a:t>未</a:t></a:r></a:p></p:txBody>"#,
+            ),
+        ),
+        vec![],
+    );
+    let output = run(&input, &out, true);
+    assert_eq!(output.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("U+672A"));
+    assert!(!out.exists());
+}
+
+#[test]
+fn shape_autofit_expands_fill_and_text_around_the_anchor() {
+    for (anchor, y, top, bottom) in [("t", 20, 20, 68), ("ctr", 30, 11, 59), ("b", 60, 22, 70)] {
+        let dir = tempfile::tempdir().unwrap();
+        let input = dir.path().join("autofit.pptx");
+        let out = dir.path().join("out");
+        let shape = format!(
+            r#"<p:sp><p:spPr>{}<a:prstGeom prst="rect"/><a:solidFill><a:srgbClr val="00FF00"/></a:solidFill></p:spPr><p:txBody><a:bodyPr lIns="0" rIns="0" tIns="0" bIns="0" anchor="{anchor}"><a:spAutoFit/></a:bodyPr><a:p><a:pPr><a:defRPr sz="1200"><a:latin typeface="Pptx2img Metrics Test"/></a:defRPr></a:pPr><a:r><a:t>A</a:t></a:r><a:br/><a:r><a:t>A</a:t></a:r><a:br/><a:r><a:t>A</a:t></a:r></a:p></p:txBody></p:sp>"#,
+            transform(0, y, 100, 10)
+        );
+        write_deck(&input, page("sld", "", "", &shape), vec![]);
+        check(run(&input, &out, false));
+        let img = image(&out);
+        assert_eq!(rgb(&img, 80, top), (0, 255, 0));
+        assert_eq!(rgb(&img, 80, bottom - 1), (0, 255, 0));
+        assert_eq!(rgb(&img, 80, top - 1), (255, 255, 255));
+        assert_eq!(rgb(&img, 80, bottom), (255, 255, 255));
+        let m: serde_json::Value =
+            serde_json::from_slice(&fs::read(out.join("manifest.json")).unwrap()).unwrap();
+        assert!(
+            !m["slides"][0]["diagnostics"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|d| d["code"] == "text_overflow")
+        );
+    }
+}
+
+#[test]
+fn bullet_font_mapping_color_and_local_none_reach_pixels() {
+    for disabled in [false, true] {
+        let dir = tempfile::tempdir().unwrap();
+        let input = dir.path().join("bullet.pptx");
+        let out = dir.path().join("out");
+        let none = if disabled { "<a:buNone/>" } else { "" };
+        let body = format!(
+            r#"<p:txBody><a:bodyPr lIns="0" tIns="0" rIns="0" bIns="0"/><a:lstStyle><a:lvl1pPr marL="190500" indent="-190500"><a:buChar char="•"/><a:buFont typeface="要求記号書体"/><a:buSzPct val="150000"/><a:buClr><a:srgbClr val="0000FF"/></a:buClr><a:defRPr sz="1200"><a:latin typeface="Pptx2img Metrics Test"/></a:defRPr></a:lvl1pPr></a:lstStyle><a:p><a:pPr>{none}</a:pPr><a:r><a:t>AAAA AAAA AAAA</a:t></a:r></a:p></p:txBody>"#
+        );
+        write_deck(
+            &input,
+            page(
+                "sld",
+                "",
+                "",
+                &placeholder(1, "title", &transform(0, 0, 100, 100), &body),
+            ),
+            vec![],
+        );
+        let report = pptx2img::convert(
+            &input,
+            &out,
+            &pptx2img::ConvertOptions {
+                width: 100,
+                no_system_fonts: true,
+                font_file: vec![
+                    Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/metrics.ttf"),
+                    Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/bullets.ttf"),
+                ],
+                font_mapping: std::collections::HashMap::from([(
+                    "要求記号書体".into(),
+                    "Pptx Bullets".into(),
+                )]),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let img = image(&out);
+        let mut blue = 0;
+        for y in 0..100 {
+            for x in 0..100 {
+                let (r, g, b) = rgb(&img, x, y);
+                if b > 200 && r < 100 && g < 100 {
+                    blue += 1;
+                    assert!(x < 20);
+                }
+            }
+        }
+        assert_eq!(blue > 0, !disabled);
+        assert_eq!(
+            report.slides[0].diagnostics.iter().any(|d| d
+                .font
+                .as_ref()
+                .is_some_and(
+                    |f| f.requested_family == "要求記号書体" && f.reason == "explicit_mapping"
+                )),
+            !disabled
+        );
+    }
+}
+
+#[test]
+fn preset_text_rectangle_applies_body_and_paragraph_margins_once() {
+    let dir = tempfile::tempdir().unwrap();
+    let body = r#"<p:txBody><a:bodyPr lIns="19050" rIns="28575" tIns="0" bIns="0"><a:normAutofit fontScale="55000"/></a:bodyPr><a:p><a:pPr marL="47625" marR="66675"><a:defRPr sz="1200"><a:latin typeface="Pptx2img Metrics Test"/></a:defRPr></a:pPr><a:r><a:t>AAAA AAAA AAAA AAAA AAAA AAAA</a:t></a:r></a:p></p:txBody>"#;
+    for (name, geometry, x, y, w, h) in [
+        ("arrow", "rightArrow", 0, 0, 100, 40),
+        ("rectangle", "rect", 0, 10, 90, 20),
+    ] {
+        let input = dir.path().join(format!("{name}.pptx"));
+        let shape = format!(
+            r#"<p:sp><p:spPr>{}<a:prstGeom prst="{geometry}"/><a:noFill/></p:spPr>{body}</p:sp>"#,
+            transform(x, y, w, h)
+        );
+        write_deck(&input, page("sld", "", "", &shape), vec![]);
+        check(run(&input, &dir.path().join(name), false));
+    }
+    assert_eq!(
+        image(&dir.path().join("arrow")).data(),
+        image(&dir.path().join("rectangle")).data()
+    );
+}
+
+#[test]
+fn preset_autofit_matches_explicit_expanded_geometry_for_each_anchor() {
+    let dir = tempfile::tempdir().unwrap();
+    for (anchor, y, final_y) in [("t", 10, 10), ("ctr", 35, 16), ("b", 65, 27)] {
+        for fitted in [false, true] {
+            let mode = if fitted { "spAutoFit" } else { "noAutofit" };
+            let (top, height) = if fitted { (y, 10) } else { (final_y, 48) };
+            let shape = format!(
+                r#"<p:sp><p:spPr>{}<a:prstGeom prst="rightArrow"/><a:solidFill><a:srgbClr val="00FF00"/></a:solidFill></p:spPr><p:txBody><a:bodyPr lIns="0" rIns="0" tIns="0" bIns="0" anchor="{anchor}"><a:{mode}/></a:bodyPr><a:p><a:pPr><a:defRPr sz="600"><a:latin typeface="Pptx2img Metrics Test"/></a:defRPr></a:pPr><a:r><a:t>A</a:t></a:r><a:br/><a:r><a:t>A</a:t></a:r><a:br/><a:r><a:t>A</a:t></a:r></a:p></p:txBody></p:sp>"#,
+                transform(0, top, 100, height)
+            );
+            let input = dir.path().join(format!("{anchor}-{fitted}.pptx"));
+            let out = dir.path().join(format!("{anchor}-{fitted}"));
+            write_deck(&input, page("sld", "", "", &shape), vec![]);
+            check(run(&input, &out, false));
+            let manifest: serde_json::Value =
+                serde_json::from_slice(&fs::read(out.join("manifest.json")).unwrap()).unwrap();
+            assert!(
+                !manifest["slides"][0]["diagnostics"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .any(|d| d["code"] == "text_overflow")
+            );
+        }
+        assert_eq!(
+            image(&dir.path().join(format!("{anchor}-true"))).data(),
+            image(&dir.path().join(format!("{anchor}-false"))).data()
+        );
+    }
+}
