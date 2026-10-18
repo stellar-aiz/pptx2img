@@ -63,3 +63,37 @@ fn blur_spreads_shadow_and_keeps_approximation_diagnostic() {
             .any(|d| d["code"] == "approximation")
     );
 }
+
+#[test]
+fn autofit_shadow_and_rotated_geometry_match_explicit_final_dimensions() {
+    let d = tempfile::tempdir().unwrap();
+    for follows in [0, 1] {
+        for fitted in [false, true] {
+            let mode = if fitted { "spAutoFit" } else { "noAutofit" };
+            let (y, h) = if fitted { (35, 10) } else { (16, 48) };
+            let xfrm =
+                transform(20, y, 60, h).replace("<a:xfrm>", r#"<a:xfrm rot="1800000" flipH="1">"#);
+            let shape = format!(
+                r#"<p:sp><p:spPr>{xfrm}<a:prstGeom prst="rightArrow"/><a:solidFill><a:srgbClr val="00FF00"/></a:solidFill><a:effectLst><a:outerShdw blurRad="9525" dist="95250" dir="5400000" rotWithShape="{follows}"><a:srgbClr val="000000"><a:alpha val="50000"/></a:srgbClr></a:outerShdw></a:effectLst></p:spPr><p:txBody><a:bodyPr lIns="0" rIns="0" tIns="0" bIns="0" anchor="ctr"><a:{mode}/></a:bodyPr><a:p><a:pPr><a:defRPr sz="600"><a:latin typeface="Pptx2img Metrics Test"/></a:defRPr></a:pPr><a:r><a:t>A</a:t></a:r><a:br/><a:r><a:t>A</a:t></a:r><a:br/><a:r><a:t>A</a:t></a:r></a:p></p:txBody></p:sp>"#
+            );
+            let input = d.path().join(format!("{follows}-{fitted}.pptx"));
+            let out = d.path().join(format!("{follows}-{fitted}"));
+            write_deck(&input, page("sld", "", "", &shape), vec![]);
+            check(run(&input, &out, false));
+            assert!(
+                image(&out)
+                    .pixels()
+                    .iter()
+                    .filter(|p| (120..200).contains(&p.red())
+                        && p.red() == p.green()
+                        && p.green() == p.blue())
+                    .count()
+                    > 10
+            );
+        }
+        assert_eq!(
+            image(&d.path().join(format!("{follows}-false"))).data(),
+            image(&d.path().join(format!("{follows}-true"))).data()
+        );
+    }
+}

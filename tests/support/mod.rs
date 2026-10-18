@@ -49,6 +49,7 @@ pub fn write_deck(path: &Path, slide: String, extra: Vec<(&str, Vec<u8>)>) {
         parts.retain(|(existing, _)| *existing != name);
         parts.push((name, data));
     }
+
     for (name, data) in parts {
         zip.start_file(name, SimpleFileOptions::default()).unwrap();
         zip.write_all(&data).unwrap();
