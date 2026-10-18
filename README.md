@@ -658,3 +658,25 @@ Python 比較器 14 件、LibreOffice 比較 8 系統が合格しました。
 `cargo fmt --check`、`cargo clippy --locked --all-targets -- -D warnings`、
 `actionlint` も合格しています。既存の画像・改行・行内位置の閾値は変更していません。
 PowerPoint の参照画像との照合は未確認です。GitHub 上の CI 結果は PR のチェック欄を参照してください。
+
+### 不足フォントと明示的な代替
+
+`--font-file /path/font.ttf` で利用権のあるフォントを追加できます。
+`--font-map 'Meiryo UI=Noto Sans CJK JP'` は要求書体を別 family に対応させます。
+複数指定でき、同じ要求名の再指定は最後を採用します。対応は一段のみで、
+循環する指定でも連鎖探索しません。Rust API では `ConvertOptions.font_mapping`
+に同じ対応を設定します。代替先が存在しない場合は診断して自動選択へ戻ります。
+フォントの自動取得・再配布は行いません。
+
+自動選択は対象文字の対応範囲、斜体の一致、太さの差、次の family 順で評価します。
+Noto Sans CJK JP、Noto Sans JP、Yu Gothic、Hiragino Sans、Meiryo、
+Arial Unicode MS、Arial、その他。同順位は PostScript 名・family 名・face index
+の順で安定させます。指定 family 内の選択も文字の対応範囲を考慮します。
+欠字は同じ規則で別 face を探し、全候補で描けない字は `missing_glyph` を残します。
+
+manifest の `slides[].diagnostics[].font` は要求 family、実 family、PostScript 名、
+face index、理由を保持し、診断の `part`・`object_id` とスライド番号から影響箇所を
+取得できます。理由は `family_missing`（書体不在）、`explicit_mapping`（明示指定）、
+`mapped_family_missing`（代替指定先不在）、`glyph_fallback`（字形不足）、
+`style_approximation`（太さ・斜体不一致）です。CLI は書体ごとにまとめて表示します。
+計測と描画は同一 face を使いますが、代替後も元書体との文字幅・行高差は残ります。

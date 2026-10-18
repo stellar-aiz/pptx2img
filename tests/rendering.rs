@@ -426,3 +426,100 @@ fn rounded_rectangle_adjustment_and_empty_outline() {
         assert_eq!(rgb(&rendered, 11, 11) == (255, 0, 0), corner_is_red);
     }
 }
+
+#[test]
+fn font_mapping_matches_api_and_cli_and_aggregates_targets() {
+    let dir = tempfile::tempdir().unwrap();
+    let input = dir.path().join("mapping.pptx");
+    let body = r#"<p:txBody><a:bodyPr/><a:p><a:r><a:rPr><a:latin typeface="要求書体"/><a:ea typeface="要求書体"/></a:rPr><a:t>Aあ</a:t></a:r></a:p></p:txBody>"#;
+    write_deck(
+        &input,
+        page(
+            "sld",
+            "",
+            "",
+            &(placeholder(7, "title", &transform(0, 0, 100, 40), body)
+                + &placeholder(8, "title", &transform(0, 50, 100, 40), body)),
+        ),
+        vec![],
+    );
+    let font = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/cjk.ttf");
+    let cli_out = dir.path().join("cli");
+    let cli = Command::new(env!("CARGO_BIN_EXE_pptx2img"))
+        .arg(&input)
+        .arg("--out")
+        .arg(&cli_out)
+        .args([
+            "--width",
+            "100",
+            "--no-system-fonts",
+            "--font-map",
+            "要求書体=Pptx CJK",
+            "--font-file",
+        ])
+        .arg(&font)
+        .output()
+        .unwrap();
+    let stderr = String::from_utf8_lossy(&cli.stderr);
+    assert_eq!(
+        stderr.matches("フォント代替: 要求書体").count(),
+        1,
+        "{stderr}"
+    );
+    check(cli);
+    let api_out = dir.path().join("api");
+    let report = pptx2img::convert(
+        &input,
+        &api_out,
+        &pptx2img::ConvertOptions {
+            width: 100,
+            no_system_fonts: true,
+            font_file: vec![font],
+            font_mapping: std::collections::HashMap::from([("要求書体".into(), "Pptx CJK".into())]),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    assert_eq!(
+        fs::read(cli_out.join("slide-001.png")).unwrap(),
+        fs::read(api_out.join("slide-001.png")).unwrap()
+    );
+    let diagnostics: Vec<_> = report.slides[0]
+        .diagnostics
+        .iter()
+        .filter(|d| d.font.is_some())
+        .collect();
+    assert_eq!(diagnostics.len(), 2);
+    assert_eq!(
+        diagnostics[0].font.as_ref().unwrap().reason,
+        "explicit_mapping"
+    );
+    assert_eq!(diagnostics[0].object_id.as_deref(), Some("7"));
+    assert_eq!(diagnostics[1].object_id.as_deref(), Some("8"));
+}
+
+#[test]
+fn missing_glyph_strict_leaves_no_output() {
+    let dir = tempfile::tempdir().unwrap();
+    let input = dir.path().join("missing.pptx");
+    let out = dir.path().join("strict");
+    write_deck(
+        &input,
+        page(
+            "sld",
+            "",
+            "",
+            &placeholder(
+                1,
+                "title",
+                &transform(0, 0, 100, 100),
+                r#"<p:txBody><a:bodyPr/><a:p><a:r><a:rPr><a:ea typeface="Pptx2img Metrics Test"/></a:rPr><a:t>未</a:t></a:r></a:p></p:txBody>"#,
+            ),
+        ),
+        vec![],
+    );
+    let output = run(&input, &out, true);
+    assert_eq!(output.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("U+672A"));
+    assert!(!out.exists());
+}
