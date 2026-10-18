@@ -222,3 +222,56 @@ fn thin_line_arrow_sizes_keep_visible_direction_without_widening_the_line() {
         }
     }
 }
+
+#[test]
+fn bent_connector_rotation_after_flip_keeps_saved_bend_and_end_direction() {
+    // ECMA preset: (l,t)→(r,t)→(r,b)。水平反転後に270度回転する。
+    let (_, pixels) = render("bentConnector2", "", r#"rot="16200000" flipH="1""#);
+    assert_eq!(rgb(&pixels, 20, 50), (0, 0, 0));
+    assert_eq!(rgb(&pixels, 50, 79), (0, 0, 0));
+    assert_eq!(rgb(&pixels, 50, 20), (255, 255, 255));
+    assert_eq!(rgb(&pixels, 79, 50), (255, 255, 255));
+    let (_, arrow) = render(
+        "bentConnector2",
+        r#"<a:tailEnd type="triangle"/>"#,
+        r#"rot="16200000" flipH="1""#,
+    );
+    assert_eq!(rgb(&pixels, 75, 77), (255, 255, 255));
+    assert!(rgb(&arrow, 75, 77).0 < 255);
+}
+
+#[test]
+fn attached_connector_keeps_saved_pixels_and_reports_targeted_routing_limit() {
+    let d = tempfile::tempdir().unwrap();
+    let input = d.path().join("attached.pptx");
+    let mut outputs = Vec::new();
+    for attached in [false, true] {
+        let links = if attached {
+            r#"<a:stCxn id="10" idx="2"/><a:endCxn id="11" idx="1"/>"#
+        } else {
+            ""
+        };
+        let shape = format!(
+            r#"<p:cxnSp><p:nvCxnSpPr><p:cNvPr id="7" name="接続線"/><p:cNvCxnSpPr>{links}</p:cNvCxnSpPr></p:nvCxnSpPr><p:spPr>{}<a:prstGeom prst="bentConnector2"/><a:ln w="19050"><a:solidFill><a:srgbClr val="000000"/></a:solidFill></a:ln></p:spPr></p:cxnSp>"#,
+            transform(20, 20, 60, 60)
+        );
+        write_deck(&input, page("sld", "", "", &shape), vec![]);
+        let out = d.path().join(if attached { "attached" } else { "free" });
+        check(run(&input, &out, false));
+        outputs.push(image(&out));
+        let manifest: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(out.join("manifest.json")).unwrap()).unwrap();
+        let records: Vec<_> = manifest["slides"][0]["diagnostics"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|d| d["message"].as_str().unwrap().contains("経路の再計算"))
+            .collect();
+        assert_eq!(records.len(), usize::from(attached));
+        if attached {
+            assert_eq!(records[0]["code"], "unsupported");
+            assert_eq!(records[0]["object_id"], "7");
+        }
+    }
+    assert_eq!(outputs[0].data(), outputs[1].data());
+}
