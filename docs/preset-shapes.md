@@ -36,3 +36,34 @@ approximation診断を残す。custDashなどは未対応警告を維持する�
 自作資料: `python tests/visual/make_lines.py /tmp/lines.pptx`。
 LibreOffice比較3ページは既存閾値内（MAE 0.004429、0.005158、0.001855、
 差分率0.764%、2.025%、0.827%）。これは接合部の完全一致を意味しない。
+
+## テーマ線参照
+
+`lnRef` の1始まりの `idx` でテーマの `lnStyleLst` を選び、`phClr` を
+参照側の色へ置き換える。テーマ線、継承した線、最も近い直接指定の順で重ねる。
+幅・cap・複合線属性、塗り、破線、接合、始端・終端を個別に解決する。
+直接指定した `noFill`、端部の `type="none"`、`prstDash="solid"` は親の指定を解除する。
+端部の部分指定では未指定の属性を保持する。`idx=0` は線なしとし、直接指定は優先する。
+未解決の参照番号、custDash、複合線などの未対応警告を維持する。
+
+根拠は [LineReference](https://learn.microsoft.com/en-us/dotnet/api/documentformat.openxml.drawing.linereference?view=openxml-3.0.1)、
+[LineStyleList](https://learn.microsoft.com/en-us/dotnet/api/documentformat.openxml.drawing.linestylelist?view=openxml-3.0.1)、
+[Outline](https://learn.microsoft.com/en-us/dotnet/api/documentformat.openxml.drawing.outline?view=openxml-3.0.1)。
+仕様と自作回帰資料から独立に実装した。
+
+```sh
+python tests/visual/make_theme_lines.py /tmp/theme-lines.pptx
+python tests/visual/compare.py --fixture /tmp/theme-lines.pptx \
+  --binary target/release/pptx2img --out /tmp/theme-lines-comparison --width 1600
+```
+
+自作資料はテーマ指定、同等の直接指定、幅0.25ptの部分上書きの3ページ。
+回帰ではテーマ指定と直接指定の全画素一致、上書き・解除・未対応診断を検証する。
+線端の接合は従来どおり近似であり、細い線の端部サイズ等には参照との差が残り得る。
+フォント代替の見た目の残差は別の [Issue #25](https://github.com/stellar-aiz/pptx2img/issues/25) で追跡する。
+
+細線の端部は、自作0.25/0.5/0.75/1/1.5/2/3/4/6ptとsm/med/lgの27組合せを
+LibreOffice 26.2.5.2で実測した。2pt以下では端部寸法が一定となり、2pt超は
+線幅に比例したため、端部の基準幅をmax(線幅, 2pt)で近似する。線本体は太くしない。
+この近似は診断に明記し、PowerPoint完全互換とは扱わない。
+再現: `python tests/visual/make_arrow_sizes.py /tmp/arrow-sizes.pptx`。

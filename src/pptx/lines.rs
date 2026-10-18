@@ -1,6 +1,138 @@
 //! DrawingML の線種・端部を SVG の線属性とマーカーへ変換する。
 use super::*;
+use std::collections::BTreeMap;
 
+/// 線の継承用の小さなXML表現。部品ごとのnamespace prefixに依存しない。
+#[derive(Clone)]
+pub(super) struct Element {
+    name: String,
+    attrs: BTreeMap<String, String>,
+    children: Vec<Element>,
+}
+impl Element {
+    pub(super) fn from(node: Node<'_, '_>) -> Self {
+        Self {
+            name: node.tag_name().name().into(),
+            attrs: node
+                .attributes()
+                .map(|a| (a.name().into(), a.value().into()))
+                .collect(),
+            children: node
+                .children()
+                .filter(|n| n.is_element())
+                .map(Self::from)
+                .collect(),
+        }
+    }
+    fn group(&self) -> &str {
+        match self.name.as_str() {
+            "noFill" | "solidFill" | "gradFill" | "pattFill" | "blipFill" | "grpFill" => "fill",
+            "prstDash" | "custDash" => "dash",
+            "round" | "bevel" | "miter" => "join",
+            name => name,
+        }
+    }
+    fn overlay(&mut self, other: Self) {
+        self.attrs.extend(other.attrs);
+        for child in other.children {
+            if let Some(index) = self
+                .children
+                .iter()
+                .position(|c| c.group() == child.group())
+            {
+                if matches!(child.name.as_str(), "headEnd" | "tailEnd") {
+                    self.children[index].attrs.extend(child.attrs);
+                } else {
+                    self.children[index] = child;
+                }
+            } else {
+                self.children.push(child);
+            }
+        }
+    }
+    fn placeholder(&mut self, color: &Self) {
+        if self.name == "schemeClr" && self.attrs.get("val").is_some_and(|v| v == "phClr") {
+            let transforms = std::mem::take(&mut self.children);
+            *self = color.clone();
+            self.children.extend(transforms);
+        } else {
+            for child in &mut self.children {
+                child.placeholder(color);
+            }
+        }
+    }
+    fn xml(&self) -> String {
+        let attrs = self
+            .attrs
+            .iter()
+            .map(|(k, v)| format!(" {k}=\"{}\"", escape(v)))
+            .collect::<String>();
+        format!(
+            "<a:{}{attrs}>{}</a:{}>",
+            self.name,
+            self.children.iter().map(Self::xml).collect::<String>(),
+            self.name
+        )
+    }
+}
+
+pub(super) fn resolve(
+    direct: &[Node<'_, '_>],
+    reference: Option<Node<'_, '_>>,
+    theme: &Theme,
+    warnings: &mut Warnings,
+) -> Option<String> {
+    let mut resolved = None;
+    if let Some(reference) = reference {
+        let index = reference
+            .attribute("idx")
+            .and_then(|s| s.parse::<usize>().ok());
+        if index == Some(0) {
+            resolved = Some(Element {
+                name: "ln".into(),
+                attrs: BTreeMap::new(),
+                children: vec![Element {
+                    name: "noFill".into(),
+                    attrs: BTreeMap::new(),
+                    children: vec![],
+                }],
+            });
+        } else if let Some(mut line) = index.and_then(|i| theme.line_style(i)) {
+            let color = reference
+                .children()
+                .find(|n| n.is_element())
+                .map(Element::from)
+                .unwrap_or_else(|| {
+                    warn(warnings, "テーマ線の参照色がないため黒で近似します");
+                    Element {
+                        name: "srgbClr".into(),
+                        attrs: BTreeMap::from([("val".into(), "000000".into())]),
+                        children: vec![],
+                    }
+                });
+            line.placeholder(&color);
+            resolved = Some(line);
+        } else {
+            warn(
+                warnings,
+                format!(
+                    "テーマ線参照 {} を解決できません",
+                    reference.attribute("idx").unwrap_or("未指定")
+                ),
+            );
+        }
+    }
+    // 遠い親から適用し、最も近い直接指定を最後に重ねる。
+    for node in direct.iter().rev() {
+        let line = Element::from(*node);
+        if let Some(current) = &mut resolved {
+            current.overlay(line);
+        } else {
+            resolved = Some(line);
+        }
+    }
+    resolved.map(|line| format!("<root xmlns:a=\"{A}\">{}</root>", line.xml()))
+}
 pub(super) fn decorations(
     line: Node<'_, '_>,
     stroke: &str,
@@ -8,6 +140,11 @@ pub(super) fn decorations(
     svg: &mut String,
     warnings: &mut Warnings,
 ) -> String {
+    for attr in line.attributes() {
+        if !matches!(attr.name(), "w" | "cap" | "cmpd" | "algn") {
+            warn(warnings, format!("未対応の線属性: {}", attr.name()));
+        }
+    }
     let cap = match line.attribute("cap").unwrap_or("flat") {
         "flat" => "butt",
         "rnd" => "round",
@@ -71,7 +208,7 @@ pub(super) fn decorations(
         // stellar:debt(scope) 矢印と線本体の接合は重ね描き。upgrade: 端部形状に応じた線の短縮
         warnings.push(
             Code::Approximation,
-            "矢印端は近似です。線本体との接合部は重ね描きします",
+            "矢印端は近似です。2pt未満の線では端部の基準幅を2ptとし、接合部は重ね描きします",
         );
     }
     for (tag, side) in [("headEnd", "start"), ("tailEnd", "end")] {
@@ -87,7 +224,10 @@ pub(super) fn decorations(
             "lg" => 5.0,
             _ => 3.0,
         };
-        let (length, height) = (dimension("len"), dimension("w"));
+        // 自作0.25〜6pt系列とLibreOffice比較では、端部の基準幅は2pt未満で一定。
+        // 線本体の幅は変えず、端部の縦横寸法だけを近似する。
+        let end_scale = (8.0 / 3.0 / width).max(1.0);
+        let (length, height) = (dimension("len") * end_scale, dimension("w") * end_scale);
         let middle = height / 2.0;
         let drawing = match kind {
             "triangle" => format!("<path d=\"M0 0 L{length} {middle} L0 {height} Z\"/>"),
@@ -129,4 +269,35 @@ pub(super) fn decorations(
         warn(warnings, "内側配置の線は中央配置で近似します");
     }
     attrs
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn nearer_line_overlays_parent_attributes_and_exclusive_groups() {
+        let source = format!(
+            r#"<root xmlns:d="{A}"><d:ln cap="rnd"><d:noFill/><d:prstDash val="solid"/><d:bevel/><d:headEnd w="lg"/></d:ln><d:ln w="19050"><d:solidFill><d:srgbClr val="FF0000"/></d:solidFill><d:custDash/><d:miter/><d:headEnd type="triangle"/></d:ln></root>"#
+        );
+        let doc = Document::parse(&source).unwrap();
+        let nodes: Vec<_> = doc
+            .root_element()
+            .children()
+            .filter(|n| n.is_element())
+            .collect();
+        let xml = resolve(&nodes, None, &Theme::default(), &mut Warnings::default()).unwrap();
+        let doc = Document::parse(&xml).unwrap();
+        let line = child(doc.root_element(), A, "ln").unwrap();
+        assert_eq!(line.attribute("w"), Some("19050"));
+        assert_eq!(line.attribute("cap"), Some("rnd"));
+        assert!(child(line, A, "noFill").is_some());
+        assert!(child(line, A, "solidFill").is_none());
+        assert!(child(line, A, "prstDash").is_some());
+        assert!(child(line, A, "custDash").is_none());
+        assert!(child(line, A, "bevel").is_some());
+        assert!(child(line, A, "miter").is_none());
+        let head = child(line, A, "headEnd").unwrap();
+        assert_eq!(head.attribute("type"), Some("triangle"));
+        assert_eq!(head.attribute("w"), Some("lg"));
+    }
 }
