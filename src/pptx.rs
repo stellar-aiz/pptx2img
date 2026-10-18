@@ -469,8 +469,15 @@ fn render_shape(
             );
         }
     }
-    if shape.chain.iter().any(|n| child(*n, P, "style").is_some()) {
-        warn(warnings, "テーマ由来の図形スタイルは未対応です");
+    let style_node = shape.chain.iter().find_map(|n| child(*n, P, "style"));
+    if style_node.is_some_and(|n| {
+        n.children()
+            .any(|c| c.is_element() && !c.has_tag_name((A, "lnRef")))
+    }) {
+        warn(
+            warnings,
+            "テーマ由来の塗り・効果・文字スタイル参照は未対応です",
+        );
     }
     if node.has_tag_name((P, "pic")) {
         render_image(node, parts, rels, w, h, svg, warnings)?;
@@ -485,7 +492,20 @@ fn render_shape(
             theme,
             warnings,
         );
-        let line = props_chain.iter().find_map(|n| child(*n, A, "ln"));
+        let direct_lines: Vec<_> = props_chain
+            .iter()
+            .filter_map(|n| child(*n, A, "ln"))
+            .collect();
+        let resolved_line = lines::resolve(
+            &direct_lines,
+            style_node.and_then(|n| child(n, A, "lnRef")),
+            theme,
+            warnings,
+        );
+        let line_doc = resolved_line.as_deref().map(Document::parse).transpose()?;
+        let line = line_doc
+            .as_ref()
+            .and_then(|doc| child(doc.root_element(), A, "ln"));
         let stroke = line
             .map(|n| fill_line(n, theme, warnings))
             .unwrap_or_else(|| "none".into());
