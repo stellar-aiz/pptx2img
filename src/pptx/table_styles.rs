@@ -152,14 +152,14 @@ fn regions<'a>(
     let first_col = enabled("firstCol");
     let last_col = enabled("lastCol");
     if enabled("bandRow") && !(first_row && row == 0 || last_row && row + 1 == rows) {
-        names.push(if (row - usize::from(first_row)) % 2 == 0 {
+        names.push(if (row - usize::from(first_row)).is_multiple_of(2) {
             "band1H"
         } else {
             "band2H"
         });
     }
     if enabled("bandCol") && !(first_col && col == 0 || last_col && col + 1 == cols) {
-        names.push(if (col - usize::from(first_col)) % 2 == 0 {
+        names.push(if (col - usize::from(first_col)).is_multiple_of(2) {
             "band1V"
         } else {
             "band2V"
@@ -255,12 +255,12 @@ pub(super) fn cell(
         if let Some(tx) = child(region, A, "tcTxStyle") {
             let mut inherited = Element::empty("rPr");
             for key in ["b", "i"] {
-                if let Some(v) = tx.attribute(key) {
-                    if v != "def" {
-                        inherited
-                            .attrs
-                            .push((key.into(), if v == "on" { "1" } else { "0" }.into()));
-                    }
+                if let Some(v) = tx.attribute(key)
+                    && v != "def"
+                {
+                    inherited
+                        .attrs
+                        .push((key.into(), if v == "on" { "1" } else { "0" }.into()));
                 }
             }
             if tx
