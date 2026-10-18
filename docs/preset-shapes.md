@@ -67,3 +67,19 @@ LibreOffice 26.2.5.2で実測した。2pt以下では端部寸法が一定とな
 線幅に比例したため、端部の基準幅をmax(線幅, 2pt)で近似する。線本体は太くしない。
 この近似は診断に明記し、PowerPoint完全互換とは扱わない。
 再現: `python tests/visual/make_arrow_sizes.py /tmp/arrow-sizes.pptx`。
+
+## 折れ線の保存経路と接続点
+
+ECMA-376 Part 1配布物のDrawingMLGeometriesにあるbentConnector2は
+左上→右上→右下の経路である。反転後に回転する順序は
+[OOXML Primer §5.7.3・§5.7.6](https://download.microsoft.com/download/e/1/4/e14fb96f-83b8-4a2a-84db-7fa8acbe061a/Office%20Open%20XML%20Part%203%20-%20Primer.pdf)
+に従う。水平反転＋270度回転は左上→左下→右下となり、線端は右向きになる。
+この保存経路と変換の画素回帰を設けている。
+
+stCxn/endCxnがある場合も保存された形状と変換を使用する。
+接続先図形の接続点に基づく経路再計算は未対応で、対象図形付きの診断を記録する。
+LibreOfficeは接続参照の有無に応じて経路を変更するため、比較結果と
+静的な仕様一致は区別する。経路差を隠すために変換順や比較閾値は変更しない。
+
+自作対照: `python tests/visual/make_connector_routing.py /tmp/routing.pptx`。
+接続参照の有無だけを切り替え、LibreOfficeの起点移動と当方の保存経路維持を確認する。
