@@ -4,6 +4,7 @@ use super::*;
 #[derive(Default)]
 pub(super) struct Theme {
     colors: HashMap<String, String>,
+    source: Option<String>,
     mapping: HashMap<String, String>,
     fonts: HashMap<String, String>,
     hanging: HashMap<String, [Option<bool>; 9]>,
@@ -84,6 +85,7 @@ impl Theme {
         if let Some(path) = theme_path {
             let doc = xml(parts, &path)?;
             result.read_theme(doc.root_element());
+            result.source = Some(doc.input_text().into());
         }
         Ok(result)
     }
@@ -151,6 +153,44 @@ impl Theme {
                         self.fonts.insert(format!("{key}-{suffix}"), value.into());
                     }
                 }
+            }
+        }
+    }
+    pub(super) fn fill_reference(
+        &self,
+        reference: Node<'_, '_>,
+        warnings: &mut Warnings,
+    ) -> String {
+        let index = number(reference, "idx", 0.0) as usize;
+        if index == 0 || index == 1000 {
+            return "none".into();
+        }
+        let Some(source) = &self.source else {
+            warn(warnings, "テーマ塗りを解決できません: テーマ部品なし");
+            return "none".into();
+        };
+        let doc = Document::parse(source).expect("読み込み済みテーマXML");
+        let (list, position) = if index > 1000 {
+            ("bgFillStyleLst", index - 1001)
+        } else {
+            ("fillStyleLst", index - 1)
+        };
+        let entry = doc
+            .descendants()
+            .find(|n| n.has_tag_name((A, list)))
+            .and_then(|n| n.children().filter(|n| n.is_element()).nth(position));
+        match entry {
+            Some(n) if n.has_tag_name((A, "noFill")) => "none".into(),
+            Some(n) if n.has_tag_name((A, "solidFill")) => {
+                let placeholder = color(reference, "#000000", self, warnings);
+                colors::resolve(n, "none", self, Some(&placeholder), warnings)
+            }
+            _ => {
+                warn(
+                    warnings,
+                    format!("テーマ塗り参照 {index} は未解決または単色以外です"),
+                );
+                "none".into()
             }
         }
     }
