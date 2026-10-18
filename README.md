@@ -680,3 +680,15 @@ face index、理由を保持し、診断の `part`・`object_id` とスライド
 `mapped_family_missing`（代替指定先不在）、`glyph_fallback`（字形不足）、
 `style_approximation`（太さ・斜体不一致）です。CLI は書体ごとにまとめて表示します。
 計測と描画は同一 face を使いますが、代替後も元書体との文字幅・行高差は残ります。
+
+### 本文の既定書式
+
+通常のテキストボックス（`txBox=1`）では `presentation/defaultTextStyle` を使います。
+プレースホルダーは従来どおりレイアウト・マスターの書式を継承し、図形内文字は
+`otherStyle` を参照します。run・段落・リストの明示値が既定値に優先します。
+空段落は `endParaRPr` のサイズとフォントメトリクスで行高を決めます。
+
+仕様の入口は [MicrosoftのdefaultTextStyle解説](https://learn.microsoft.com/en-us/office/open-xml/presentation/working-with-presentations)。
+`examples/text-inheritance.pptx` は自作の同一Arial・明示18pt／継承18ptの比較資料です。
+LibreOfficeでも両者は18ptです。縦位置・行送りの画像差は残り、既存比較閾値を
+超えるため完全互換とは扱いません。枠に収まらない文字は切り捨てず診断を残します。

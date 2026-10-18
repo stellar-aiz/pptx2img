@@ -517,6 +517,21 @@ pub(super) fn render<'a>(
         Some("body" | "obj" | "subTitle") => "bodyStyle",
         _ => "otherStyle",
     };
+    // 通常のテキストボックスはプレゼン既定を使用し、プレースホルダーの
+    // マスター書式を流用しない。図形内文字は従来のotherStyleを維持する。
+    let textbox = body
+        .parent()
+        .and_then(|n| child(n, P, "nvSpPr"))
+        .and_then(|n| child(n, P, "cNvSpPr"))
+        .and_then(|n| theme::bool_attr(n, "txBox"))
+        == Some(true);
+    let presentation = theme
+        .presentation
+        .as_deref()
+        .and_then(|s| Document::parse(s).ok());
+    let presentation_style = presentation
+        .as_ref()
+        .and_then(|doc| child(doc.root_element(), P, "defaultTextStyle"));
     let mut lines = Vec::new();
     let mut cursor = 0.0;
     for paragraph in body.children().filter(|n| n.has_tag_name((A, "p"))) {
@@ -538,7 +553,11 @@ pub(super) fn render<'a>(
                 paragraph_props.extend(child(list, A, "defPPr"));
             }
         }
-        if let Some(style) = source.master_style.and_then(|n| child(n, P, style_kind)) {
+        if !textbox && let Some(style) = source.master_style.and_then(|n| child(n, P, style_kind)) {
+            paragraph_props.extend(child(style, A, &level_tag));
+            paragraph_props.extend(child(style, A, "defPPr"));
+        }
+        if let Some(style) = presentation_style {
             paragraph_props.extend(child(style, A, &level_tag));
             paragraph_props.extend(child(style, A, "defPPr"));
         }
@@ -561,7 +580,15 @@ pub(super) fn render<'a>(
             if run.has_tag_name((A, "br")) {
                 all.extend(glyphs(
                     "\n",
-                    style(&defaults, false, theme, warnings),
+                    style(
+                        &child(run, A, "rPr")
+                            .into_iter()
+                            .chain(defaults.iter().copied())
+                            .collect::<Vec<_>>(),
+                        false,
+                        theme,
+                        warnings,
+                    ),
                     resolver,
                     warnings,
                 ));
@@ -614,12 +641,30 @@ pub(super) fn render<'a>(
                 "文字幅を超える負の字間は未対応のため送り幅を 0 に制限します",
             );
         }
-        let empty_size = style(&defaults, false, theme, warnings).size;
+        let end_defaults: Vec<_> = child(paragraph, A, "endParaRPr")
+            .into_iter()
+            .chain(defaults.iter().copied())
+            .collect();
+        let empty_style = style(&end_defaults, false, theme, warnings);
+        let has_empty_line = all.is_empty()
+            || all.first().is_some_and(|g| g.ch == '\n')
+            || all.last().is_some_and(|g| g.ch == '\n')
+            || all.windows(2).any(|p| p[0].ch == '\n' && p[1].ch == '\n');
+        let empty = if has_empty_line {
+            glyphs(" ", empty_style, resolver, warnings)
+        } else {
+            Vec::new()
+        };
+        let empty_ascent = empty.first().map(|g| g.ascent).unwrap_or(0.0);
+        let empty_height = empty
+            .first()
+            .map(|g| g.ascent + g.descent + g.leading)
+            .unwrap_or(0.0);
         let natural = all
             .iter()
             .map(|g| g.ascent + g.descent + g.leading)
             .fold(0.0, f64::max)
-            .max(empty_size);
+            .max(if all.is_empty() { empty_height } else { 0.0 });
         cursor += spacing(spacing_node("spcBef"), "spcBef", natural, 0.0);
         let compressed = options.punctuation_compression && wrap_enabled;
         if compressed && all.iter().any(|g| g.style.spacing != 0.0) {
@@ -638,11 +683,15 @@ pub(super) fn render<'a>(
             if width > available + 0.01 {
                 warnings.push(Code::TextOverflow, "文字がテキスト枠の横幅を超えています");
             }
-            let ascent = glyph_line.iter().map(|g| g.ascent).fold(0.0, f64::max);
+            let ascent = if glyph_line.is_empty() {
+                empty_ascent
+            } else {
+                glyph_line.iter().map(|g| g.ascent).fold(0.0, f64::max)
+            };
             let descent = glyph_line.iter().map(|g| g.descent).fold(0.0, f64::max);
             let leading = glyph_line.iter().map(|g| g.leading).fold(0.0, f64::max);
             let line_height = if glyph_line.is_empty() {
-                empty_size
+                empty_height
             } else {
                 ascent + descent + leading
             };
@@ -1187,5 +1236,92 @@ mod tests {
         assert_eq!(s.size, 16.0);
         assert!(!s.bold);
         assert_eq!(s.face, "Example");
+    }
+    fn inherited_fixture(paragraphs: &str, size: &str) -> (String, Warnings) {
+        let source = format!(
+            r#"<p:sp xmlns:p="{P}" xmlns:a="{A}"><p:nvSpPr><p:cNvSpPr txBox="1"/></p:nvSpPr><p:txBody><a:bodyPr lIns="0" rIns="0" tIns="0" bIns="0"/><a:lstStyle/>{paragraphs}</p:txBody><p:txStyles><p:otherStyle><a:lvl1pPr><a:defRPr sz="2400"/></a:lvl1pPr></p:otherStyle></p:txStyles></p:sp>"#
+        );
+        let doc = Document::parse(&source).unwrap();
+        let mut theme = Theme::default();
+        theme.presentation = Some(format!(
+            r#"<p:presentation xmlns:p="{P}" xmlns:a="{A}"><p:defaultTextStyle><a:lvl1pPr><a:defRPr sz="{size}"><a:latin typeface="Pptx2img Metrics Test"/></a:defRPr></a:lvl1pPr></p:defaultTextStyle></p:presentation>"#
+        ));
+        let mut fonts = Database::new();
+        fonts.load_font_data(include_bytes!("../../tests/fixtures/metrics.ttf").to_vec());
+        let mut svg = String::new();
+        let mut warnings = Warnings::default();
+        render(
+            TextBody {
+                body: child(doc.root_element(), P, "txBody").unwrap(),
+                inherited: vec![],
+                master_style: child(doc.root_element(), P, "txStyles"),
+                cell_props: None,
+            },
+            100.0,
+            90.0,
+            &theme,
+            &RenderOptions {
+                fonts: Resolver::new(&fonts, &HashMap::new()),
+                punctuation_compression: false,
+            },
+            &mut svg,
+            &mut warnings,
+        );
+        (svg, warnings)
+    }
+    #[test]
+    fn textbox_uses_presentation_defaults_and_matches_explicit_runs() {
+        let inherited =
+            inherited_fixture(r#"<a:p><a:r><a:t>AAAA AAAA AAAA</a:t></a:r></a:p>"#, "900").0;
+        let explicit = inherited_fixture(
+            r#"<a:p><a:r><a:rPr sz="900"/><a:t>AAAA AAAA AAAA</a:t></a:r></a:p>"#,
+            "1800",
+        )
+        .0;
+        assert_eq!(inherited, explicit);
+        assert!(inherited.contains("font-size=\"12\""));
+    }
+    #[test]
+    fn paragraph_positions_include_spacing_breaks_and_empty_end_style() {
+        for (line_spacing, expected) in [
+            (
+                r#"<a:spcPct val="150000"/>"#,
+                vec![13.6, 31.6, 58.666666666666664],
+            ),
+            (
+                r#"<a:spcPts val="1500"/>"#,
+                vec![21.6, 41.6, 62.666666666666664],
+            ),
+        ] {
+            let paragraph = format!(
+                r#"<a:p><a:pPr><a:lnSpc>{line_spacing}</a:lnSpc><a:spcBef><a:spcPts val="300"/></a:spcBef><a:spcAft><a:spcPts val="200"/></a:spcAft></a:pPr><a:r><a:t>A</a:t></a:r><a:br/><a:r><a:t>A</a:t></a:r></a:p><a:p><a:endParaRPr sz="1500"/></a:p>"#
+            );
+            let (svg, _) = inherited_fixture(&paragraph, "900");
+            let root = format!("<svg>{svg}</svg>");
+            let doc = Document::parse(&root).unwrap();
+            let positions: Vec<f64> = doc
+                .descendants()
+                .filter(|n| n.has_tag_name("text"))
+                .map(|n| n.attribute("y").unwrap().parse().unwrap())
+                .collect();
+            for (actual, expected) in positions.iter().zip(expected) {
+                assert!((actual - expected).abs() < 1e-5, "{positions:?}");
+            }
+            assert_eq!(positions.len(), 3);
+        }
+    }
+    #[test]
+    fn overflowing_text_keeps_diagnostic_without_clipping() {
+        let (svg, warnings) = inherited_fixture(
+            &format!("<a:p><a:r><a:t>{}</a:t></a:r></a:p>", "A ".repeat(100)),
+            "1800",
+        );
+        assert!(
+            warnings
+                .records
+                .iter()
+                .any(|d| d.code == Code::TextOverflow)
+        );
+        assert_eq!(svg.matches("A ").count(), 100);
     }
 }
