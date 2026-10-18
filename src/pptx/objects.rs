@@ -52,7 +52,24 @@ impl<'d> Renderer<'_, 'd> {
                     self.warnings,
                 )?,
                 "grpSp" => self.group(node, location, depth)?,
-                "graphicFrame" => self.table(node, location)?,
+                "graphicFrame" => {
+                    let ole = child(node, A, "graphic")
+                        .and_then(|n| child(n, A, "graphicData"))
+                        .and_then(|data| {
+                            child(data, P, "oleObj").or_else(|| {
+                                const MC: &str =
+                                    "http://schemas.openxmlformats.org/markup-compatibility/2006";
+                                child(data, MC, "AlternateContent")
+                                    .and_then(|n| child(n, MC, "Fallback"))
+                                    .and_then(|n| child(n, P, "oleObj"))
+                            })
+                        });
+                    if let Some(ole) = ole {
+                        self.ole(node, ole)?;
+                    } else {
+                        self.table(node, location)?;
+                    }
+                }
                 other => self.warnings.push(
                     Code::Omitted,
                     format!("未対応の要素を省略しました: {other}"),
@@ -89,6 +106,83 @@ impl<'d> Renderer<'_, 'd> {
             self.node(n, &format!("{location}/{i}"), depth + 1)?;
         }
         self.svg.push_str("</g></g>");
+        Ok(())
+    }
+    /// OLE 本体にはアクセスせず、同一パッケージの静止画だけを表示する。
+    fn ole(&mut self, frame: Node<'d, 'd>, ole: Node<'d, 'd>) -> Result<()> {
+        let kind = ole.attribute("progId").unwrap_or("種別不明");
+        let preview = child(ole, P, "pic");
+        let hidden = [frame, preview.unwrap_or(ole)].iter().any(|node| {
+            node.children()
+                .find_map(|n| child(n, P, "cNvPr"))
+                .and_then(|n| n.attribute("hidden"))
+                .is_some_and(|v| v == "1" || v == "true")
+        });
+        if hidden {
+            self.warnings.push(
+                Code::Omitted,
+                format!("OLE ({kind}) は hidden 指定のため非表示です。OLE は実行しません"),
+            );
+            return Ok(());
+        }
+        let reason = (|| {
+            let pic = preview.ok_or("プレビュー画像がありません")?;
+            let blip = pic
+                .descendants()
+                .find(|n| n.has_tag_name((A, "blip")))
+                .ok_or("プレビューの画像参照がありません")?;
+            let id = blip
+                .attribute((R, "embed"))
+                .ok_or("外部参照のプレビューは取得しません")?;
+            let rel = self.rels.get(id).ok_or("プレビューの関連がありません")?;
+            if rel.external {
+                return Err("外部参照のプレビューは取得しません");
+            }
+            if !rel.kind.ends_with("/image") {
+                return Err("プレビューの関連が画像ではありません");
+            }
+            let data = self
+                .parts
+                .get(&rel.target)
+                .ok_or("プレビュー画像の部品がありません")?;
+            if !data.starts_with(b"\x89PNG\r\n\x1a\n") && !data.starts_with(b"\xff\xd8\xff") {
+                return Err("プレビュー形式は PNG/JPEG 以外のため未対応です");
+            }
+            if imagesize::blob_size(data).is_err() {
+                return Err("プレビュー画像が不正です");
+            }
+            Ok(())
+        })();
+        if let Err(reason) = reason {
+            self.warnings.push(
+                Code::Omitted,
+                format!("OLE ({kind}) を省略しました: {reason}。OLE は実行しません"),
+            );
+            return Ok(());
+        }
+        let Some(t) = child(frame, P, "xfrm") else {
+            self.warnings.push(
+                Code::Omitted,
+                format!("OLE ({kind}) の表示座標がありません"),
+            );
+            return Ok(());
+        };
+        let (w, h) = transform(t, self.svg)?;
+        // pic の内側座標を重ねて適用しない。graphicFrame が表示領域を持つ。
+        render_image(
+            preview.unwrap(),
+            self.parts,
+            self.rels,
+            w,
+            h,
+            self.svg,
+            self.warnings,
+        )?;
+        self.svg.push_str("</g>");
+        self.warnings.push(
+            Code::Approximation,
+            format!("OLE ({kind}) は実行せず、内部 PNG/JPEG プレビューを静的描画しました"),
+        );
         Ok(())
     }
     fn table(&mut self, node: Node<'d, 'd>, location: &str) -> Result<()> {
