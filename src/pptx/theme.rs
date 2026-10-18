@@ -5,6 +5,7 @@ use super::*;
 pub(super) struct Theme {
     colors: HashMap<String, String>,
     source: Option<String>,
+    line_styles: Vec<lines::Element>,
     mapping: HashMap<String, String>,
     fonts: HashMap<String, String>,
     hanging: HashMap<String, [Option<bool>; 9]>,
@@ -111,7 +112,20 @@ impl Theme {
             })
             .unwrap_or(false)
     }
+    pub(super) fn line_style(&self, index: usize) -> Option<lines::Element> {
+        self.line_styles.get(index.checked_sub(1)?).cloned()
+    }
     fn read_theme(&mut self, root: Node<'_, '_>) {
+        self.line_styles = root
+            .descendants()
+            .find(|n| n.has_tag_name((A, "lnStyleLst")))
+            .map(|list| {
+                list.children()
+                    .filter(|n| n.has_tag_name((A, "ln")))
+                    .map(lines::Element::from)
+                    .collect()
+            })
+            .unwrap_or_default();
         if let Some(scheme) = root
             .descendants()
             .find(|n| n.has_tag_name((A, "clrScheme")))
