@@ -4,6 +4,7 @@ use base64::{Engine, engine::general_purpose::STANDARD};
 use roxmltree::{Document, Node};
 use std::{collections::HashMap, fs::File, io::Read, path::Path};
 
+mod colors;
 mod diagnostics;
 mod fonts;
 mod geometry;
@@ -202,31 +203,7 @@ pub fn read(path: &Path, options: &RenderOptions<'_>) -> Result<Deck> {
 }
 
 fn color(node: Node<'_, '_>, default: &str, theme: &Theme, warnings: &mut Warnings) -> String {
-    for c in node.children().filter(|n| n.is_element()) {
-        let resolved = match c.tag_name().name() {
-            "srgbClr" => c
-                .attribute("val")
-                .filter(|v| theme::valid_rgb(v))
-                .map(|s| format!("#{s}")),
-            "sysClr" => c
-                .attribute("lastClr")
-                .filter(|v| theme::valid_rgb(v))
-                .map(|s| format!("#{s}")),
-            "schemeClr" => c
-                .attribute("val")
-                .and_then(|v| theme.color(v))
-                .map(str::to_owned),
-            _ => None,
-        };
-        if let Some(rgb) = resolved {
-            if c.children().any(|n| n.is_element()) {
-                warn(warnings, "色変換（透明度・明度など）は未対応です");
-            }
-            return rgb;
-        }
-    }
-    warn(warnings, "色を解決できないため代替色で描画しました");
-    default.into()
+    colors::resolve(node, default, theme, None, warnings)
 }
 fn fill(node: Node<'_, '_>, default: &str, theme: &Theme, warnings: &mut Warnings) -> String {
     if child(node, A, "noFill").is_some() {
@@ -355,7 +332,7 @@ fn render_shape(
         .iter()
         .filter_map(|n| child(*n, P, "spPr"))
         .collect();
-    let Some(props) = props_chain.first().copied() else {
+    let Some(_) = props_chain.first() else {
         warnings.push(Code::Omitted, "図形属性がない要素を省略しました");
         return Ok(());
     };
@@ -482,26 +459,21 @@ fn render_shape(
     let style_node = shape.chain.iter().find_map(|n| child(*n, P, "style"));
     if style_node.is_some_and(|n| {
         n.children()
-            .any(|c| c.is_element() && !c.has_tag_name((A, "lnRef")))
+            .any(|c| c.is_element() && !matches!(c.tag_name().name(), "fillRef" | "lnRef"))
     }) {
-        warn(
-            warnings,
-            "テーマ由来の塗り・効果・文字スタイル参照は未対応です",
-        );
+        warn(warnings, "テーマ由来の効果・文字スタイル参照は未対応です");
     }
     if node.has_tag_name((P, "pic")) {
         render_image(node, parts, rels, w, h, svg, warnings)?;
     } else {
-        let fill = fill(
-            props_chain
-                .iter()
-                .copied()
-                .find(|n| layout::has_fill(*n))
-                .unwrap_or(props),
-            "none",
-            theme,
-            warnings,
-        );
+        let explicit_fill = props_chain.iter().copied().find(|n| layout::has_fill(*n));
+        let fill = if let Some(explicit) = explicit_fill {
+            fill(explicit, "none", theme, warnings)
+        } else if let Some(reference) = style_node.and_then(|n| child(n, A, "fillRef")) {
+            theme.fill_reference(reference, warnings)
+        } else {
+            "none".into()
+        };
         let direct_lines: Vec<_> = props_chain
             .iter()
             .filter_map(|n| child(*n, A, "ln"))
@@ -516,6 +488,7 @@ fn render_shape(
         let line = line_doc
             .as_ref()
             .and_then(|doc| child(doc.root_element(), A, "ln"));
+
         let stroke = line
             .map(|n| fill_line(n, theme, warnings))
             .unwrap_or_else(|| "none".into());
