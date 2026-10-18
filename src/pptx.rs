@@ -320,7 +320,7 @@ fn render_shape(
         .iter()
         .filter_map(|n| child(*n, P, "spPr"))
         .collect();
-    let Some(props) = props_chain.first().copied() else {
+    let Some(_) = props_chain.first() else {
         warnings.push(Code::Omitted, "図形属性がない要素を省略しました");
         return Ok(());
     };
