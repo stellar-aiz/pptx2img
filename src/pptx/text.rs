@@ -1,7 +1,10 @@
 //! フォントの公称 advance と行メトリクスによる横書き配置。
 //! 句読点のぶら下がりと固定行送りを解釈する。複雑な shaping などは未対応。
+mod bullets;
+use super::fonts::Resolver;
 use super::*;
-use resvg::usvg::fontdb::{Database, Family, Query, Style as FontStyle, Weight};
+#[cfg(test)]
+use resvg::usvg::fontdb::Database;
 use skrifa::raw::TableProvider;
 use skrifa::{
     FontRef, MetadataProvider,
@@ -86,43 +89,19 @@ fn measurement_size(css_px: f64) -> f64 {
     (hundredth_mm * 600.0 / 2540.0).round().max(1.0) * 96.0 / 600.0
 }
 
-fn glyphs(value: &str, mut style: Style, fonts: &Database, warnings: &mut Warnings) -> Vec<Glyph> {
-    let families = [if style.face == "sans-serif" {
-        Family::SansSerif
-    } else {
-        Family::Name(&style.face)
-    }];
-    let query = Query {
-        families: &families,
-        weight: if style.bold {
-            Weight::BOLD
-        } else {
-            Weight::NORMAL
-        },
-        style: if style.italic {
-            FontStyle::Italic
-        } else {
-            FontStyle::Normal
-        },
-        ..Default::default()
-    };
+fn glyphs(
+    value: &str,
+    mut style: Style,
+    resolver: &Resolver<'_>,
+    warnings: &mut Warnings,
+) -> Vec<Glyph> {
+    let fonts = resolver.database;
+    let requested = style.face.clone();
     let id = fonts
         .faces()
         .find(|f| format!("pptx2img-face-{}", f.id) == style.face)
         .map(|f| f.id)
-        .or_else(|| fonts.query(&query))
-        .or_else(|| {
-            warnings.push(
-                Code::FontSubstitution,
-                format!("指定フォントがないため代替します: {}", style.face),
-            );
-            fonts
-                .query(&Query {
-                    families: &[Family::SansSerif],
-                    ..query
-                })
-                .or_else(|| fonts.faces().next().map(|f| f.id))
-        });
+        .or_else(|| resolver.select(&style.face, value, style.bold, style.italic, warnings));
     if let Some(id) = id {
         style.face = format!("pptx2img-face-{id}");
         if let Some(Some(result)) = fonts.with_face_data(id, |data, index| {
@@ -162,24 +141,17 @@ fn glyphs(value: &str, mut style: Style, fonts: &Database, warnings: &mut Warnin
                     .map(|ch| {
                         let advance = map.map(ch).and_then(|id| gm.advance_width(id));
                         if advance.is_none() && ch != '\n' {
-                            let mut database = std::sync::Arc::new(fonts.clone());
-                            let fallback = resvg::usvg::FontResolver::default_fallback_selector()(
+                            let fallback = resolver.fallback(
+                                &requested,
                                 ch,
-                                &[id],
-                                &mut database,
+                                style.bold,
+                                style.italic,
+                                warnings,
                             );
                             if let Some(fallback) = fallback {
-                                let name = fonts
-                                    .face(fallback)
-                                    .map(|f| f.post_script_name.as_str())
-                                    .unwrap_or("");
-                                warnings.push(
-                                    Code::FontSubstitution,
-                                    format!("文字 U+{:04X} を {name} で代替します", ch as u32),
-                                );
                                 let mut replacement = style.clone();
                                 replacement.face = format!("pptx2img-face-{fallback}");
-                                return glyphs(&ch.to_string(), replacement, fonts, warnings)
+                                return glyphs(&ch.to_string(), replacement, resolver, warnings)
                                     .remove(0);
                             }
                             warnings.push(
@@ -483,6 +455,71 @@ impl<'a> From<Node<'a, 'a>> for TextBody<'a> {
     }
 }
 
+#[derive(Clone, Copy, Debug)]
+pub(super) struct TextExtent {
+    pub height: f64,
+    pub offset_y: f64,
+}
+#[derive(Clone, Copy, Debug)]
+struct AutoFit {
+    scale: f64,
+    reduction: f64,
+    expand: bool,
+}
+fn auto_fit(nodes: &[Node<'_, '_>], warnings: &mut Warnings) -> AutoFit {
+    let mode = nodes.iter().find_map(|n| {
+        n.children().find(|c| {
+            c.tag_name().namespace() == Some(A)
+                && matches!(
+                    c.tag_name().name(),
+                    "noAutofit" | "normAutofit" | "spAutoFit"
+                )
+        })
+    });
+    let mut result = AutoFit {
+        scale: 1.0,
+        reduction: 0.0,
+        expand: false,
+    };
+    if let Some(mode) = mode {
+        match mode.tag_name().name() {
+            "normAutofit" => {
+                let percentage =
+                    |key: &str, default: f64, maximum: f64, warnings: &mut Warnings| {
+                        let Some(raw) = mode.attribute(key) else {
+                            return default;
+                        };
+                        let value = if let Some(percent) = raw.strip_suffix('%') {
+                            percent.parse::<f64>().ok().map(|n| n / 100.0)
+                        } else {
+                            raw.parse::<f64>().ok().map(|n| n / 100000.0)
+                        };
+                        match value.filter(|n| {
+                            n.is_finite()
+                                && *n >= 0.0
+                                && *n <= maximum
+                                && (key != "fontScale" || *n > 0.0)
+                        }) {
+                            Some(value) => value,
+                            None => {
+                                warn(
+                                    warnings,
+                                    format!("不正な自動調整値 {key}={raw} を既定値で近似します"),
+                                );
+                                default
+                            }
+                        }
+                    };
+                result.scale = percentage("fontScale", 1.0, 1.0, warnings);
+                result.reduction = percentage("lnSpcReduction", 0.0, 1.0, warnings);
+            }
+            "spAutoFit" => result.expand = true,
+            _ => {}
+        }
+    }
+    result
+}
+
 pub(super) fn render<'a>(
     source: impl Into<TextBody<'a>>,
     w: f64,
@@ -491,7 +528,7 @@ pub(super) fn render<'a>(
     options: &RenderOptions<'_>,
     svg: &mut String,
     warnings: &mut Warnings,
-) {
+) -> TextExtent {
     let source = source.into();
     let body = source.body;
     let bodies: Vec<_> = std::iter::once(body)
@@ -499,7 +536,7 @@ pub(super) fn render<'a>(
         .collect();
     warnings.push(
         Code::Approximation,
-        "文字組みは近似です。複雑な shaping・自動縮小・完全な Office 互換は未対応です",
+        "文字組みは近似です。複雑な shaping・完全な Office 互換は未対応です",
     );
     if options.punctuation_compression {
         warn(
@@ -507,6 +544,7 @@ pub(super) fn render<'a>(
             "自動句読点圧縮は実験的な描画方針です。PPTX 内の指定ではありません",
         );
     }
+    let resolver = &options.fonts;
     let body_props: Vec<_> = bodies
         .iter()
         .filter_map(|n| child(*n, A, "bodyPr"))
@@ -514,12 +552,12 @@ pub(super) fn render<'a>(
     if attr(&body_props, "vert").is_some_and(|s| s != "horz") {
         warn(warnings, "縦書きは未対応です");
     }
-    if body_props.iter().any(|n| {
-        n.children()
-            .any(|c| matches!(c.tag_name().name(), "normAutofit" | "spAutoFit"))
-    }) {
-        warn(warnings, "テキストの自動縮小・枠の自動拡張は未対応です");
-    }
+    let autofit = auto_fit(&body_props, warnings);
+    let text_style = |nodes: &[Node<'_, '_>], east: bool, warnings: &mut Warnings| {
+        let mut style = style(nodes, east, theme, warnings);
+        style.size *= autofit.scale;
+        style
+    };
     let margin = |key, cell_key, default| {
         source
             .cell_props
@@ -545,6 +583,22 @@ pub(super) fn render<'a>(
         Some("body" | "obj" | "subTitle") => "bodyStyle",
         _ => "otherStyle",
     };
+    // 通常のテキストボックスはプレゼン既定を使用し、プレースホルダーの
+    // マスター書式を流用しない。図形内文字は従来のotherStyleを維持する。
+    let textbox = body
+        .parent()
+        .and_then(|n| child(n, P, "nvSpPr"))
+        .and_then(|n| child(n, P, "cNvSpPr"))
+        .and_then(|n| theme::bool_attr(n, "txBox"))
+        == Some(true);
+    let presentation = theme
+        .presentation
+        .as_deref()
+        .and_then(|s| Document::parse(s).ok());
+    let presentation_style = presentation
+        .as_ref()
+        .and_then(|doc| child(doc.root_element(), P, "defaultTextStyle"));
+    let mut counters = bullets::Counters::default();
     let mut lines = Vec::new();
     let mut cursor = 0.0;
     for paragraph in body.children().filter(|n| n.has_tag_name((A, "p"))) {
@@ -566,7 +620,11 @@ pub(super) fn render<'a>(
                 paragraph_props.extend(child(list, A, "defPPr"));
             }
         }
-        if let Some(style) = source.master_style.and_then(|n| child(n, P, style_kind)) {
+        if !textbox && let Some(style) = source.master_style.and_then(|n| child(n, P, style_kind)) {
+            paragraph_props.extend(child(style, A, &level_tag));
+            paragraph_props.extend(child(style, A, "defPPr"));
+        }
+        if let Some(style) = presentation_style {
             paragraph_props.extend(child(style, A, &level_tag));
             paragraph_props.extend(child(style, A, "defPPr"));
         }
@@ -589,8 +647,15 @@ pub(super) fn render<'a>(
             if run.has_tag_name((A, "br")) {
                 all.extend(glyphs(
                     "\n",
-                    style(&defaults, false, theme, warnings),
-                    options.fonts,
+                    text_style(
+                        &child(run, A, "rPr")
+                            .into_iter()
+                            .chain(defaults.iter().copied())
+                            .collect::<Vec<_>>(),
+                        false,
+                        warnings,
+                    ),
+                    resolver,
                     warnings,
                 ));
             } else if run.has_tag_name((A, "r")) || run.has_tag_name((A, "fld")) {
@@ -607,8 +672,8 @@ pub(super) fn render<'a>(
                     if last.is_some_and(|v| v != east) {
                         all.extend(glyphs(
                             &segment,
-                            style(&nodes, last.unwrap(), theme, warnings),
-                            options.fonts,
+                            text_style(&nodes, last.unwrap(), warnings),
+                            resolver,
                             warnings,
                         ));
                         segment.clear();
@@ -619,20 +684,54 @@ pub(super) fn render<'a>(
                 if !segment.is_empty() {
                     all.extend(glyphs(
                         &segment,
-                        style(&nodes, last.unwrap_or(false), theme, warnings),
-                        options.fonts,
+                        text_style(&nodes, last.unwrap_or(false), warnings),
+                        resolver,
                         warnings,
                     ));
                 }
             }
         }
-        if paragraph_props.iter().any(|n| {
-            n.children()
-                .any(|n| matches!(n.tag_name().name(), "buChar" | "buAutoNum"))
-                || n.attribute("marL").is_some()
-                || n.attribute("indent").is_some()
-        }) {
-            warn(warnings, "箇条書き・段落インデントは未対応です");
+        let marker = counters.label(&paragraph_props, level, warnings);
+        let marker_glyphs = marker
+            .as_deref()
+            .map(|text| {
+                let first_run = paragraph
+                    .children()
+                    .find(|n| n.has_tag_name((A, "r")) || n.has_tag_name((A, "fld")));
+                let marker_nodes: Vec<_> = first_run
+                    .and_then(|n| child(n, A, "rPr"))
+                    .into_iter()
+                    .chain(defaults.iter().copied())
+                    .collect();
+                let marker_style = text_style(
+                    &marker_nodes,
+                    all.first().is_some_and(|g| is_east_asian(g.ch)),
+                    warnings,
+                );
+                let marker_style = bullets::style(
+                    &paragraph_props,
+                    marker_style,
+                    autofit.scale,
+                    theme,
+                    warnings,
+                );
+                glyphs(text, marker_style, resolver, warnings)
+            })
+            .unwrap_or_default();
+        let margin_left = prop_number(&paragraph_props, "marL", 0.0) / EMU;
+        let margin_right = prop_number(&paragraph_props, "marR", 0.0) / EMU;
+        let indent = prop_number(&paragraph_props, "indent", 0.0) / EMU;
+        let paragraph_left = left + margin_left;
+        let paragraph_width = (available - margin_left - margin_right).max(1.0);
+        let first_indent = if marker.is_some() { 0.0 } else { indent };
+        if marker.is_some() && text_width(&marker_glyphs) > -indent && !marker_glyphs.is_empty() {
+            warn(
+                warnings,
+                "箇条書き記号と本文の間隔が不足しています。marL/indentを確認してください",
+            );
+        }
+        if marker.is_some() && attr(&paragraph_props, "algn").is_some_and(|a| a != "l") {
+            warn(warnings, "左揃え以外の箇条書き記号位置は近似です");
         }
         if all.windows(2).any(|pair| {
             pair[0].style == pair[1].style && pair[0].advance + pair[0].style.spacing < 0.0
@@ -642,12 +741,30 @@ pub(super) fn render<'a>(
                 "文字幅を超える負の字間は未対応のため送り幅を 0 に制限します",
             );
         }
-        let empty_size = style(&defaults, false, theme, warnings).size;
+        let end_defaults: Vec<_> = child(paragraph, A, "endParaRPr")
+            .into_iter()
+            .chain(defaults.iter().copied())
+            .collect();
+        let empty_style = text_style(&end_defaults, false, warnings);
+        let has_empty_line = all.is_empty()
+            || all.first().is_some_and(|g| g.ch == '\n')
+            || all.last().is_some_and(|g| g.ch == '\n')
+            || all.windows(2).any(|p| p[0].ch == '\n' && p[1].ch == '\n');
+        let empty = if has_empty_line {
+            glyphs(" ", empty_style, resolver, warnings)
+        } else {
+            Vec::new()
+        };
+        let empty_ascent = empty.first().map(|g| g.ascent).unwrap_or(0.0);
+        let empty_height = empty
+            .first()
+            .map(|g| g.ascent + g.descent + g.leading)
+            .unwrap_or(0.0);
         let natural = all
             .iter()
             .map(|g| g.ascent + g.descent + g.leading)
             .fold(0.0, f64::max)
-            .max(empty_size);
+            .max(if all.is_empty() { empty_height } else { 0.0 });
         cursor += spacing(spacing_node("spcBef"), "spcBef", natural, 0.0);
         let compressed = options.punctuation_compression && wrap_enabled;
         if compressed && all.iter().any(|g| g.style.spacing != 0.0) {
@@ -656,50 +773,126 @@ pub(super) fn render<'a>(
                 "自動句読点圧縮と明示字間の併用は未対応のため明示字間を優先します",
             );
         }
-        let wrapped = if compressed && all.iter().all(|g| g.style.spacing == 0.0) {
-            compress_wrap(&all, available, hanging)
-        } else {
-            wrap(&all, available, wrap_enabled, hanging)
+        let wrap_lines = |glyphs: &[Glyph], width| {
+            if compressed && all.iter().all(|g| g.style.spacing == 0.0) {
+                compress_wrap(glyphs, width, hanging)
+            } else {
+                wrap(glyphs, width, wrap_enabled, hanging)
+            }
         };
-        for glyph_line in wrapped {
-            let width = layout_width(&glyph_line, available, hanging);
-            if width > available + 0.01 {
+        let mut wrapped = wrap_lines(&all, (paragraph_width - first_indent).max(1.0));
+        if first_indent != 0.0 && wrapped.len() > 1 {
+            let first = wrapped.remove(0);
+            let consumed = first.len();
+            let rest = if all.get(consumed).is_some_and(|g| g.ch == '\n') {
+                consumed + 1
+            } else {
+                consumed
+            };
+            wrapped = std::iter::once(first)
+                .chain(wrap_lines(&all[rest..], paragraph_width))
+                .collect();
+        }
+        for (line_index, glyph_line) in wrapped.into_iter().enumerate() {
+            let line_indent = if line_index == 0 { first_indent } else { 0.0 };
+            let line_available = paragraph_width - line_indent;
+            let width = layout_width(&glyph_line, line_available, hanging);
+            if width > line_available + 0.01 {
                 warnings.push(Code::TextOverflow, "文字がテキスト枠の横幅を超えています");
             }
-            let ascent = glyph_line.iter().map(|g| g.ascent).fold(0.0, f64::max);
-            let descent = glyph_line.iter().map(|g| g.descent).fold(0.0, f64::max);
-            let leading = glyph_line.iter().map(|g| g.leading).fold(0.0, f64::max);
-            let line_height = if glyph_line.is_empty() {
-                empty_size
-            } else {
-                ascent + descent + leading
-            };
-            let advance = spacing(spacing_node("lnSpc"), "lnSpc", line_height, line_height);
+            let metrics = glyph_line
+                .iter()
+                .chain(marker_glyphs.iter().filter(|_| line_index == 0));
+            let ascent = metrics.clone().map(|g| g.ascent).fold(
+                if glyph_line.is_empty() {
+                    empty_ascent
+                } else {
+                    0.0
+                },
+                f64::max,
+            );
+            let descent = metrics.clone().map(|g| g.descent).fold(0.0, f64::max);
+            let leading = metrics.map(|g| g.leading).fold(0.0, f64::max);
+            let line_height =
+                if glyph_line.is_empty() && (line_index != 0 || marker_glyphs.is_empty()) {
+                    empty_height
+                } else {
+                    ascent + descent + leading
+                };
+            let fixed = spacing_node("lnSpc")
+                .and_then(|n| child(n, A, "lnSpc"))
+                .and_then(|n| child(n, A, "spcPts"))
+                .is_some();
+            let advance = (spacing(spacing_node("lnSpc"), "lnSpc", line_height, line_height)
+                - if fixed {
+                    0.0
+                } else {
+                    line_height * autofit.reduction
+                })
+            .max(0.0);
             let x = match attr(&paragraph_props, "algn") {
-                Some("ctr") => left + (available - width) / 2.0,
-                Some("r") => left + available - width,
-                _ => left,
+                Some("ctr") => paragraph_left + line_indent + (line_available - width) / 2.0,
+                Some("r") => paragraph_left + line_indent + line_available - width,
+                _ => paragraph_left + line_indent,
             };
+            let baseline =
+                cursor + baseline_offset(spacing_node("lnSpc"), ascent, line_height, advance);
+            if line_index == 0 && !marker_glyphs.is_empty() {
+                lines.push(Line {
+                    glyphs: marker_glyphs.clone(),
+                    x: paragraph_left + indent,
+                    baseline,
+                });
+            }
             lines.push(Line {
                 glyphs: glyph_line,
                 x,
-                baseline: cursor
-                    + baseline_offset(spacing_node("lnSpc"), ascent, line_height, advance),
+                baseline,
             });
             cursor += advance;
         }
         cursor += spacing(spacing_node("spcAft"), "spcAft", natural, 0.0);
     }
-    if cursor > h - top - bottom + 0.01 {
-        warnings.push(Code::TextOverflow, "文字がテキスト枠の高さを超えています");
-    }
-    let vertical = match source
+    let content_height = lines.iter().fold(cursor, |bottom, line| {
+        bottom.max(line.baseline + line.glyphs.iter().map(|g| g.descent).fold(0.0, f64::max))
+    });
+    let anchor = source
         .cell_props
         .and_then(|n| n.attribute("anchor"))
-        .or_else(|| attr(&body_props, "anchor"))
-    {
-        Some("ctr") => top + (h - top - bottom - cursor) / 2.0,
-        Some("b") => h - bottom - cursor,
+        .or_else(|| attr(&body_props, "anchor"));
+    let can_expand = autofit.expand
+        && source.cell_props.is_none()
+        && attr(&body_props, "vert").is_none_or(|s| s == "horz");
+    if autofit.expand && !can_expand {
+        warn(warnings, "表セル・縦書きの自動枠拡張は未対応です");
+    }
+    if autofit.expand && !wrap_enabled {
+        warn(
+            warnings,
+            "折り返しなしの横方向自動枠拡張は未対応です。高さだけ拡張します",
+        );
+    }
+    let expanded_height = if can_expand {
+        h.max(top + content_height + bottom)
+    } else {
+        h
+    };
+    let extent = TextExtent {
+        height: expanded_height,
+        offset_y: -(expanded_height - h)
+            * match anchor {
+                Some("ctr") => 0.5,
+                Some("b") => 1.0,
+                _ => 0.0,
+            },
+    };
+    let h = expanded_height;
+    if content_height > h - top - bottom + 0.01 {
+        warnings.push(Code::TextOverflow, "文字がテキスト枠の高さを超えています");
+    }
+    let vertical = match anchor {
+        Some("ctr") => top + (h - top - bottom - content_height) / 2.0,
+        Some("b") => h - bottom - content_height,
         Some("t") | None => top,
         _ => {
             warn(warnings, "均等割付の縦配置は未対応です");
@@ -743,7 +936,9 @@ pub(super) fn render<'a>(
         }
         svg.push_str("</text>");
     }
+    extent
 }
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -847,13 +1042,23 @@ mod tests {
             style.face = "Pptx2img Metrics Test".into();
             style.size = size_pt * 4.0 / 3.0;
             let mut warnings = Warnings::default();
-            let measured = glyphs("あA \u{301}", style.clone(), &fonts, &mut warnings);
+            let measured = glyphs(
+                "あA \u{301}",
+                style.clone(),
+                &Resolver::new(&fonts, &HashMap::new()),
+                &mut warnings,
+            );
             assert!(warnings.is_empty(), "{warnings:?}");
             for (glyph, expected) in measured.iter().zip([full, full / 2.0, full / 4.0, 0.0]) {
                 assert!((glyph.advance - expected).abs() < 1e-10);
                 assert_eq!(glyph.style.size, style.size);
             }
-            let missing = glyphs("未", style.clone(), &fonts, &mut warnings);
+            let missing = glyphs(
+                "未",
+                style.clone(),
+                &Resolver::new(&fonts, &HashMap::new()),
+                &mut warnings,
+            );
             assert_eq!(missing[0].advance, style.size);
             assert!(warnings.iter().any(|w| w.contains("U+672A")));
         }
@@ -970,7 +1175,7 @@ mod tests {
                 100.0,
                 &Theme::default(),
                 &RenderOptions {
-                    fonts: &Database::new(),
+                    fonts: Resolver::new(&Database::new(), &HashMap::new()),
                     punctuation_compression: true,
                 },
                 &mut svg,
@@ -1064,7 +1269,7 @@ mod tests {
                 100.0,
                 &Theme::default(),
                 &RenderOptions {
-                    fonts: &Database::new(),
+                    fonts: Resolver::new(&Database::new(), &HashMap::new()),
                     punctuation_compression: false,
                 },
                 &mut svg,
@@ -1086,7 +1291,7 @@ mod tests {
             100.0,
             &Theme::default(),
             &RenderOptions {
-                fonts: &Database::new(),
+                fonts: Resolver::new(&Database::new(), &HashMap::new()),
                 punctuation_compression: false,
             },
             &mut String::new(),
@@ -1205,5 +1410,288 @@ mod tests {
         assert_eq!(s.size, 16.0);
         assert!(!s.bold);
         assert_eq!(s.face, "Example");
+    }
+    fn inherited_fixture(paragraphs: &str, size: &str) -> (String, Warnings) {
+        let source = format!(
+            r#"<p:sp xmlns:p="{P}" xmlns:a="{A}"><p:nvSpPr><p:cNvSpPr txBox="1"/></p:nvSpPr><p:txBody><a:bodyPr lIns="0" rIns="0" tIns="0" bIns="0"/><a:lstStyle/>{paragraphs}</p:txBody><p:txStyles><p:otherStyle><a:lvl1pPr><a:defRPr sz="2400"/></a:lvl1pPr></p:otherStyle></p:txStyles></p:sp>"#
+        );
+        let doc = Document::parse(&source).unwrap();
+        let mut theme = Theme::default();
+        theme.presentation = Some(format!(
+            r#"<p:presentation xmlns:p="{P}" xmlns:a="{A}"><p:defaultTextStyle><a:lvl1pPr><a:defRPr sz="{size}"><a:latin typeface="Pptx2img Metrics Test"/></a:defRPr></a:lvl1pPr></p:defaultTextStyle></p:presentation>"#
+        ));
+        let mut fonts = Database::new();
+        fonts.load_font_data(include_bytes!("../../tests/fixtures/metrics.ttf").to_vec());
+        let mut svg = String::new();
+        let mut warnings = Warnings::default();
+        render(
+            TextBody {
+                body: child(doc.root_element(), P, "txBody").unwrap(),
+                inherited: vec![],
+                master_style: child(doc.root_element(), P, "txStyles"),
+                cell_props: None,
+            },
+            100.0,
+            90.0,
+            &theme,
+            &RenderOptions {
+                fonts: Resolver::new(&fonts, &HashMap::new()),
+                punctuation_compression: false,
+            },
+            &mut svg,
+            &mut warnings,
+        );
+        (svg, warnings)
+    }
+    #[test]
+    fn textbox_uses_presentation_defaults_and_matches_explicit_runs() {
+        let inherited =
+            inherited_fixture(r#"<a:p><a:r><a:t>AAAA AAAA AAAA</a:t></a:r></a:p>"#, "900").0;
+        let explicit = inherited_fixture(
+            r#"<a:p><a:r><a:rPr sz="900"/><a:t>AAAA AAAA AAAA</a:t></a:r></a:p>"#,
+            "1800",
+        )
+        .0;
+        assert_eq!(inherited, explicit);
+        assert!(inherited.contains("font-size=\"12\""));
+    }
+    #[test]
+    fn paragraph_positions_include_spacing_breaks_and_empty_end_style() {
+        for (line_spacing, expected) in [
+            (
+                r#"<a:spcPct val="150000"/>"#,
+                vec![13.6, 31.6, 58.666666666666664],
+            ),
+            (
+                r#"<a:spcPts val="1500"/>"#,
+                vec![21.6, 41.6, 62.666666666666664],
+            ),
+        ] {
+            let paragraph = format!(
+                r#"<a:p><a:pPr><a:lnSpc>{line_spacing}</a:lnSpc><a:spcBef><a:spcPts val="300"/></a:spcBef><a:spcAft><a:spcPts val="200"/></a:spcAft></a:pPr><a:r><a:t>A</a:t></a:r><a:br/><a:r><a:t>A</a:t></a:r></a:p><a:p><a:endParaRPr sz="1500"/></a:p>"#
+            );
+            let (svg, _) = inherited_fixture(&paragraph, "900");
+            let root = format!("<svg>{svg}</svg>");
+            let doc = Document::parse(&root).unwrap();
+            let positions: Vec<f64> = doc
+                .descendants()
+                .filter(|n| n.has_tag_name("text"))
+                .map(|n| n.attribute("y").unwrap().parse().unwrap())
+                .collect();
+            for (actual, expected) in positions.iter().zip(expected) {
+                assert!((actual - expected).abs() < 1e-5, "{positions:?}");
+            }
+            assert_eq!(positions.len(), 3);
+        }
+    }
+    #[test]
+    fn overflowing_text_keeps_diagnostic_without_clipping() {
+        let (svg, warnings) = inherited_fixture(
+            &format!("<a:p><a:r><a:t>{}</a:t></a:r></a:p>", "A ".repeat(100)),
+            "1800",
+        );
+        assert!(
+            warnings
+                .records
+                .iter()
+                .any(|d| d.code == Code::TextOverflow)
+        );
+        assert_eq!(svg.matches("A ").count(), 100);
+    }
+    fn autofit_fixture(
+        mode: &str,
+        inherited_mode: &str,
+        anchor: &str,
+        paragraphs: &str,
+    ) -> (String, TextExtent, Warnings) {
+        let xml = format!(
+            r#"<root xmlns:a="{A}" xmlns:p="{P}"><p:txBody><a:bodyPr lIns="0" rIns="0" tIns="0" bIns="0" anchor="{anchor}">{mode}</a:bodyPr><a:lstStyle><a:lvl1pPr><a:defRPr sz="1500"><a:latin typeface="Pptx2img Metrics Test"/></a:defRPr></a:lvl1pPr></a:lstStyle>{paragraphs}</p:txBody><p:txBody><a:bodyPr>{inherited_mode}</a:bodyPr></p:txBody></root>"#
+        );
+        let doc = Document::parse(&xml).unwrap();
+        let bodies: Vec<_> = doc
+            .root_element()
+            .children()
+            .filter(|n| n.is_element())
+            .collect();
+        let mut fonts = Database::new();
+        fonts.load_font_data(include_bytes!("../../tests/fixtures/metrics.ttf").to_vec());
+        let mut svg = String::new();
+        let mut warnings = Warnings::default();
+        let extent = render(
+            TextBody {
+                body: bodies[0],
+                inherited: vec![bodies[1]],
+                master_style: None,
+                cell_props: None,
+            },
+            200.0,
+            20.0,
+            &Theme::default(),
+            &RenderOptions {
+                fonts: Resolver::new(&fonts, &HashMap::new()),
+                punctuation_compression: false,
+            },
+            &mut svg,
+            &mut warnings,
+        );
+        (svg, extent, warnings)
+    }
+    #[test]
+    fn normal_autofit_scales_measurement_and_svg_together() {
+        for (scale, expected_size) in [(100000, 20.0), (55000, 11.0), (92500, 18.5)] {
+            let (svg, _, _) = autofit_fixture(
+                &format!(r#"<a:normAutofit fontScale="{scale}"/>"#),
+                "",
+                "t",
+                "<a:p><a:r><a:t>AA</a:t></a:r></a:p>",
+            );
+            let root = format!("<svg>{svg}</svg>");
+            let doc = Document::parse(&root).unwrap();
+            let span = doc.descendants().find(|n| n.has_tag_name("tspan")).unwrap();
+            assert_eq!(
+                span.attribute("font-size").unwrap().parse::<f64>().unwrap(),
+                expected_size
+            );
+            let positions: Vec<f64> = span
+                .attribute("x")
+                .unwrap()
+                .split_whitespace()
+                .map(|v| v.parse().unwrap())
+                .collect();
+            assert!((positions[1] - measurement_size(expected_size) / 2.0).abs() < 1e-6);
+        }
+    }
+    #[test]
+    fn line_spacing_reduction_subtracts_percentage_points_not_fixed_spacing() {
+        for (spacing_xml, expected) in [
+            (r#"<a:spcPct val="120000"/>"#, 20.0),
+            (r#"<a:spcPts val="2400"/>"#, 32.0),
+        ] {
+            let p = format!(
+                "<a:p><a:pPr><a:lnSpc>{spacing_xml}</a:lnSpc></a:pPr><a:r><a:t>A</a:t></a:r><a:br/><a:r><a:t>A</a:t></a:r></a:p>"
+            );
+            let (svg, _, _) =
+                autofit_fixture(r#"<a:normAutofit lnSpcReduction="20000"/>"#, "", "t", &p);
+            let root = format!("<svg>{svg}</svg>");
+            let doc = Document::parse(&root).unwrap();
+            let y: Vec<f64> = doc
+                .descendants()
+                .filter(|n| n.has_tag_name("text"))
+                .map(|n| n.attribute("y").unwrap().parse().unwrap())
+                .collect();
+            assert_eq!(y[1] - y[0], expected);
+        }
+    }
+    #[test]
+    fn local_no_autofit_cancels_parent_and_shape_fit_preserves_anchor() {
+        let paragraph = "<a:p><a:r><a:t>A</a:t></a:r><a:br/><a:r><a:t>A</a:t></a:r><a:br/><a:r><a:t>A</a:t></a:r></a:p>";
+        let (svg, extent, _) = autofit_fixture(
+            "<a:noAutofit/>",
+            r#"<a:normAutofit fontScale="55000"/>"#,
+            "t",
+            paragraph,
+        );
+        assert!(svg.contains("font-size=\"20\""));
+        assert_eq!(extent.height, 20.0);
+        for (anchor, offset) in [("t", 0.0), ("ctr", -20.0), ("b", -40.0)] {
+            let (_, extent, warnings) = autofit_fixture("<a:spAutoFit/>", "", anchor, paragraph);
+            assert_eq!(extent.height, 60.0);
+            assert_eq!(extent.offset_y, offset);
+            assert!(
+                !warnings
+                    .records
+                    .iter()
+                    .any(|d| d.code == Code::TextOverflow)
+            );
+        }
+    }
+    #[test]
+    fn bullets_and_wrapped_lines_have_separate_starts() {
+        for (level, margin, marker_x) in [(0, 190500, 0.0), (1, 381000, 20.0)] {
+            let paragraph = format!(
+                r#"<a:p><a:pPr lvl="{level}" marL="{margin}" indent="-190500"><a:buFont typeface="Pptx2img Metrics Test"/><a:buChar char="A"/></a:pPr><a:r><a:t>AAAA AAAA AAAA AAAA AAAA</a:t></a:r></a:p>"#
+            );
+            let (svg, _) = inherited_fixture(&paragraph, "900");
+            let root = format!("<svg>{svg}</svg>");
+            let doc = Document::parse(&root).unwrap();
+            let spans: Vec<_> = doc
+                .descendants()
+                .filter(|n| n.has_tag_name("tspan"))
+                .collect();
+            let x = |n: Node<'_, '_>| {
+                n.attribute("x")
+                    .unwrap()
+                    .split_whitespace()
+                    .next()
+                    .unwrap()
+                    .parse::<f64>()
+                    .unwrap()
+            };
+            assert_eq!(spans[0].text(), Some("A"));
+            assert_eq!(x(spans[0]), marker_x);
+            assert!(spans.len() > 2);
+            for span in &spans[1..] {
+                assert_eq!(x(*span), margin as f64 / EMU);
+            }
+        }
+    }
+    #[test]
+    fn non_bullet_indent_only_moves_first_line_and_keeps_hard_breaks() {
+        let paragraph = r#"<a:p><a:pPr marL="190500" indent="190500"><a:buNone/></a:pPr><a:r><a:t>AAAA AAAA AAAA AAAA</a:t></a:r><a:br/><a:r><a:t>AAAA</a:t></a:r></a:p>"#;
+        let (svg, _) = inherited_fixture(paragraph, "900");
+        let root = format!("<svg>{svg}</svg>");
+        let doc = Document::parse(&root).unwrap();
+        let spans: Vec<_> = doc
+            .descendants()
+            .filter(|n| n.has_tag_name("tspan"))
+            .collect();
+        assert!(spans.len() > 2);
+        for (i, span) in spans.iter().enumerate() {
+            let x: f64 = span
+                .attribute("x")
+                .unwrap()
+                .split_whitespace()
+                .next()
+                .unwrap()
+                .parse()
+                .unwrap();
+            assert_eq!(x, if i == 0 { 40.0 } else { 20.0 });
+        }
+        assert_eq!(
+            spans.iter().filter_map(|n| n.text()).collect::<String>(),
+            "AAAA AAAA AAAA AAAAAAAA"
+        );
+        assert_eq!(spans.last().unwrap().text(), Some("AAAA"));
+    }
+    #[test]
+    fn inherited_bullet_can_be_cancelled_and_size_color_follow_choice() {
+        let xml = format!(
+            r#"<a:root xmlns:a="{A}"><a:pPr><a:buNone/><a:buFontTx/><a:buSzTx/><a:buClrTx/></a:pPr><a:lvl1pPr><a:buChar char="A"/><a:buFont typeface="不在"/><a:buSzPct val="200000"/><a:buClr><a:srgbClr val="FF0000"/></a:buClr></a:lvl1pPr></a:root>"#
+        );
+        let doc = Document::parse(&xml).unwrap();
+        let nodes: Vec<_> = doc
+            .root_element()
+            .children()
+            .filter(|n| n.is_element())
+            .collect();
+        let base = sample("A")[0].style.clone();
+        let mut warnings = Warnings::default();
+        let unchanged =
+            bullets::style(&nodes, base.clone(), 0.55, &Theme::default(), &mut warnings);
+        assert_eq!(unchanged, base);
+        let changed = bullets::style(
+            &nodes[1..],
+            base.clone(),
+            0.55,
+            &Theme::default(),
+            &mut warnings,
+        );
+        assert_eq!(changed.size, base.size * 2.0);
+        assert_eq!(changed.color, "#FF0000");
+        assert_eq!(changed.face, "不在");
+        assert_eq!(
+            bullets::Counters::default().label(&nodes, 0, &mut warnings),
+            None
+        );
     }
 }
