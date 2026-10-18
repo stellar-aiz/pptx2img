@@ -451,12 +451,9 @@ fn render_shape(
     let style_node = shape.chain.iter().find_map(|n| child(*n, P, "style"));
     if style_node.is_some_and(|n| {
         n.children()
-            .any(|c| c.is_element() && c.tag_name().name() != "fillRef")
+            .any(|c| c.is_element() && !matches!(c.tag_name().name(), "fillRef" | "lnRef"))
     }) {
-        warn(
-            warnings,
-            "テーマ由来の線・効果・文字スタイル参照は未対応です",
-        );
+        warn(warnings, "テーマ由来の効果・文字スタイル参照は未対応です");
     }
     let effect_count = props_chain
         .iter()
@@ -482,7 +479,21 @@ fn render_shape(
         } else {
             "none".into()
         };
-        let line = props_chain.iter().find_map(|n| child(*n, A, "ln"));
+        let direct_lines: Vec<_> = props_chain
+            .iter()
+            .filter_map(|n| child(*n, A, "ln"))
+            .collect();
+        let resolved_line = lines::resolve(
+            &direct_lines,
+            style_node.and_then(|n| child(n, A, "lnRef")),
+            theme,
+            warnings,
+        );
+        let line_doc = resolved_line.as_deref().map(Document::parse).transpose()?;
+        let line = line_doc
+            .as_ref()
+            .and_then(|doc| child(doc.root_element(), A, "ln"));
+
         let stroke = line
             .map(|n| fill_line(n, theme, warnings))
             .unwrap_or_else(|| "none".into());
