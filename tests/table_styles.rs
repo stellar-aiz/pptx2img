@@ -139,6 +139,7 @@ fn table_font_reference_mapping_and_cell_margins_match_explicit_textbox() {
             &input,
             &out,
             &pptx2img::ConvertOptions {
+                font_fallback: true,
                 width: 100,
                 no_system_fonts: true,
                 font_file: ["latin", "cjk", "other"]

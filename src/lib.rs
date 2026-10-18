@@ -23,6 +23,8 @@ pub struct ConvertOptions {
     pub width: u32,
     /// 警告がある場合、ファイルを出力せず StrictModeError を返す。
     pub strict: bool,
+    /// フォント代替・欠字・書体スタイルの近似を許可する（既定は停止）。
+    pub font_fallback: bool,
     /// 実験的な句読点の自動圧縮。
     pub punctuation_compression: bool,
     /// 追加で読み込むフォントファイル。
@@ -37,6 +39,7 @@ impl Default for ConvertOptions {
         Self {
             width: 1600,
             strict: false,
+            font_fallback: false,
             punctuation_compression: false,
             font_file: Vec::new(),
             no_system_fonts: false,
@@ -87,6 +90,59 @@ impl std::fmt::Display for StrictModeError {
     }
 }
 impl std::error::Error for StrictModeError {}
+
+/// フォント不足・代替を検出して出力前に停止した場合の診断。
+/// image は予定ファイル名であり、画像・manifest は出力されない。
+#[derive(Debug)]
+pub struct FontFallbackError {
+    pub slides: Vec<SlideReport>,
+}
+impl std::fmt::Display for FontFallbackError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        writeln!(
+            f,
+            "必要なフォント・字形・スタイルをそのまま使用できません。"
+        )?;
+        let mut entries =
+            std::collections::BTreeMap::<String, std::collections::BTreeSet<usize>>::new();
+        for slide in &self.slides {
+            for diagnostic in &slide.diagnostics {
+                let detail = if let Some(font) = &diagnostic.font {
+                    let reason = match font.reason.as_str() {
+                        "family_missing" => "書体不足",
+                        "mapped_family_missing" => "指定した代替先が不足",
+                        "glyph_fallback" => "必要な文字が未収録",
+                        "style_approximation" => "太さ・斜体が不一致",
+                        "explicit_mapping" => "代替指定あり",
+                        _ => "代替が必要",
+                    };
+                    format!("{}（{}）", font.requested_family, reason)
+                } else if diagnostic.code == DiagnosticCode::MissingGlyph {
+                    diagnostic.message.clone()
+                } else {
+                    continue;
+                };
+                entries.entry(detail).or_default().insert(slide.slide);
+            }
+        }
+        for (detail, slides) in entries {
+            writeln!(
+                f,
+                "  {detail} — スライド {}",
+                slides
+                    .iter()
+                    .map(usize::to_string)
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            )?;
+        }
+        write!(
+            f,
+            "--font-file でフォントを追加してください。代替を許可する場合は --font-fallback を指定してください。"
+        )
+    }
+}
+impl std::error::Error for FontFallbackError {}
 
 /// PPTX を指定したディレクトリへ同期的に変換する。
 ///
@@ -160,6 +216,31 @@ fn convert_inner(
     let height = height as u32;
     if u64::from(settings.width) * u64::from(height) > 16_777_216 {
         bail!("出力画像の画素数が上限を超えています");
+    }
+    if !settings.font_fallback
+        && deck.slides.iter().any(|slide| {
+            slide.diagnostics.iter().any(|d| {
+                matches!(
+                    d.code,
+                    DiagnosticCode::FontSubstitution | DiagnosticCode::MissingGlyph
+                )
+            })
+        })
+    {
+        return Err(FontFallbackError {
+            slides: deck
+                .slides
+                .iter()
+                .enumerate()
+                .map(|(index, slide)| SlideReport {
+                    slide: index + 1,
+                    image: format!("slide-{:03}.png", index + 1),
+                    warnings: slide.warnings.clone(),
+                    diagnostics: slide.diagnostics.clone(),
+                })
+                .collect(),
+        }
+        .into());
     }
     if options.fontdb.is_empty() && deck.slides.iter().any(|s| s.svg.contains("<text")) {
         bail!("フォントがありません。--font-file で指定してください");

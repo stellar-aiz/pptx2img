@@ -117,6 +117,12 @@ impl<'a> Resolver<'a> {
                 self.record(family, id, "mapped_family_missing", warnings);
             }
         }
+        if id.is_none() {
+            warnings.push(
+                super::diagnostics::Code::MissingGlyph,
+                format!("必要なフォントがありません: {family}"),
+            );
+        }
         id
     }
     pub(super) fn fallback(

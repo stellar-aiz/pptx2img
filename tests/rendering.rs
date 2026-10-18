@@ -56,7 +56,7 @@ fn run(path: &Path, out: &Path, strict: bool) -> std::process::Output {
     cmd.arg(path)
         .arg("--out")
         .arg(out)
-        .args(["--width", "100", "--no-system-fonts"])
+        .args(["--width", "100", "--no-system-fonts", "--font-fallback"])
         .arg("--font-file")
         .arg(concat!(
             env!("CARGO_MANIFEST_DIR"),
@@ -446,6 +446,7 @@ fn font_mapping_matches_api_and_cli_and_aggregates_targets() {
     let font = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/cjk.ttf");
     let cli_out = dir.path().join("cli");
     let cli = Command::new(env!("CARGO_BIN_EXE_pptx2img"))
+        .arg("--font-fallback")
         .arg(&input)
         .arg("--out")
         .arg(&cli_out)
@@ -472,6 +473,7 @@ fn font_mapping_matches_api_and_cli_and_aggregates_targets() {
         &input,
         &api_out,
         &pptx2img::ConvertOptions {
+            font_fallback: true,
             width: 100,
             no_system_fonts: true,
             font_file: vec![font],
@@ -577,6 +579,7 @@ fn bullet_font_mapping_color_and_local_none_reach_pixels() {
             &input,
             &out,
             &pptx2img::ConvertOptions {
+                font_fallback: true,
                 width: 100,
                 no_system_fonts: true,
                 font_file: vec![

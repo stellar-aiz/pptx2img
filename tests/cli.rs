@@ -46,7 +46,7 @@ fn run(input: &Path, output: &Path, strict: bool) -> std::process::Output {
         .arg(input)
         .arg("--out")
         .arg(output)
-        .args(["--width", "100"]);
+        .args(["--width", "100", "--font-fallback"]);
     if strict {
         command.arg("--strict");
     }
@@ -157,7 +157,7 @@ fn default_output_is_next_to_input_and_explicit_output_takes_precedence() {
         command
             .current_dir(dir.path())
             .arg(Path::new("入力 資料").join("資料.v2.pptx"))
-            .args(["--width", "100", "--no-system-fonts"]);
+            .args(["--width", "100", "--no-system-fonts", "--font-fallback"]);
         command.output().unwrap()
     };
     let result = invoke();
@@ -257,5 +257,114 @@ fn library_returns_strict_diagnostics_and_validates_width() {
     }
     fs::write(&input, "broken").unwrap();
     assert!(convert(&input, &out, &ConvertOptions::default()).is_err());
+    assert!(!out.exists());
+}
+
+#[test]
+fn font_fallback_is_explicit_and_reports_all_affected_slides() {
+    use pptx2img::{ConvertOptions, FontFallbackError, convert};
+    let font = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/latin.ttf");
+    // 書体不足、字形の不足、スタイルの不足を OS のフォントに依存せず検証する。
+    for (family, value, attributes, reason) in [
+        ("不在の書体", "A", "", "書体不足"),
+        ("Pptx Latin", "あ", "", "U+3042"),
+        ("Pptx Latin", "A", "b=\"1\"", "太さ・斜体"),
+    ] {
+        let dir = tempfile::tempdir().unwrap();
+        let input = dir.path().join("fonts.pptx");
+        fixture(
+            &input,
+            &format!(
+                r#"<p:sp><p:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="952500" cy="952500"/></a:xfrm></p:spPr><p:txBody><a:bodyPr/><a:p><a:r><a:rPr {attributes}><a:latin typeface="{family}"/><a:ea typeface="{family}"/></a:rPr><a:t>{value}</a:t></a:r></a:p></p:txBody></p:sp>"#
+            ),
+        );
+        let settings = ConvertOptions {
+            width: 100,
+            no_system_fonts: true,
+            font_file: vec![font.clone()],
+            ..Default::default()
+        };
+        let api_out = dir.path().join("api");
+        let error = convert(&input, &api_out, &settings).unwrap_err();
+        let diagnostic = error.downcast_ref::<FontFallbackError>().unwrap();
+        assert_eq!(diagnostic.slides.len(), 2);
+        assert!(!api_out.exists());
+        let text = diagnostic.to_string();
+        assert!(text.contains(family), "{text}");
+        assert!(text.contains(reason), "{text}");
+        assert!(text.contains("スライド 1, 2"), "{text}");
+        for (suffix, flags, success) in [
+            ("default", vec![], false),
+            ("fallback", vec!["--font-fallback"], true),
+            ("strict", vec!["--font-fallback", "--strict"], false),
+        ] {
+            let out = dir.path().join(suffix);
+            let result = Command::new(env!("CARGO_BIN_EXE_pptx2img"))
+                .arg(&input)
+                .arg("--out")
+                .arg(&out)
+                .args(["--width", "100", "--no-system-fonts", "--font-file"])
+                .arg(&font)
+                .args(flags)
+                .output()
+                .unwrap();
+            let stderr = String::from_utf8_lossy(&result.stderr);
+            assert_eq!(result.status.success(), success, "{stderr}");
+            assert_eq!(out.exists(), success, "{stderr}");
+            if success {
+                assert!(out.join("slide-002.png").exists());
+                let report: serde_json::Value =
+                    serde_json::from_slice(&fs::read(out.join("manifest.json")).unwrap()).unwrap();
+                assert!(
+                    !report["slides"][0]["diagnostics"]
+                        .as_array()
+                        .unwrap()
+                        .is_empty()
+                );
+            } else if suffix == "default" {
+                assert!(stderr.contains(family), "{stderr}");
+                assert!(stderr.contains("--font-fallback"), "{stderr}");
+            }
+        }
+    }
+}
+
+#[test]
+fn exact_font_needs_no_flag_but_mapping_requires_permission() {
+    use pptx2img::{ConvertOptions, FontFallbackError, convert};
+    let dir = tempfile::tempdir().unwrap();
+    let input = dir.path().join("fonts.pptx");
+    fixture(
+        &input,
+        r#"<p:sp><p:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="952500" cy="952500"/></a:xfrm></p:spPr><p:txBody><a:bodyPr/><a:p><a:r><a:rPr><a:latin typeface="Pptx Latin"/></a:rPr><a:t>A</a:t></a:r></a:p></p:txBody></p:sp>"#,
+    );
+    let mut settings = ConvertOptions {
+        width: 100,
+        no_system_fonts: true,
+        font_file: vec![Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/latin.ttf")],
+        ..Default::default()
+    };
+    convert(&input, dir.path().join("exact"), &settings).unwrap();
+    settings
+        .font_file
+        .push(Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/cjk.ttf"));
+    settings
+        .font_mapping
+        .insert("Pptx Latin".into(), "Pptx CJK".into());
+    let out = dir.path().join("mapped");
+    assert!(
+        convert(&input, &out, &settings)
+            .unwrap_err()
+            .is::<FontFallbackError>()
+    );
+    assert!(!out.exists());
+    settings.font_fallback = true;
+    convert(&input, &out, &settings).unwrap();
+    settings.font_file.clear();
+    settings.font_fallback = false;
+    let out = dir.path().join("no-fonts");
+    let error = convert(&input, &out, &settings).unwrap_err();
+    assert!(error.is::<FontFallbackError>());
+    assert!(error.to_string().contains("Pptx Latin"));
     assert!(!out.exists());
 }

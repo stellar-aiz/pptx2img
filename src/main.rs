@@ -18,6 +18,9 @@ struct Args {
     /// 警告があれば画像を出力せず失敗する
     #[arg(long)]
     strict: bool,
+    /// 不足フォント・欠字・太さや斜体の不一致を許容して代替描画する
+    #[arg(long)]
+    font_fallback: bool,
     /// 行幅が不足するとき句読点の余白を自動圧縮する（実験的・既定は無効）
     #[arg(long)]
     punctuation_compression: bool,
@@ -86,6 +89,7 @@ fn run(args: Args) -> Result<()> {
         &ConvertOptions {
             width: args.width,
             strict: args.strict,
+            font_fallback: args.font_fallback,
             punctuation_compression: args.punctuation_compression,
             font_file: args.font_file,
             no_system_fonts: args.no_system_fonts,

@@ -61,7 +61,7 @@ pub fn run(path: &Path, out: &Path, strict: bool) -> std::process::Output {
     cmd.arg(path)
         .arg("--out")
         .arg(out)
-        .args(["--width", "100", "--no-system-fonts"])
+        .args(["--width", "100", "--no-system-fonts", "--font-fallback"])
         .arg("--font-file")
         .arg(concat!(
             env!("CARGO_MANIFEST_DIR"),

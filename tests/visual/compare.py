@@ -181,7 +181,7 @@ def run(args: argparse.Namespace) -> bool:
         # 読み込む入力を証跡として固定し、両者に同一ファイルを渡す。
         copied = out / "input.pptx"
         shutil.copyfile(fixture, copied)
-        command = [str(binary), str(copied), "--out", str(out / "actual"), "--width", str(args.width)]
+        command = [str(binary), str(copied), "--out", str(out / "actual"), "--width", str(args.width), "--font-fallback"]
         if args.punctuation_compression:
             command.append("--punctuation-compression")
         execute(command, out, "pptx2img", env)
