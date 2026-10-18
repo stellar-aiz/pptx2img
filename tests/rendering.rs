@@ -523,3 +523,32 @@ fn missing_glyph_strict_leaves_no_output() {
     assert!(String::from_utf8_lossy(&output.stderr).contains("U+672A"));
     assert!(!out.exists());
 }
+
+#[test]
+fn shape_autofit_expands_fill_and_text_around_the_anchor() {
+    for (anchor, y, top, bottom) in [("t", 20, 20, 68), ("ctr", 30, 11, 59), ("b", 60, 22, 70)] {
+        let dir = tempfile::tempdir().unwrap();
+        let input = dir.path().join("autofit.pptx");
+        let out = dir.path().join("out");
+        let shape = format!(
+            r#"<p:sp><p:spPr>{}<a:prstGeom prst="rect"/><a:solidFill><a:srgbClr val="00FF00"/></a:solidFill></p:spPr><p:txBody><a:bodyPr lIns="0" rIns="0" tIns="0" bIns="0" anchor="{anchor}"><a:spAutoFit/></a:bodyPr><a:p><a:pPr><a:defRPr sz="1200"><a:latin typeface="Pptx2img Metrics Test"/></a:defRPr></a:pPr><a:r><a:t>A</a:t></a:r><a:br/><a:r><a:t>A</a:t></a:r><a:br/><a:r><a:t>A</a:t></a:r></a:p></p:txBody></p:sp>"#,
+            transform(0, y, 100, 10)
+        );
+        write_deck(&input, page("sld", "", "", &shape), vec![]);
+        check(run(&input, &out, false));
+        let img = image(&out);
+        assert_eq!(rgb(&img, 80, top), (0, 255, 0));
+        assert_eq!(rgb(&img, 80, bottom - 1), (0, 255, 0));
+        assert_eq!(rgb(&img, 80, top - 1), (255, 255, 255));
+        assert_eq!(rgb(&img, 80, bottom), (255, 255, 255));
+        let m: serde_json::Value =
+            serde_json::from_slice(&fs::read(out.join("manifest.json")).unwrap()).unwrap();
+        assert!(
+            !m["slides"][0]["diagnostics"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|d| d["code"] == "text_overflow")
+        );
+    }
+}

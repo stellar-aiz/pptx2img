@@ -362,11 +362,35 @@ fn render_shape(
         bail!("図形の座標・寸法がありません");
     };
     let x = number(offset, "x", 0.0) / EMU;
-    let y = number(offset, "y", 0.0) / EMU;
+    let mut y = number(offset, "y", 0.0) / EMU;
     let w = number(extent, "cx", 0.0) / EMU;
-    let h = number(extent, "cy", 0.0) / EMU;
+    let mut h = number(extent, "cy", 0.0) / EMU;
     if w < 0.0 || h < 0.0 {
         bail!("図形寸法が負です");
+    }
+    let mut text_svg = String::new();
+    if let Some(body) = child(node, P, "txBody") {
+        let extent = text::render(
+            text::TextBody {
+                body,
+                inherited: shape
+                    .chain
+                    .iter()
+                    .skip(1)
+                    .filter_map(|n| child(*n, P, "txBody"))
+                    .collect(),
+                master_style: shape.master_style,
+                cell_props: None,
+            },
+            w,
+            h,
+            theme,
+            options,
+            &mut text_svg,
+            warnings,
+        );
+        h = extent.height;
+        y += extent.offset_y;
     }
     let rotation = number(transform, "rot", 0.0) / 60_000.0;
     let fx = if matches!(transform.attribute("flipH"), Some("1" | "true")) {
@@ -459,27 +483,7 @@ fn render_shape(
                 other => warnings.push(Code::Omitted, format!("未対応のプリセット図形: {other}")),
             }
         }
-        if let Some(body) = child(node, P, "txBody") {
-            text::render(
-                text::TextBody {
-                    body,
-                    inherited: shape
-                        .chain
-                        .iter()
-                        .skip(1)
-                        .filter_map(|n| child(*n, P, "txBody"))
-                        .collect(),
-                    master_style: shape.master_style,
-                    cell_props: None,
-                },
-                w,
-                h,
-                theme,
-                options,
-                svg,
-                warnings,
-            );
-        }
+        svg.push_str(&text_svg);
     }
     svg.push_str("</g>");
     Ok(())

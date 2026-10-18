@@ -692,3 +692,21 @@ face index、理由を保持し、診断の `part`・`object_id` とスライド
 `examples/text-inheritance.pptx` は自作の同一Arial・明示18pt／継承18ptの比較資料です。
 LibreOfficeでも両者は18ptです。縦位置・行送りの画像差は残り、既存比較閾値を
 超えるため完全互換とは扱いません。枠に収まらない文字は切り捨てず診断を残します。
+
+### 保存済み自動調整
+
+`normAutofit` の `fontScale`（未指定100%）を全runの計測・折り返し・描画へ
+適用します。`lnSpcReduction`（未指定0%）は百分率行間から減算し、例えば
+120%-20%=100%になります。固定ptの行間は減らしません。
+子の `noAutofit` は親の自動調整を解除します。保存率の動的な再探索は行いません。
+
+`spAutoFit` は横書き・固定幅で必要な高さまで枠を拡張し、上端・中央・下端の
+アンカーと余白を保持します。表セル・縦書き、折り返しなしの横方向拡張は未対応で
+警告します。縦書きや表の行高まで対応済みとは扱いません。
+自作資料は `examples/text-autofit.pptx`、再生成コードは
+`tests/visual/make_text_autofit.py` です。
+
+[NormalAutoFitの仕様](https://learn.microsoft.com/en-us/dotnet/api/documentformat.openxml.drawing.normalautofit)と
+[OfficeのspAutoFit解釈](https://learn.microsoft.com/en-us/openspecs/office_standards/ms-oe376/19d31037-28bf-4693-85be-3a37bfe82d51)を参照。
+LibreOffice 26.2.5.2はこの自作資料の保存縮小率を再計算し、保存枠も自動拡張しないため、
+全画素比較には差が残ります。既存の閾値を緩めず差分を記録します。
