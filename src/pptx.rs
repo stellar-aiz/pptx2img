@@ -5,6 +5,7 @@ use roxmltree::{Document, Node};
 use std::{collections::HashMap, fs::File, io::Read, path::Path};
 
 mod diagnostics;
+mod geometry;
 mod layout;
 mod objects;
 mod text;
@@ -421,43 +422,57 @@ fn render_shape(
             .unwrap_or_else(|| "none".into());
         let line_width = line.map(|n| number(n, "w", 9525.0) / EMU).unwrap_or(1.0);
         let style = format!("fill=\"{fill}\" stroke=\"{stroke}\" stroke-width=\"{line_width}\"");
+        let mut text_rect = (0.0, 0.0, w, h);
         if let Some(geometry) = props_chain.iter().find_map(|n| child(*n, A, "prstGeom")) {
-            if geometry.attribute("prst") != Some("roundRect")
-                && geometry.descendants().any(|n| n.has_tag_name((A, "gd")))
-            {
-                warn(warnings, "図形の調整値は未対応です");
-            }
-            match geometry.attribute("prst").unwrap_or("") {
-                "rect" => svg.push_str(&format!("<rect width=\"{w}\" height=\"{h}\" {style}/>")),
-                "roundRect" => {
-                    let mut adjustment = 16667.0_f64;
-                    for guide in geometry.descendants().filter(|n| n.has_tag_name((A, "gd"))) {
-                        let value = guide
-                            .attribute("fmla")
-                            .and_then(|s| s.strip_prefix("val "))
-                            .and_then(|s| s.trim().parse::<f64>().ok())
-                            .filter(|v| v.is_finite());
-                        if let (Some("adj"), Some(value)) = (guide.attribute("name"), value) {
-                            adjustment = value;
-                        } else {
-                            warn(warnings, "角丸矩形の調整式は未対応です");
-                        }
-                    }
-                    let radius = w.min(h) * adjustment.clamp(0.0, 50000.0) / 100000.0;
-                    svg.push_str(&format!("<rect width=\"{w}\" height=\"{h}\" rx=\"{radius}\" ry=\"{radius}\" {style}/>"));
+            if let Some(preset) = geometry::preset(geometry, w, h, &style, warnings) {
+                svg.push_str(&preset.svg);
+                text_rect = preset.text;
+            } else {
+                if geometry.attribute("prst") != Some("roundRect")
+                    && geometry.descendants().any(|n| n.has_tag_name((A, "gd")))
+                {
+                    warn(warnings, "図形の調整値は未対応です");
                 }
-                "ellipse" => svg.push_str(&format!(
-                    "<ellipse cx=\"{}\" cy=\"{}\" rx=\"{}\" ry=\"{}\" {style}/>",
-                    w / 2.0,
-                    h / 2.0,
-                    w / 2.0,
-                    h / 2.0
-                )),
-                "line" => svg.push_str(&format!("<line x2=\"{w}\" y2=\"{h}\" {style}/>")),
-                other => warnings.push(Code::Omitted, format!("未対応のプリセット図形: {other}")),
+                match geometry.attribute("prst").unwrap_or("") {
+                    "rect" => {
+                        svg.push_str(&format!("<rect width=\"{w}\" height=\"{h}\" {style}/>"))
+                    }
+                    "roundRect" => {
+                        let mut adjustment = 16667.0_f64;
+                        for guide in geometry.descendants().filter(|n| n.has_tag_name((A, "gd"))) {
+                            let value = guide
+                                .attribute("fmla")
+                                .and_then(|s| s.strip_prefix("val "))
+                                .and_then(|s| s.trim().parse::<f64>().ok())
+                                .filter(|v| v.is_finite());
+                            if let (Some("adj"), Some(value)) = (guide.attribute("name"), value) {
+                                adjustment = value;
+                            } else {
+                                warn(warnings, "角丸矩形の調整式は未対応です");
+                            }
+                        }
+                        let radius = w.min(h) * adjustment.clamp(0.0, 50000.0) / 100000.0;
+                        svg.push_str(&format!("<rect width=\"{w}\" height=\"{h}\" rx=\"{radius}\" ry=\"{radius}\" {style}/>"));
+                    }
+                    "ellipse" => svg.push_str(&format!(
+                        "<ellipse cx=\"{}\" cy=\"{}\" rx=\"{}\" ry=\"{}\" {style}/>",
+                        w / 2.0,
+                        h / 2.0,
+                        w / 2.0,
+                        h / 2.0
+                    )),
+                    "line" => svg.push_str(&format!("<line x2=\"{w}\" y2=\"{h}\" {style}/>")),
+                    other => {
+                        warnings.push(Code::Omitted, format!("未対応のプリセット図形: {other}"))
+                    }
+                }
             }
         }
         if let Some(body) = child(node, P, "txBody") {
+            svg.push_str(&format!(
+                "<g transform=\"translate({} {})\">",
+                text_rect.0, text_rect.1
+            ));
             text::render(
                 text::TextBody {
                     body,
@@ -470,13 +485,14 @@ fn render_shape(
                     master_style: shape.master_style,
                     cell_props: None,
                 },
-                w,
-                h,
+                text_rect.2,
+                text_rect.3,
                 theme,
                 options,
                 svg,
                 warnings,
             );
+            svg.push_str("</g>");
         }
     }
     svg.push_str("</g>");
