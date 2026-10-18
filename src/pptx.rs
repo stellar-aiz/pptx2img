@@ -5,12 +5,14 @@ use roxmltree::{Document, Node};
 use std::{collections::HashMap, fs::File, io::Read, path::Path};
 
 mod diagnostics;
+mod fonts;
 mod geometry;
+pub(crate) use fonts::Resolver as FontResolver;
 mod layout;
 mod lines;
 mod objects;
 mod text;
-pub use diagnostics::{Code as DiagnosticCode, Diagnostic};
+pub use diagnostics::{Code as DiagnosticCode, Diagnostic, FontResolution};
 use diagnostics::{Code, Target, Warnings};
 mod theme;
 use theme::Theme;
@@ -126,7 +128,7 @@ fn escape(s: &str) -> String {
 }
 
 pub struct RenderOptions<'a> {
-    pub fonts: &'a resvg::usvg::fontdb::Database,
+    pub fonts: FontResolver<'a>,
     pub punctuation_compression: bool,
 }
 
@@ -362,11 +364,77 @@ fn render_shape(
         bail!("図形の座標・寸法がありません");
     };
     let x = number(offset, "x", 0.0) / EMU;
-    let y = number(offset, "y", 0.0) / EMU;
+    let mut y = number(offset, "y", 0.0) / EMU;
     let w = number(extent, "cx", 0.0) / EMU;
-    let h = number(extent, "cy", 0.0) / EMU;
+    let mut h = number(extent, "cy", 0.0) / EMU;
     if w < 0.0 || h < 0.0 {
         bail!("図形寸法が負です");
+    }
+    let mut text_svg = String::new();
+    if let Some(body) = child(node, P, "txBody") {
+        // 図形の文字領域で計測する。高さ変更で文字領域の幅も変わるため、
+        // 最終寸法で再計測する。保存済みfontScaleは再探索しない。
+        let geometry_node = props_chain.iter().find_map(|n| child(*n, A, "prstGeom"));
+        for attempt in 0..16 {
+            let mut measured_warnings = Warnings::default();
+            measured_warnings.target = warnings.target.clone();
+            let rect = geometry_node
+                .and_then(|n| geometry::preset(n, w, h, "", &mut measured_warnings))
+                .map(|g| g.text)
+                .unwrap_or((0.0, 0.0, w, h));
+            text_svg.clear();
+            text_svg.push_str(&format!(
+                "<g transform=\"translate({} {})\">",
+                rect.0, rect.1
+            ));
+            let extent = text::render(
+                text::TextBody {
+                    body,
+                    inherited: shape
+                        .chain
+                        .iter()
+                        .skip(1)
+                        .filter_map(|n| child(*n, P, "txBody"))
+                        .collect(),
+                    master_style: shape.master_style,
+                    cell_props: None,
+                },
+                rect.2,
+                rect.3,
+                theme,
+                options,
+                &mut text_svg,
+                &mut measured_warnings,
+            );
+            text_svg.push_str("</g>");
+            let growth = extent.height - rect.3;
+            if growth > 0.01 && (rect.3 > 0.0 || h == 0.0) && attempt < 15 && h < 100_000.0 {
+                let ratio = if rect.3 > 0.0 {
+                    (h / rect.3).max(1.0)
+                } else {
+                    1.0
+                };
+                let new_height = (h + growth * ratio).min(100_000.0);
+                y += extent.offset_y / growth * (new_height - h);
+                h = new_height;
+                continue;
+            }
+            if growth > 0.01 {
+                warn(
+                    warnings,
+                    "図形文字領域の自動拡張が上限に達したため本文が収まらない可能性があります",
+                );
+            }
+            // 中間寸法の診断を残さず、採用した配置の診断だけを公開する。
+            for record in measured_warnings.records {
+                if let Some(font) = record.font {
+                    warnings.font(font);
+                } else {
+                    warnings.push(record.code, record.message);
+                }
+            }
+            break;
+        }
     }
     let rotation = number(transform, "rot", 0.0) / 60_000.0;
     let fx = if matches!(transform.attribute("flipH"), Some("1" | "true")) {
@@ -428,11 +496,10 @@ fn render_shape(
         let style = format!(
             "{decorations} fill=\"{fill}\" stroke=\"{stroke}\" stroke-width=\"{line_width}\""
         );
-        let mut text_rect = (0.0, 0.0, w, h);
+
         if let Some(geometry) = props_chain.iter().find_map(|n| child(*n, A, "prstGeom")) {
             if let Some(preset) = geometry::preset(geometry, w, h, &style, warnings) {
                 svg.push_str(&preset.svg);
-                text_rect = preset.text;
             } else {
                 if geometry.attribute("prst") != Some("roundRect")
                     && geometry.descendants().any(|n| n.has_tag_name((A, "gd")))
@@ -479,32 +546,7 @@ fn render_shape(
                 }
             }
         }
-        if let Some(body) = child(node, P, "txBody") {
-            svg.push_str(&format!(
-                "<g transform=\"translate({} {})\">",
-                text_rect.0, text_rect.1
-            ));
-            text::render(
-                text::TextBody {
-                    body,
-                    inherited: shape
-                        .chain
-                        .iter()
-                        .skip(1)
-                        .filter_map(|n| child(*n, P, "txBody"))
-                        .collect(),
-                    master_style: shape.master_style,
-                    cell_props: None,
-                },
-                text_rect.2,
-                text_rect.3,
-                theme,
-                options,
-                svg,
-                warnings,
-            );
-            svg.push_str("</g>");
-        }
+        svg.push_str(&text_svg);
     }
     svg.push_str("</g>");
     Ok(())

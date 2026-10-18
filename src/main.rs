@@ -27,13 +27,44 @@ struct Args {
     /// システムフォントを読まず、指定したフォントだけを使う
     #[arg(long)]
     no_system_fonts: bool,
+    /// 要求書体=代替書体 の対応（複数指定可、一段のみ）
+    #[arg(long, value_parser = parse_font_mapping)]
+    font_map: Vec<(String, String)>,
 }
 
+fn parse_font_mapping(value: &str) -> std::result::Result<(String, String), String> {
+    let (from, to) = value
+        .split_once('=')
+        .ok_or("要求書体=代替書体 を指定してください")?;
+    if from.trim().is_empty() || to.trim().is_empty() {
+        return Err("書体名は空にできません".into());
+    }
+    Ok((from.trim().into(), to.trim().into()))
+}
 fn print_warnings(slides: &[SlideReport]) {
+    let mut fonts = std::collections::BTreeMap::<String, std::collections::BTreeSet<String>>::new();
     for slide in slides {
-        for warning in &slide.warnings {
-            eprintln!("警告 [スライド {}]: {warning}", slide.slide);
+        for diagnostic in &slide.diagnostics {
+            if let Some(font) = &diagnostic.font {
+                fonts
+                    .entry(font.requested_family.clone())
+                    .or_default()
+                    .insert(format!("{} ({})", font.post_script_name, font.reason));
+            } else {
+                eprintln!("警告 [スライド {}]: {}", slide.slide, diagnostic.message);
+            }
         }
+    }
+    for (requested, actual) in &fonts {
+        eprintln!(
+            "フォント代替: {requested} → {}",
+            actual.iter().cloned().collect::<Vec<_>>().join(", ")
+        );
+    }
+    if !fonts.is_empty() {
+        eprintln!(
+            "指定書体は --font-file で追加、代替先は --font-map '要求書体=代替書体' で指定できます。詳細は manifest.json の diagnostics.font を参照してください。"
+        );
     }
 }
 fn main() {
@@ -58,6 +89,7 @@ fn run(args: Args) -> Result<()> {
             punctuation_compression: args.punctuation_compression,
             font_file: args.font_file,
             no_system_fonts: args.no_system_fonts,
+            font_mapping: args.font_map.into_iter().collect(),
         },
     )?;
     print_warnings(&report.slides);

@@ -7,6 +7,7 @@ pub(super) struct Theme {
     mapping: HashMap<String, String>,
     fonts: HashMap<String, String>,
     hanging: HashMap<String, [Option<bool>; 9]>,
+    pub(super) presentation: Option<String>,
 }
 impl Theme {
     pub(super) fn load(parts: &Parts, slide: &str, warnings: &mut Warnings) -> Result<Self> {
@@ -19,6 +20,7 @@ impl Theme {
             let doc = xml(parts, &presentation.target)?;
             if let Some(defaults) = child(doc.root_element(), P, "defaultTextStyle") {
                 result.read_hanging("default", defaults);
+                result.presentation = Some(doc.input_text().to_owned());
             }
         }
         let mut chain = vec![slide.to_string()];
