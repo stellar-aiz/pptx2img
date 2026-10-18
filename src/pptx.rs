@@ -12,6 +12,7 @@ pub(crate) use fonts::Resolver as FontResolver;
 mod layout;
 mod lines;
 mod objects;
+mod table_styles;
 mod text;
 pub use diagnostics::{Code as DiagnosticCode, Diagnostic, FontResolution};
 use diagnostics::{Code, Target, Warnings};

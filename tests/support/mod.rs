@@ -45,9 +45,11 @@ pub fn write_deck(path: &Path, slide: String, extra: Vec<(&str, Vec<u8>)>) {
         ("ppt/_rels/presentation.xml.rels",rel("slide","slides/slide1.xml").into_bytes()),
         ("ppt/slides/slide1.xml",slide.into_bytes()),
     ];
-    // 指定した部品で既定の最小presentation等を置き換えられる。
-    parts.retain(|(name, _)| !extra.iter().any(|(replacement, _)| name == replacement));
-    parts.extend(extra);
+    for (name, data) in extra {
+        parts.retain(|(existing, _)| *existing != name);
+        parts.push((name, data));
+    }
+
     for (name, data) in parts {
         zip.start_file(name, SimpleFileOptions::default()).unwrap();
         zip.write_all(&data).unwrap();

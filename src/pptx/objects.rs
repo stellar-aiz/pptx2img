@@ -121,14 +121,8 @@ impl<'d> Renderer<'_, 'd> {
         {
             bail!("表の行列寸法が不正です");
         }
-        if child(table, A, "tblPr")
-            .is_some_and(|n| n.children().any(|n| n.is_element()) || n.attributes().len() > 0)
-        {
-            warn(
-                self.warnings,
-                "表のテーマスタイル・帯・全体書式は未対応です。セルの明示書式を描画します",
-            );
-        }
+        let style_source = table_styles::load(self.parts, table, self.warnings)?;
+        let style_doc = style_source.as_deref().map(Document::parse).transpose()?;
         self.svg.push_str(&format!(
             "<g transform=\"scale({} {})\">",
             w / widths.iter().sum::<f64>(),
@@ -193,7 +187,21 @@ impl<'d> Renderer<'_, 'd> {
                     let ch: f64 = hs.iter().sum();
                     self.svg
                         .push_str(&format!("<g transform=\"translate({x} {y})\">"));
-                    let props = child(*cell, A, "tcPr");
+                    let styled = style_doc.as_ref().map(|doc| {
+                        table_styles::cell(
+                            *cell,
+                            doc.root_element(),
+                            child(table, A, "tblPr"),
+                            (row_index, col, rows.len(), widths.len()),
+                            self.warnings,
+                        )
+                    });
+                    let styled_doc = styled.as_deref().map(Document::parse).transpose()?;
+                    let cell = styled_doc
+                        .as_ref()
+                        .map(Document::root_element)
+                        .unwrap_or(*cell);
+                    let props = child(cell, A, "tcPr");
                     let background = props
                         .map(|n| fill(n, "none", self.theme, self.warnings))
                         .unwrap_or("none".into());
@@ -235,7 +243,7 @@ impl<'d> Renderer<'_, 'd> {
                             warn(self.warnings, "表の縦書きは未対応です");
                         }
                     }
-                    if let Some(body) = child(*cell, A, "txBody") {
+                    if let Some(body) = child(cell, A, "txBody") {
                         text::render(
                             text::TextBody {
                                 body,
