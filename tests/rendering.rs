@@ -614,3 +614,104 @@ fn bullet_font_mapping_color_and_local_none_reach_pixels() {
         );
     }
 }
+
+#[test]
+fn preset_text_rectangle_applies_body_and_paragraph_margins_once() {
+    let dir = tempfile::tempdir().unwrap();
+    let body = r#"<p:txBody><a:bodyPr lIns="19050" rIns="28575" tIns="0" bIns="0"><a:normAutofit fontScale="55000"/></a:bodyPr><a:p><a:pPr marL="47625" marR="66675"><a:defRPr sz="1200"><a:latin typeface="Pptx2img Metrics Test"/></a:defRPr></a:pPr><a:r><a:t>AAAA AAAA AAAA AAAA AAAA AAAA</a:t></a:r></a:p></p:txBody>"#;
+    for (name, geometry, x, y, w, h) in [
+        ("arrow", "rightArrow", 0, 0, 100, 40),
+        ("rectangle", "rect", 0, 10, 90, 20),
+    ] {
+        let input = dir.path().join(format!("{name}.pptx"));
+        let shape = format!(
+            r#"<p:sp><p:spPr>{}<a:prstGeom prst="{geometry}"/><a:noFill/></p:spPr>{body}</p:sp>"#,
+            transform(x, y, w, h)
+        );
+        write_deck(&input, page("sld", "", "", &shape), vec![]);
+        check(run(&input, &dir.path().join(name), false));
+    }
+    assert_eq!(
+        image(&dir.path().join("arrow")).data(),
+        image(&dir.path().join("rectangle")).data()
+    );
+}
+
+#[test]
+fn preset_autofit_matches_explicit_expanded_geometry_for_each_anchor() {
+    let dir = tempfile::tempdir().unwrap();
+    for (anchor, y, final_y) in [("t", 10, 10), ("ctr", 35, 16), ("b", 65, 27)] {
+        for fitted in [false, true] {
+            let mode = if fitted { "spAutoFit" } else { "noAutofit" };
+            let (top, height) = if fitted { (y, 10) } else { (final_y, 48) };
+            let shape = format!(
+                r#"<p:sp><p:spPr>{}<a:prstGeom prst="rightArrow"/><a:solidFill><a:srgbClr val="00FF00"/></a:solidFill></p:spPr><p:txBody><a:bodyPr lIns="0" rIns="0" tIns="0" bIns="0" anchor="{anchor}"><a:{mode}/></a:bodyPr><a:p><a:pPr><a:defRPr sz="600"><a:latin typeface="Pptx2img Metrics Test"/></a:defRPr></a:pPr><a:r><a:t>A</a:t></a:r><a:br/><a:r><a:t>A</a:t></a:r><a:br/><a:r><a:t>A</a:t></a:r></a:p></p:txBody></p:sp>"#,
+                transform(0, top, 100, height)
+            );
+            let input = dir.path().join(format!("{anchor}-{fitted}.pptx"));
+            let out = dir.path().join(format!("{anchor}-{fitted}"));
+            write_deck(&input, page("sld", "", "", &shape), vec![]);
+            check(run(&input, &out, false));
+            let manifest: serde_json::Value =
+                serde_json::from_slice(&fs::read(out.join("manifest.json")).unwrap()).unwrap();
+            assert!(
+                !manifest["slides"][0]["diagnostics"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .any(|d| d["code"] == "text_overflow")
+            );
+        }
+        assert_eq!(
+            image(&dir.path().join(format!("{anchor}-true"))).data(),
+            image(&dir.path().join(format!("{anchor}-false"))).data()
+        );
+    }
+}
+
+#[test]
+fn preset_autofit_bounds_degenerate_areas_and_keeps_final_diagnostics_once() {
+    for (height, adjustment, limited) in [(0, 50000, false), (10, 0, true), (10, 1, true)] {
+        let d = tempfile::tempdir().unwrap();
+        let input = d.path().join("bounded.pptx");
+        let out = d.path().join("out");
+        let shape = format!(
+            r#"<p:sp><p:nvSpPr><p:cNvPr id="2" name="境界検証"/></p:nvSpPr><p:spPr>{}<a:prstGeom prst="rightArrow"><a:avLst><a:gd name="adj1" fmla="val {adjustment}"/></a:avLst></a:prstGeom><a:solidFill><a:srgbClr val="00FF00"/></a:solidFill></p:spPr><p:txBody><a:bodyPr lIns="0" rIns="0" tIns="0" bIns="0"><a:spAutoFit/></a:bodyPr><a:p><a:pPr><a:defRPr sz="600"><a:latin typeface="要求不在"/></a:defRPr></a:pPr><a:r><a:t>A</a:t></a:r><a:br/><a:r><a:t>A</a:t></a:r><a:br/><a:r><a:t>A</a:t></a:r></a:p></p:txBody></p:sp>"#,
+            transform(0, 10, 100, height)
+        );
+        write_deck(&input, page("sld", "", "", &shape), vec![]);
+        check(run(&input, &out, false));
+        let manifest: serde_json::Value =
+            serde_json::from_slice(&fs::read(out.join("manifest.json")).unwrap()).unwrap();
+        let records = manifest["slides"][0]["diagnostics"].as_array().unwrap();
+        assert_eq!(
+            records
+                .iter()
+                .filter(|d| d["message"].as_str().unwrap().contains("自動拡張が上限"))
+                .count(),
+            usize::from(limited)
+        );
+        assert_eq!(
+            records
+                .iter()
+                .filter(|d| d["code"] == "font_substitution")
+                .count(),
+            1
+        );
+        assert_eq!(
+            records
+                .iter()
+                .filter(|d| d["message"].as_str().unwrap().contains("文字組みは近似"))
+                .count(),
+            1
+        );
+        assert!(records.iter().all(|d| d["object_id"] == "2"));
+        if !limited {
+            // ゼロ高さからでも文字高24pxを収める48pxの矢印へ拡張する。
+            let img = image(&out);
+            assert_eq!(rgb(&img, 10, 25), (0, 255, 0));
+            assert_eq!(rgb(&img, 10, 47), (255, 255, 255));
+            assert!(!records.iter().any(|d| d["code"] == "text_overflow"));
+        }
+    }
+}
