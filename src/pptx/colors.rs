@@ -7,8 +7,30 @@ pub(super) fn resolve(
     placeholder: Option<&str>,
     warnings: &mut Warnings,
 ) -> String {
+    resolve_inner(node, default, theme, placeholder, false, warnings).0
+}
+pub(super) fn shadow_color(
+    node: Node<'_, '_>,
+    theme: &Theme,
+    warnings: &mut Warnings,
+) -> (String, f64) {
+    resolve_inner(node, "#000000", theme, None, true, warnings)
+}
+fn resolve_inner(
+    node: Node<'_, '_>,
+    default: &str,
+    theme: &Theme,
+    placeholder: Option<&str>,
+    alpha_enabled: bool,
+    warnings: &mut Warnings,
+) -> (String, f64) {
     for c in node.children().filter(|n| n.is_element()) {
         let rgb = match c.tag_name().name() {
+            "prstClr" => match c.attribute("val") {
+                Some("black") => Some("#000000".into()),
+                Some("white") => Some("#FFFFFF".into()),
+                _ => None,
+            },
             "srgbClr" => c
                 .attribute("val")
                 .filter(|s| theme::valid_rgb(s))
@@ -35,6 +57,7 @@ pub(super) fn resolve(
                 + components.iter().copied().fold(1.0, f64::min))
                 / 2.0;
             let mut changed = false;
+            let mut alpha = 1.0;
             for transform in c.children().filter(|n| n.is_element()) {
                 match transform.tag_name().name() {
                     "lumMod" => {
@@ -46,18 +69,31 @@ pub(super) fn resolve(
                         light = (light + number(transform, "val", 0.0) / 100000.0).clamp(0.0, 1.0);
                         changed = true;
                     }
+                    "alpha" if alpha_enabled => {
+                        alpha = (number(transform, "val", 100000.0) / 100000.0).clamp(0.0, 1.0)
+                    }
+                    "alphaMod" if alpha_enabled => {
+                        alpha =
+                            (alpha * number(transform, "val", 100000.0) / 100000.0).clamp(0.0, 1.0)
+                    }
+                    "alphaOff" if alpha_enabled => {
+                        alpha = (alpha + number(transform, "val", 0.0) / 100000.0).clamp(0.0, 1.0)
+                    }
                     name => warn(warnings, format!("未対応の色変換: {name}")),
                 }
             }
-            return if changed {
-                luminance(&rgb, 0.0, light)
-            } else {
-                rgb
-            };
+            return (
+                if changed {
+                    luminance(&rgb, 0.0, light)
+                } else {
+                    rgb
+                },
+                alpha,
+            );
         }
     }
     warn(warnings, "色を解決できないため代替色で描画しました");
-    default.into()
+    (default.into(), 1.0)
 }
 fn components(rgb: &str) -> [f64; 3] {
     std::array::from_fn(|i| {

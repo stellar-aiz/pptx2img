@@ -6,6 +6,7 @@ use std::{collections::HashMap, fs::File, io::Read, path::Path};
 
 mod colors;
 mod diagnostics;
+mod effects;
 mod geometry;
 mod layout;
 mod lines;
@@ -321,7 +322,7 @@ fn render_shape(
         .iter()
         .filter_map(|n| child(*n, P, "spPr"))
         .collect();
-    let Some(props) = props_chain.first().copied() else {
+    let Some(_) = props_chain.first() else {
         warnings.push(Code::Omitted, "図形属性がない要素を省略しました");
         return Ok(());
     };
@@ -371,7 +372,7 @@ fn render_shape(
     {
         if !matches!(
             attr.tag_name().name(),
-            "xfrm" | "prstGeom" | "solidFill" | "noFill" | "ln"
+            "xfrm" | "prstGeom" | "solidFill" | "noFill" | "ln" | "effectLst"
         ) {
             warn(
                 warnings,
@@ -389,6 +390,19 @@ fn render_shape(
             "テーマ由来の線・効果・文字スタイル参照は未対応です",
         );
     }
+    let effect_count = props_chain
+        .iter()
+        .find_map(|n| child(*n, A, "effectLst"))
+        .map(|n| {
+            effects::begin(
+                n,
+                (w, h, rotation, fx as f64, fy as f64),
+                theme,
+                svg,
+                warnings,
+            )
+        })
+        .unwrap_or(0);
     if node.has_tag_name((P, "pic")) {
         render_image(node, parts, rels, w, h, svg, warnings)?;
     } else {
@@ -488,6 +502,9 @@ fn render_shape(
             );
             svg.push_str("</g>");
         }
+    }
+    for _ in 0..effect_count {
+        svg.push_str("</g>");
     }
     svg.push_str("</g>");
     Ok(())
