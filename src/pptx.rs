@@ -340,6 +340,16 @@ fn render_shape(
     warnings: &mut Warnings,
 ) -> Result<()> {
     let node = shape.chain[0];
+    if node.has_tag_name((P, "cxnSp"))
+        && node
+            .descendants()
+            .any(|n| n.has_tag_name((A, "stCxn")) || n.has_tag_name((A, "endCxn")))
+    {
+        warnings.push(
+            Code::Unsupported,
+            "接続先の接続点に基づくコネクタ経路の再計算は未対応です。保存された形状と変換で描画します",
+        );
+    }
     let props_chain: Vec<_> = shape
         .chain
         .iter()
