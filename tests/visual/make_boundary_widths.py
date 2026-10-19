@@ -1,4 +1,4 @@
-"""境界幅の前後を0.01pt刻みで検証する自作資料。生成時のみ python-pptx が必要。"""
+"""Independent fixture testing widths around boundaries in 0.01pt steps; python-pptx is needed only for generation."""
 import argparse
 import json
 from pathlib import Path
@@ -15,7 +15,7 @@ def make(output, sizes, include_prefix_cases=False):
     patterns = [(size, text, size * factor) for size in sizes
                 for text, factor in [('あいうえおか', 6), ('あ、いう、え', 5)]]
     if 12 in sizes and include_prefix_cases:
-        # 末尾で終わる場合と途中の改行候補を比較し、句読点なしでも同じ境界か確認する。
+        # Compare final lines with intermediate break candidates, including cases without punctuation.
         patterns.extend((12, 'あいうえおか', width) for width in (36, 48, 60))
         patterns.extend([(12, 'あいうえお', 60), (12, 'あ、いう、', 60)])
     if 24 in sizes:

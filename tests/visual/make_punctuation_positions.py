@@ -1,4 +1,4 @@
-"""句読点の圧縮量と行内位置を比較する自作資料。生成時のみ python-pptx が必要。"""
+"""Independent fixtures comparing punctuation compression and inline positions; python-pptx is needed only for generation."""
 import argparse
 import json
 from pathlib import Path
@@ -44,6 +44,6 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('output', type=Path)
     parser.add_argument('--sizes', type=float, nargs='+', default=[12, 18, 24])
-    parser.add_argument('--nested', action='store_true', help='未解決の連続括弧の再現資料を生成')
+    parser.add_argument('--nested', action='store_true', help='Generate the known unresolved nested-bracket fixture')
     args = parser.parse_args()
     make(args.output, args.sizes, args.nested)

@@ -1,7 +1,7 @@
-# Rust のビルド成果物と描画比較の実行証跡
+# Rust build artifacts and rendering comparison evidence
 /target/
 
-# Python の仮想環境とキャッシュ（比較テスト専用）
+# Python environments and caches (comparison tests only)
 /.venv/
 /.venv-*/
 /venv/
@@ -12,23 +12,23 @@ __pycache__/
 .coverage
 htmlcov/
 
-# ローカル環境設定。共有用の設定例は管理する
+# Local settings; keep shared configuration examples tracked
 .env
 .env.*
 !.env.example
 !.env.*.example
 
-# OS・エディターの一時ファイル
+# OS and editor temporary files
 .DS_Store
 Thumbs.db
 *.swp
 *.swo
 *~
 
-# ローカル専用の認証・内部状態
+# Local-only credentials and internal state
 /auth.json
 /internal_storage.json
 /version.json
 
-# ローカルの実験用資料と生成結果
+# Local experimental inputs and outputs
 /playground/

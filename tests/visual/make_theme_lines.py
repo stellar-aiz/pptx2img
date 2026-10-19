@@ -1,4 +1,4 @@
-"""テーマ線参照、同等の直接指定、細線の端部を比較する自作資料。"""
+"""Independent fixture comparing theme lines, equivalent explicit styles, and thin-line heads."""
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from zipfile import ZipFile

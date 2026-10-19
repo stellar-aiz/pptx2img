@@ -1,4 +1,4 @@
-"""LibreOffice を比較対象にした描画テスト。差分は正解・不正解を断定しない。"""
+"""Rendering comparison against LibreOffice. Differences do not establish which renderer is correct."""
 from __future__ import annotations
 
 import argparse
@@ -25,7 +25,7 @@ def digest(path: Path) -> str:
 
 def compare_images(actual: Image.Image, reference: Image.Image, tolerance: int) -> tuple[dict, Image.Image]:
     if actual.size != reference.size:
-        raise ValueError(f"画像寸法が一致しません: {actual.size} / {reference.size}")
+        raise ValueError(f"Image dimensions differ: {actual.size} / {reference.size}")
     actual, reference = actual.convert("RGB"), reference.convert("RGB")
     difference = ImageChops.difference(actual, reference)
     channels = difference.split()
@@ -39,7 +39,7 @@ def compare_images(actual: Image.Image, reference: Image.Image, tolerance: int) 
         "width": actual.width,
         "height": actual.height,
     }
-    # 同じ画素は黒、違う画素は差の強さに応じて赤。弱い差も視認しやすくする。
+    # Matching pixels are black; differing pixels are red by magnitude, enhancing faint differences.
     heatmap = Image.merge("RGB", (maximum.point(lambda x: min(255, x * 4)), Image.new("L", actual.size), Image.new("L", actual.size)))
     return metrics, heatmap
 
@@ -49,26 +49,26 @@ def passes(metrics: dict, max_mae: float, max_changed_ratio: float) -> bool:
 
 
 def load_regions(path: Path | None) -> list[dict]:
-    """矩形は画像全体に対する x, y, 幅, 高さ（0〜1）。範囲外は補正せず拒否する。"""
+    """Rectangles are normalized x, y, width, height (0-1). Reject out-of-bounds values instead of correcting them."""
     if path is None:
         return []
     regions = json.loads(path.read_text())["regions"]
     if not isinstance(regions, list) or not regions:
-        raise ValueError("regions は空でない配列で指定してください")
+        raise ValueError("regions must be a nonempty array")
     identities = set()
     for region in regions:
         slide, name, rect = region["slide"], region["name"], region["rect"]
         if type(slide) is not int or slide < 1 or not isinstance(name, str) or not name:
-            raise ValueError("領域には正のページ番号と空でない名前が必要です")
+            raise ValueError("Regions require a positive page number and a nonempty name")
         if not isinstance(rect, list) or len(rect) != 4 or any(
             type(v) not in (int, float) or not math.isfinite(v) for v in rect
         ):
-            raise ValueError("rect は有限数の [x, y, 幅, 高さ] で指定してください")
+            raise ValueError("rect must contain finite [x, y, width, height] values")
         x, y, width, height = rect
         if x < 0 or y < 0 or width <= 0 or height <= 0 or x + width > 1 or y + height > 1:
-            raise ValueError("領域が画像内に収まっていません")
+            raise ValueError("Region lies outside the image")
         if (slide, name) in identities:
-            raise ValueError("同じページの領域名は重複できません")
+            raise ValueError("Region names must be unique within a page")
         identities.add((slide, name))
     return regions
 
@@ -87,7 +87,7 @@ def compare_regions(actual: Image.Image, reference: Image.Image, regions: list[d
 
 
 def diagnostic_summary(diagnostics: list[dict] | None) -> dict:
-    # 古い manifest の未記録と、新しい manifest の診断なしを区別する。
+    # Distinguish missing diagnostics in old manifests from empty diagnostics in new ones.
     if diagnostics is None:
         return {"available": False, "by_code": {}, "has_omissions": None}
     counts = dict(sorted(Counter(record["code"] for record in diagnostics).items()))
@@ -96,11 +96,11 @@ def diagnostic_summary(diagnostics: list[dict] | None) -> dict:
 
 def execute(command: list[str], directory: Path, name: str, env: dict) -> str:
     (directory / f"{name}.command.json").write_text(json.dumps(command, ensure_ascii=False, indent=2))
-    # タイムアウト時も失敗時も、途中までのログを失わない。
+    # Preserve partial logs on timeouts and failures.
     with (directory / f"{name}.stdout.log").open("w") as stdout, (directory / f"{name}.stderr.log").open("w") as stderr:
         result = subprocess.run(command, stdout=stdout, stderr=stderr, env=env, timeout=120, check=False)
     if result.returncode != 0:
-        raise RuntimeError(f"{name} が失敗しました（終了コード {result.returncode}）。ログ: {directory}")
+        raise RuntimeError(f"{name} failed (exit code {result.returncode}). Logs: {directory}")
     return (directory / f"{name}.stdout.log").read_text(errors="replace").strip()
 
 
@@ -109,7 +109,7 @@ def find_soffice(value: str | None) -> str:
     if candidate is None and sys.platform == "darwin":
         candidate = "/Applications/LibreOffice.app/Contents/MacOS/soffice"
     if not candidate or not Path(candidate).is_file():
-        raise RuntimeError("LibreOffice がありません。--soffice または SOFFICE で実行ファイルを指定してください")
+        raise RuntimeError("LibreOffice not found. Specify its executable with --soffice or SOFFICE")
     return str(Path(candidate).resolve())
 
 
@@ -128,7 +128,7 @@ def font_inventory() -> list[dict]:
 
 
 def compression_profile(enabled: bool) -> str:
-    # ユーザーの通常プロファイルに触れず、比較条件を明示的に固定する。
+    # Pin comparison settings without modifying the user's regular profile.
     mode = 1 if enabled else 0
     return f'''<?xml version="1.0" encoding="UTF-8"?>
 <oor:items xmlns:oor="http://openoffice.org/2001/registry">
@@ -149,8 +149,8 @@ def run(args: argparse.Namespace) -> bool:
         regions = load_regions(region_path)
         report["regions"] = regions
         report["reference_limitations"] = [
-            "LibreOffice は比較対象であり、PowerPoint の正解画像はありません。",
-            "参照側にも描画差や重なりがあり得ます。画素閾値内は互換性の証明ではありません。",
+            "LibreOffice is a comparison reference; no PowerPoint ground-truth images are provided.",
+            "The reference may contain rendering differences or overlaps. Passing pixel thresholds does not prove compatibility.",
         ]
         source = Path(__file__).resolve()
         shutil.copyfile(source, out / "comparator.py")
@@ -159,7 +159,7 @@ def run(args: argparse.Namespace) -> bool:
         soffice = find_soffice(args.soffice)
         env = os.environ.copy()
         if sys.platform == "darwin":
-            # svp は macOS のフォント解決を変えるため、通常の CoreText 経路を使う。
+            # Use the regular CoreText path because svp changes font resolution on macOS.
             env["SAL_USE_VCLPLUGIN"] = "osx"
         report["environment"] = {
             "platform": platform.platform(), "python": sys.version,
@@ -178,7 +178,7 @@ def run(args: argparse.Namespace) -> bool:
             "regions_sha256": digest(out / "regions.json") if region_path else None,
             "width": args.width,
         }
-        # 読み込む入力を証跡として固定し、両者に同一ファイルを渡す。
+        # Preserve the input as evidence and pass the same file to both renderers.
         copied = out / "input.pptx"
         shutil.copyfile(fixture, copied)
         command = [str(binary), str(copied), "--out", str(out / "actual"), "--width", str(args.width), "--font-fallback"]
@@ -188,7 +188,7 @@ def run(args: argparse.Namespace) -> bool:
         manifest = json.loads((out / "actual/manifest.json").read_text())
         report["renderer_fonts"] = manifest.get("fonts")
         if any(region["slide"] > len(manifest["slides"]) for region in regions):
-            raise ValueError("指定領域のページ番号がスライド数を超えています")
+            raise ValueError("Region page number exceeds the slide count")
         reference_dir = out / "reference"
         reference_dir.mkdir()
         profile_xml = compression_profile(args.punctuation_compression)
@@ -200,21 +200,21 @@ def run(args: argparse.Namespace) -> bool:
             execute([soffice, f"-env:UserInstallation={Path(profile).resolve().as_uri()}", "--headless", "--convert-to", "pdf:impress_pdf_Export", "--outdir", str(reference_dir), str(copied)], out, "libreoffice", env)
         pdf_path = reference_dir / "input.pdf"
         if not pdf_path.is_file() or pdf_path.stat().st_size == 0:
-            raise RuntimeError("LibreOffice は正常終了しましたが PDF を生成していません")
+            raise RuntimeError("LibreOffice exited successfully but did not produce a PDF")
         (out / "diff").mkdir()
         with pdfium.PdfDocument(pdf_path) as document:
             if len(document) != len(manifest["slides"]) or len(document) == 0:
-                raise ValueError(f"ページ数が一致しません: PPTX={len(manifest['slides'])}, PDF={len(document)}")
+                raise ValueError(f"Page counts differ: PPTX={len(manifest['slides'])}, PDF={len(document)}")
             for index, slide in enumerate(manifest["slides"]):
                 name = f"slide-{index + 1:03}.png"
                 with Image.open(out / "actual" / slide["image"]) as loaded:
                     actual = loaded.convert("RGB")
                 page = document[index]
                 try:
-                    # 画像を伸縮して縦横比の不一致を隠さない。丸め誤差の 1px のみ許す。
+                    # Do not hide aspect ratio differences by stretching; allow only 1px of rounding error.
                     expected_height = actual.width * page.get_height() / page.get_width()
                     if abs(expected_height - actual.height) > 1.01:
-                        raise ValueError(f"スライド {index + 1} の縦横比が一致しません")
+                        raise ValueError(f"Aspect ratio differs on slide {index + 1}")
                     bitmap = page.render(scale=actual.width / page.get_width())
                     try:
                         reference = bitmap.to_pil().convert("RGB")
@@ -223,7 +223,7 @@ def run(args: argparse.Namespace) -> bool:
                 finally:
                     page.close()
                 if abs(reference.width - actual.width) > 1 or abs(reference.height - actual.height) > 1:
-                    raise ValueError("PDF の描画寸法が一致しません")
+                    raise ValueError("Rendered PDF dimensions differ")
                 reference = reference.resize(actual.size, Image.Resampling.LANCZOS)
                 reference.save(reference_dir / name)
                 metrics, heatmap = compare_images(actual, reference, args.pixel_tolerance)
@@ -250,13 +250,13 @@ def run(args: argparse.Namespace) -> bool:
         raise
     finally:
         (out / "report.json").write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n")
-        print(f"比較結果: {out / 'report.json'}", flush=True)
+        print(f"Comparison report: {out / 'report.json'}", flush=True)
 
 
 def fraction(value: str) -> float:
     number = float(value)
     if not 0 <= number <= 1:
-        raise argparse.ArgumentTypeError("0〜1 で指定してください")
+        raise argparse.ArgumentTypeError("Specify a value between 0 and 1")
     return number
 
 
@@ -266,8 +266,8 @@ def main() -> int:
     parser.add_argument("--fixture", type=Path, required=True)
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--soffice")
-    parser.add_argument("--regions", type=Path, help="正規化矩形の JSON。全体と同じ閾値で局所比較する")
-    parser.add_argument("--punctuation-compression", action="store_true", help="両エンジンの自動句読点圧縮を有効にする")
+    parser.add_argument("--regions", type=Path, help="JSON with normalized rectangles; compare regions using the whole-page thresholds")
+    parser.add_argument("--punctuation-compression", action="store_true", help="Enable automatic punctuation compression in both engines")
     parser.add_argument("--width", type=int, default=1200, choices=range(64, 4097), metavar="64..4096")
     parser.add_argument("--pixel-tolerance", type=int, default=16, choices=range(256), metavar="0..255")
     parser.add_argument("--max-mae", type=fraction, default=0.02)
@@ -276,7 +276,7 @@ def main() -> int:
     try:
         return 0 if run(args) else 1
     except Exception as error:
-        print(f"比較テストの実行エラー: {error}", file=sys.stderr)
+        print(f"Comparison execution error: {error}", file=sys.stderr)
         return 2
 
 

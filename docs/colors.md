@@ -1,21 +1,25 @@
-# 色変換とテーマ塗り
+# Color transforms and theme fills
 
-lumMod/lumOff は HSL の明度に記述順で適用する。途中で8ビットへ丸めず、
-最終色をRGBへ戻す。色相・彩度を保ち、明度は0〜1に制限する。
+Apply lumMod/lumOff to HSL luminance in document order. Do not round intermediate
+values to 8 bits; convert the final color back to RGB. Preserve hue/saturation
+and clamp luminance to 0–1.
 
-図形の fillRef はテーマ fmtScheme の fillStyleLst（1始まり）、
-bgFillStyleLst（1001始まり）を参照する。phClr には fillRef の色を渡す。
-明示 noFill/solidFill を優先する。未知の変換・単色以外のテーマ塗り・
-未解決参照は警告に残す。線・効果・文字のテーマ参照は対象外。
+Shape fillRef resolves against theme fmtScheme fillStyleLst (indices starting at 1)
+and bgFillStyleLst (starting at 1001), passing the reference color as phClr.
+Explicit noFill/solidFill wins. Unknown transforms, non-solid theme fills, and
+unresolved references produce warnings. This color-fill implementation does not
+cover line, effect, or text theme references; line support is documented separately.
 
-根拠は ECMA-376 Part 1 の DrawingML と
-[Open XML SDKのFillReference説明](https://learn.microsoft.com/en-us/dotnet/api/documentformat.openxml.drawing.fillreference)
-を参照。ibis-office のコード・テスト・素材は転用していない。
+Implemented independently from ECMA-376 Part 1 DrawingML and the
+[Open XML SDK FillReference description](https://learn.microsoft.com/en-us/dotnet/api/documentformat.openxml.drawing.fillreference).
+No ibis-office code, tests, or assets were reused.
 
-自作資料: `python tests/visual/make_colors.py /tmp/colors.pptx`。
-LibreOffice 26.2.5.2、1600px、既存閾値で MAE 0.000589、差分率0.422%。
+Fixture: `python tests/visual/make_colors.py /tmp/colors.pptx`.
+Historical comparison at 1600px with LibreOffice 26.2.5.2: MAE 0.000589,
+changed-pixel ratio 0.422%, within unchanged thresholds.
 
-原資料6・14ページをローカル目視・画素確認した。淡青の領域は
-RGB (25,163,252) から (210,237,254) となり、参照 (209,237,254) に近づいた。
-灰色パネルの塗りは再現され、残る周囲の影は未対応effectLstに由来する。
-文字差・箇条書きは別課題。原資料画像は公開していない。
+Local inspection of source pages 6/14 found the pale blue region changed from
+RGB (25,163,252) to (210,237,254), closer to reference (209,237,254).
+The gray panel fill was reproduced; at that stage, surrounding shadow differences
+came from unsupported effectLst. See [later shadow support](shadows.md).
+Text and bullet differences are separate issues. Source images were not published.

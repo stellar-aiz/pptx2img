@@ -1,4 +1,4 @@
-"""日本語比較資料の主要フォントと LibreOffice 版を固定する。差はエラーにする。"""
+"""Pin key fonts and the LibreOffice version for Japanese fixtures; fail on differences."""
 import hashlib
 import os
 from pathlib import Path
@@ -16,12 +16,12 @@ def check():
     for name, expected in EXPECTED_FONTS.items():
         path = fonts.get(name)
         if path is None or hashlib.sha256(path.read_bytes()).hexdigest() != expected:
-            raise RuntimeError(f"比較用フォントが基準と一致しません: {name}。環境差を確認してください")
+            raise RuntimeError(f"Comparison font differs from the baseline: {name}. Check the environment")
     soffice = os.environ.get("SOFFICE", "/Applications/LibreOffice.app/Contents/MacOS/soffice")
     version = subprocess.check_output([soffice, "--version"], text=True).strip()
     if not version.startswith("LibreOffice 26.2.5.2 "):
-        raise RuntimeError(f"比較用 LibreOffice の版が一致しません: {version}")
-    print("比較用フォントと LibreOffice の版を確認しました")
+        raise RuntimeError(f"Comparison LibreOffice version differs: {version}")
+    print("Verified comparison fonts and LibreOffice version")
 
 
 if __name__ == "__main__":

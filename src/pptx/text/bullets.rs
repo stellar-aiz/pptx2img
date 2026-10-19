@@ -1,4 +1,4 @@
-//! 箇条書きの排他的な属性継承と、段落レベルごとの番号列。
+//! Mutually exclusive bullet property inheritance and numbering per paragraph level.
 use super::*;
 
 pub(super) fn choice<'a>(nodes: &[Node<'a, '_>], tags: &[&str]) -> Option<Node<'a, 'a>> {
@@ -44,7 +44,7 @@ impl Counters {
                     {
                         Some(n) => n,
                         None => {
-                            warn(warnings, "不正な開始番号を1で近似します");
+                            warn(warnings, "Invalid start number; using 1");
                             1
                         }
                     }
@@ -55,7 +55,7 @@ impl Counters {
                 Some(number_label(kind, number, warnings))
             }
             _ => {
-                warn(warnings, "画像の箇条書き記号は未対応です");
+                warn(warnings, "Picture bullets are unsupported");
                 None
             }
         }
@@ -75,7 +75,7 @@ fn number_label(kind: &str, number: u32, warnings: &mut Warnings) -> String {
     } else {
         warn(
             warnings,
-            format!("未対応の番号形式 {kind} を算用数字で近似します"),
+            format!("Unsupported numbering format {kind}; using Arabic numerals"),
         );
         return format!("{number}.");
     };
@@ -87,7 +87,7 @@ fn number_label(kind: &str, number: u32, warnings: &mut Warnings) -> String {
         _ => {
             warn(
                 warnings,
-                format!("未対応の番号形式 {kind} を算用数字で近似します"),
+                format!("Unsupported numbering format {kind}; using Arabic numerals"),
             );
             format!("{number}.")
         }
@@ -104,7 +104,10 @@ fn alphabetic(mut number: u32) -> String {
 }
 fn roman(mut number: u32, warnings: &mut Warnings) -> String {
     if number > 3999 {
-        warn(warnings, "3999を超えるローマ数字を算用数字で近似します");
+        warn(
+            warnings,
+            "Roman numerals above 3999 are approximated with Arabic numerals",
+        );
         return number.to_string();
     }
     let mut result = String::new();
@@ -148,14 +151,14 @@ pub(super) fn style(
             "buSzPct" => {
                 let value = number(size, "val", 100000.0);
                 if !(25000.0..=400000.0).contains(&value) {
-                    warn(warnings, "箇条書き記号の百分率サイズを25〜400%へ制限します");
+                    warn(warnings, "Bullet percentage size is clamped to 25-400%");
                 }
                 base.size *= value.clamp(25000.0, 400000.0) / 100000.0;
             }
             "buSzPts" => {
                 let value = number(size, "val", base.size * 75.0 / scale);
                 if !(100.0..=400000.0).contains(&value) {
-                    warn(warnings, "箇条書き記号のサイズを1〜4000ptへ制限します");
+                    warn(warnings, "Bullet size is clamped to 1-4000pt");
                 }
                 base.size = value.clamp(100.0, 400000.0) / 75.0 * scale;
             }

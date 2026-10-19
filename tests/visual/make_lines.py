@@ -1,4 +1,4 @@
-"""直線・折れ線・破線・端部の自作比較資料。"""
+"""Independent fixture for straight lines, bent lines, dashes, and arrowheads."""
 from pathlib import Path
 import sys
 from pptx import Presentation

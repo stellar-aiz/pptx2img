@@ -1,7 +1,7 @@
-"""自動句読点圧縮の幅別比較資料。再生成時のみ python-pptx が必要。
+"""Automatic punctuation compression fixtures at different widths; python-pptx is needed only for regeneration.
 
-100/110/120/130/140/150pt を含む。120pt などの境界で残る改行差も保持する。
-全 run は字間 spc 未指定。自動圧縮と明示字間を混同しない。
+Includes 100/110/120/130/140/150pt, preserving boundary line-break differences such as those at 120pt.
+All runs leave spc unspecified. Do not confuse automatic compression with explicit spacing.
 """
 import argparse
 from pathlib import Path
@@ -40,11 +40,11 @@ def make(output: Path):
     for text in ('あ、いう、え', 'あ「い」う、', '「「あ」」い',
                  'あいうえおか', 'あ・い：う；', 'あ。いう。え'):
         width_cases(text)
-    # 設定を無視する実装が全体平均で合格しないよう、密な句読点も検証する。
+    # Include dense punctuation so an implementation ignoring the setting cannot pass on whole-page averages.
     slide = deck.slides.add_slide(deck.slide_layouts[6])
     for i in range(6):
         box(slide, 'あ、い、う、え、お、か、き、', 30, 10 + i * 65, 310)
-    # 圧縮とぶら下がりは別々に指定する。
+    # Configure compression and hanging punctuation separately.
     width_cases('あ、いう、え', hanging=True)
     deck.save(output)
 

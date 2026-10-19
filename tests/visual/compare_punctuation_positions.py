@@ -1,4 +1,4 @@
-"""単一文字枠の専用資料で、改行と行内の横方向の描画位置をLibreOfficeと比較する。"""
+"""Compare line breaks and horizontal positions against LibreOffice using single-text-box fixtures."""
 import argparse
 import json
 from pathlib import Path
@@ -6,7 +6,7 @@ from PIL import Image, ImageStat
 from compare import run
 from compare_boundary_widths import line_ink, same_breaks
 
-POSITION_TOLERANCE = 2.0  # 横幅1200pxで約0.48pt。既存の画素比較とは別の基準。
+POSITION_TOLERANCE = 2.0  # About 0.48pt at 1200px width; separate from pixel comparison thresholds.
 
 
 def horizontal_distribution(image, bounds):
@@ -18,7 +18,7 @@ def horizontal_distribution(image, bounds):
 
 
 def transport_distance(first, second):
-    """正規化した横方向の描画量の累積分布差。全体の濃さの違いには反応しない。"""
+    """Difference in cumulative normalized horizontal ink distribution, independent of overall darkness."""
     if not first or len(first) != len(second):
         return None
     cumulative = distance = 0.0

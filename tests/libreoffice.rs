@@ -1,4 +1,4 @@
-//! LibreOffice 比較は明示実行時のみ。通常の cargo test は Office を要求しない。
+//! Run LibreOffice comparisons only when explicitly requested; regular cargo test does not need Office.
 use std::{
     path::PathBuf,
     process::Command,
@@ -6,37 +6,37 @@ use std::{
 };
 
 #[test]
-#[ignore = "LibreOffice と日本語フォントが必要"]
+#[ignore = "Requires LibreOffice and Japanese fonts"]
 fn composite_shapes_match_libreoffice() {
     compare_fixture("composite-shapes");
 }
 
 #[test]
-#[ignore = "LibreOffice と tests/visual/requirements.txt の Python 依存が必要"]
+#[ignore = "Requires LibreOffice and Python dependencies from tests/visual/requirements.txt"]
 fn geometry_matches_libreoffice() {
     compare_fixture("geometry");
 }
 
 #[test]
-#[ignore = "LibreOffice と日本語フォントが必要"]
+#[ignore = "Requires LibreOffice and Japanese fonts"]
 fn theme_matches_libreoffice() {
     compare_fixture("theme");
 }
 
 #[test]
-#[ignore = "LibreOffice と日本語フォントが必要"]
+#[ignore = "Requires LibreOffice and Japanese fonts"]
 fn text_spacing_and_punctuation_match_libreoffice() {
     compare_fixture("text-theme");
 }
 
 #[test]
-#[ignore = "LibreOffice と日本語フォントが必要"]
+#[ignore = "Requires LibreOffice and Japanese fonts"]
 fn explicit_character_spacing_matches_libreoffice() {
     compare_fixture("character-spacing");
 }
 
 #[test]
-#[ignore = "LibreOffice と日本語フォントが必要"]
+#[ignore = "Requires LibreOffice and Japanese fonts"]
 fn automatic_punctuation_compression_matches_both_modes() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let python = std::env::var_os("PPTX2IMG_TEST_PYTHON").unwrap_or_else(|| "python3".into());
@@ -65,7 +65,7 @@ fn automatic_punctuation_compression_matches_both_modes() {
 }
 
 #[test]
-#[ignore = "LibreOffice と日本語フォントが必要"]
+#[ignore = "Requires LibreOffice and Japanese fonts"]
 fn boundary_widths_match_both_modes() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let python = std::env::var_os("PPTX2IMG_TEST_PYTHON").unwrap_or_else(|| "python3".into());
@@ -94,7 +94,7 @@ fn boundary_widths_match_both_modes() {
 }
 
 #[test]
-#[ignore = "LibreOffice と日本語フォントが必要"]
+#[ignore = "Requires LibreOffice and Japanese fonts"]
 fn punctuation_positions_match_both_modes() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let python = std::env::var_os("PPTX2IMG_TEST_PYTHON").unwrap_or_else(|| "python3".into());

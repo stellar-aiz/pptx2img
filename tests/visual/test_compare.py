@@ -1,4 +1,4 @@
-"""比較器自体が一致・差分を正しく扱うことを、Office 不要で検証する。"""
+"""Verify the comparator handles matches and differences correctly without Office."""
 import argparse
 import unittest
 import json

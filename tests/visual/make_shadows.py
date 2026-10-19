@@ -1,4 +1,4 @@
-"""方向・ぼかし・変換と、原資料10頁と同じ影パラメータの自作図形。"""
+"""Independent shapes for direction, blur, transforms, and shadow parameters matching source page 10."""
 from pathlib import Path
 import sys
 from pptx import Presentation

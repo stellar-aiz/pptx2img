@@ -173,7 +173,7 @@ fn table_font_reference_mapping_and_cell_margins_match_explicit_textbox() {
         assert_eq!(
             diagnostics
                 .iter()
-                .any(|d| d.message.contains("表セル・縦書きの自動枠拡張")),
+                .any(|d| d.message.contains("Shape autofit for table cells")),
             table
         );
         assert!(

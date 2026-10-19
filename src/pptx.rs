@@ -1,4 +1,4 @@
-//! OOXML のうち明示座標の図形・文字・画像を描画する。未対応は警告として残す。
+//! Render OOXML shapes, text, and images with explicit coordinates; warn on unsupported features.
 use anyhow::{Context, Result, bail};
 use base64::{Engine, engine::general_purpose::STANDARD};
 use roxmltree::{Document, Node};
@@ -49,13 +49,13 @@ fn warn(warnings: &mut Warnings, value: impl Into<String>) {
 fn xml<'a>(parts: &'a Parts, name: &str) -> Result<Document<'a>> {
     let bytes = parts
         .get(name)
-        .with_context(|| format!("PPTX 内の部品がありません: {name}"))?;
+        .with_context(|| format!("Missing PPTX part: {name}"))?;
     Document::parse(std::str::from_utf8(bytes)?)
-        .with_context(|| format!("XML を解釈できません: {name}"))
+        .with_context(|| format!("Cannot parse XML: {name}"))
 }
 fn resolve(base: &str, target: &str) -> Result<String> {
     if target.contains('\\') || target.contains(':') || target.contains('%') {
-        bail!("未対応の部品 URI: {target}");
+        bail!("Unsupported part URI: {target}");
     }
     let mut components: Vec<&str> = if target.starts_with('/') {
         vec![]
@@ -69,7 +69,7 @@ fn resolve(base: &str, target: &str) -> Result<String> {
             "" | "." => {}
             ".." => {
                 if components.pop().is_none() {
-                    bail!("パッケージ外を指す部品 URI");
+                    bail!("Part URI points outside the package");
                 }
             }
             other => components.push(other),
@@ -91,13 +91,11 @@ fn relationships(parts: &Parts, base: &str) -> Result<Relationships> {
         .descendants()
         .filter(|n| n.has_tag_name((PKG_R, "Relationship")))
     {
-        let id = node
-            .attribute("Id")
-            .context("Relationship に Id がありません")?;
+        let id = node.attribute("Id").context("Relationship is missing Id")?;
         let external = node.attribute("TargetMode") == Some("External");
         let target = node
             .attribute("Target")
-            .context("Relationship に Target がありません")?;
+            .context("Relationship is missing Target")?;
         result.insert(
             id.into(),
             Part {
@@ -136,13 +134,13 @@ pub struct RenderOptions<'a> {
 }
 
 pub fn read(path: &Path, options: &RenderOptions<'_>) -> Result<Deck> {
-    let file = File::open(path).context("入力 PPTX を開けません")?;
+    let file = File::open(path).context("Cannot open input PPTX")?;
     if file.metadata()?.len() > 128 * 1024 * 1024 {
-        bail!("入力は 128 MiB 以下にしてください");
+        bail!("Input must not exceed 128 MiB");
     }
-    let mut archive = zip::ZipArchive::new(file).context("PPTX の ZIP を読めません")?;
+    let mut archive = zip::ZipArchive::new(file).context("Cannot read PPTX ZIP archive")?;
     if archive.len() > 10_000 {
-        bail!("部品数が上限を超えています");
+        bail!("Part count exceeds the limit");
     }
     let mut parts = HashMap::new();
     let mut total = 0usize;
@@ -158,44 +156,44 @@ pub fn read(path: &Path, options: &RenderOptions<'_>) -> Result<Deck> {
             .read_to_end(&mut data)?;
         total += data.len();
         if data.len() > 32 * 1024 * 1024 || total > 256 * 1024 * 1024 {
-            bail!("展開後の PPTX が上限を超えています");
+            bail!("Uncompressed PPTX exceeds the limit");
         }
         if parts.insert(name, data).is_some() {
-            bail!("ZIP 内に同名の部品があります");
+            bail!("Duplicate part name in ZIP archive");
         }
     }
     let roots = relationships(&parts, "")?;
     let root = roots
         .values()
         .find(|r| r.kind.ends_with("/officeDocument") && !r.external)
-        .context("presentation の関連がありません")?;
+        .context("Missing presentation relationship")?;
     let doc = xml(&parts, &root.target)?;
     if !doc.root_element().has_tag_name((P, "presentation")) {
-        bail!("Transitional 形式の PPTX のみ対応しています");
+        bail!("Only Transitional PPTX is supported");
     }
-    let size = child(doc.root_element(), P, "sldSz").context("スライド寸法がありません")?;
+    let size = child(doc.root_element(), P, "sldSz").context("Missing slide dimensions")?;
     let width = number(size, "cx", 0.0) / EMU;
     let height = number(size, "cy", 0.0) / EMU;
     if width <= 0.0 || height <= 0.0 || width > 100_000.0 || height > 100_000.0 {
-        bail!("スライド寸法が不正です");
+        bail!("Invalid slide dimensions");
     }
     let rels = relationships(&parts, &root.target)?;
     let mut slides = Vec::new();
     for id in doc.descendants().filter(|n| n.has_tag_name((P, "sldId"))) {
         if slides.len() >= 200 {
-            bail!("初期版は 200 スライドまで対応しています");
+            bail!("This release supports up to 200 slides");
         }
         let rid = id
             .attribute((R, "id"))
-            .context("スライドの関連 ID がありません")?;
-        let part = rels.get(rid).context("スライドの関連を解決できません")?;
+            .context("Missing slide relationship ID")?;
+        let part = rels.get(rid).context("Cannot resolve slide relationship")?;
         if part.external || !part.kind.ends_with("/slide") {
-            bail!("スライドの関連が不正です");
+            bail!("Invalid slide relationship");
         }
         slides.push(render_slide(&parts, &part.target, width, height, options)?);
     }
     if slides.is_empty() {
-        bail!("スライドがありません");
+        bail!("No slides found");
     }
     Ok(Deck {
         width,
@@ -220,7 +218,7 @@ fn fill(node: Node<'_, '_>, default: &str, theme: &Theme, warnings: &mut Warning
             "gradFill" | "pattFill" | "blipFill" | "grpFill"
         )
     }) {
-        warn(warnings, "単色以外の塗りは未対応です");
+        warn(warnings, "Non-solid fills are unsupported");
     }
     default.into()
 }
@@ -252,12 +250,12 @@ fn render_slide(
         .map(|n| fill(n, "#ffffff", &theme, &mut warnings))
         .unwrap_or_else(|| "#ffffff".into());
     if background_node.and_then(|n| child(n, P, "bgRef")).is_some() {
-        warn(&mut warnings, "テーマ背景は未対応です");
+        warn(&mut warnings, "Theme backgrounds are unsupported");
     }
     let mut svg = format!(
         "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"{width}\" height=\"{height}\" viewBox=\"0 0 {width} {height}\"><rect width=\"100%\" height=\"100%\" fill=\"{background}\"/>"
     );
-    // 低い層から描き、スライド自身が最後に重なる。ひな形のサンプル文字は描かない。
+    // Paint lower layers first and the slide last. Do not paint template sample text.
     for index in (0..roots.len()).rev() {
         if index > 0 && theme::bool_attr(roots[0], "showMasterSp") == Some(false) {
             continue;
@@ -265,7 +263,7 @@ fn render_slide(
         if index == 2 && theme::bool_attr(roots[1], "showMasterSp") == Some(false) {
             continue;
         }
-        let tree = layout::tree(roots[index]).context("図形ツリーがありません")?;
+        let tree = layout::tree(roots[index]).context("Missing shape tree")?;
         let rels = relationships(parts, &paths[index])?;
         let mut renderer = objects::Renderer {
             parts,
@@ -297,7 +295,7 @@ fn render_slide(
         if !matches!(n.tag_name().name(), "cSld" | "clrMapOvr") {
             warn(
                 &mut warnings,
-                format!("未対応のスライド属性: {}", n.tag_name().name()),
+                format!("Unsupported slide property: {}", n.tag_name().name()),
             );
         }
     }
@@ -326,7 +324,7 @@ fn render_shape(
     {
         warnings.push(
             Code::Unsupported,
-            "接続先の接続点に基づくコネクタ経路の再計算は未対応です。保存された形状と変換で描画します",
+            "Connector rerouting from connection sites is unsupported; using saved geometry and transforms",
         );
     }
     let props_chain: Vec<_> = shape
@@ -335,7 +333,7 @@ fn render_shape(
         .filter_map(|n| child(*n, P, "spPr"))
         .collect();
     let Some(_) = props_chain.first() else {
-        warnings.push(Code::Omitted, "図形属性がない要素を省略しました");
+        warnings.push(Code::Omitted, "Omitted element without shape properties");
         return Ok(());
     };
     let transforms: Vec<_> = props_chain
@@ -343,26 +341,29 @@ fn render_shape(
         .filter_map(|n| child(*n, A, "xfrm"))
         .collect();
     let Some(transform) = transforms.first().copied() else {
-        warnings.push(Code::Omitted, "継承座標を解決できない要素を省略しました");
+        warnings.push(
+            Code::Omitted,
+            "Omitted element whose inherited transform cannot be resolved",
+        );
         return Ok(());
     };
     let (Some(offset), Some(extent)) = (
         transforms.iter().find_map(|n| child(*n, A, "off")),
         transforms.iter().find_map(|n| child(*n, A, "ext")),
     ) else {
-        bail!("図形の座標・寸法がありません");
+        bail!("Missing shape position or dimensions");
     };
     let x = number(offset, "x", 0.0) / EMU;
     let mut y = number(offset, "y", 0.0) / EMU;
     let w = number(extent, "cx", 0.0) / EMU;
     let mut h = number(extent, "cy", 0.0) / EMU;
     if w < 0.0 || h < 0.0 {
-        bail!("図形寸法が負です");
+        bail!("Shape dimensions are negative");
     }
     let mut text_svg = String::new();
     if let Some(body) = child(node, P, "txBody") {
-        // 図形の文字領域で計測する。高さ変更で文字領域の幅も変わるため、
-        // 最終寸法で再計測する。保存済みfontScaleは再探索しない。
+        // Measure within the shape's text area. Height changes may also change its width,
+        // so measure again at the final size. Do not search for a new saved fontScale.
         let geometry_node = props_chain.iter().find_map(|n| child(*n, A, "prstGeom"));
         for attempt in 0..16 {
             let mut measured_warnings = Warnings::default();
@@ -411,10 +412,10 @@ fn render_shape(
             if growth > 0.01 {
                 warn(
                     warnings,
-                    "図形文字領域の自動拡張が上限に達したため本文が収まらない可能性があります",
+                    "Shape text autofit reached its limit; text may not fit",
                 );
             }
-            // 中間寸法の診断を残さず、採用した配置の診断だけを公開する。
+            // Publish diagnostics only for the selected layout, not intermediate sizes.
             for record in measured_warnings.records {
                 warnings.measured(record);
             }
@@ -450,7 +451,7 @@ fn render_shape(
         ) {
             warn(
                 warnings,
-                format!("未対応の図形属性: {}", attr.tag_name().name()),
+                format!("Unsupported shape property: {}", attr.tag_name().name()),
             );
         }
     }
@@ -459,7 +460,10 @@ fn render_shape(
         n.children()
             .any(|c| c.is_element() && !matches!(c.tag_name().name(), "fillRef" | "lnRef"))
     }) {
-        warn(warnings, "テーマ由来の効果・文字スタイル参照は未対応です");
+        warn(
+            warnings,
+            "Theme effect and text style references are unsupported",
+        );
     }
     let effect_count = props_chain
         .iter()
@@ -518,7 +522,7 @@ fn render_shape(
                 if geometry.attribute("prst") != Some("roundRect")
                     && geometry.descendants().any(|n| n.has_tag_name((A, "gd")))
                 {
-                    warn(warnings, "図形の調整値は未対応です");
+                    warn(warnings, "Shape adjustments are unsupported");
                 }
                 match geometry.attribute("prst").unwrap_or("") {
                     "rect" => {
@@ -535,7 +539,10 @@ fn render_shape(
                             if let (Some("adj"), Some(value)) = (guide.attribute("name"), value) {
                                 adjustment = value;
                             } else {
-                                warn(warnings, "角丸矩形の調整式は未対応です");
+                                warn(
+                                    warnings,
+                                    "Rounded rectangle adjustment formulas are unsupported",
+                                );
                             }
                         }
                         let radius = w.min(h) * adjustment.clamp(0.0, 50000.0) / 100000.0;
@@ -555,7 +562,7 @@ fn render_shape(
                         svg.push_str(&format!("<line x2=\"{w}\" y2=\"{h}\" {style}/>"))
                     }
                     other => {
-                        warnings.push(Code::Omitted, format!("未対応のプリセット図形: {other}"))
+                        warnings.push(Code::Omitted, format!("Unsupported preset shape: {other}"))
                     }
                 }
             }
@@ -581,7 +588,10 @@ fn fill_line(node: Node<'_, '_>, theme: &Theme, warnings: &mut Warnings) -> Stri
                 | "bevel"
                 | "miter"
         ) {
-            warn(warnings, format!("未対応の線属性: {}", n.tag_name().name()));
+            warn(
+                warnings,
+                format!("Unsupported line property: {}", n.tag_name().name()),
+            );
         }
     }
     fill(node, "none", theme, warnings)
@@ -596,39 +606,42 @@ fn render_image(
     warnings: &mut Warnings,
 ) -> Result<()> {
     let Some(blip) = node.descendants().find(|n| n.has_tag_name((A, "blip"))) else {
-        warnings.push(Code::Omitted, "画像参照がありません");
+        warnings.push(Code::Omitted, "Missing image reference");
         return Ok(());
     };
     let Some(id) = blip.attribute((R, "embed")) else {
-        warnings.push(Code::Omitted, "外部リンク画像は読み込みません");
+        warnings.push(Code::Omitted, "Externally linked images are not loaded");
         return Ok(());
     };
-    let part = rels.get(id).context("画像の関連がありません")?;
+    let part = rels.get(id).context("Missing image relationship")?;
     if part.external {
-        warnings.push(Code::Omitted, "外部リンク画像は読み込みません");
+        warnings.push(Code::Omitted, "Externally linked images are not loaded");
         return Ok(());
     }
-    let data = parts.get(&part.target).context("画像の部品がありません")?;
-    let dimensions = imagesize::blob_size(data).context("画像寸法を取得できません")?;
+    let data = parts.get(&part.target).context("Missing image part")?;
+    let dimensions = imagesize::blob_size(data).context("Cannot read image dimensions")?;
     if dimensions.width > 8192
         || dimensions.height > 8192
         || dimensions.width.saturating_mul(dimensions.height) > 16_777_216
     {
-        bail!("埋め込み画像の画素数が上限を超えています");
+        bail!("Embedded image pixel count exceeds the limit");
     }
     let mime = if data.starts_with(b"\x89PNG\r\n\x1a\n") {
         "image/png"
     } else if data.starts_with(b"\xff\xd8\xff") {
         "image/jpeg"
     } else {
-        warnings.push(Code::Omitted, "PNG/JPEG 以外の画像は未対応です");
+        warnings.push(Code::Omitted, "Only PNG/JPEG images are supported");
         return Ok(());
     };
     if node.descendants().any(|n| {
         n.has_tag_name((A, "tile")) || (n.has_tag_name((A, "fillRect")) && n.attributes().len() > 0)
     }) || blip.children().any(|n| n.is_element())
     {
-        warn(warnings, "画像のタイル・効果・塗り先の矩形指定は未対応です");
+        warn(
+            warnings,
+            "Image tiling, effects, and fill rectangles are unsupported",
+        );
     }
     let crop = node.descendants().find(|n| n.has_tag_name((A, "srcRect")));
     let values: Vec<_> = ["l", "t", "r", "b"]
@@ -637,11 +650,11 @@ fn render_image(
         .collect();
     let (left, top, right, bottom) = (values[0], values[1], values[2], values[3]);
     if left + right >= 1.0 || top + bottom >= 1.0 {
-        bail!("画像のトリミング後の寸法が正数ではありません");
+        bail!("Cropped image dimensions must be positive");
     }
     let iw = w / (1.0 - left - right);
     let ih = h / (1.0 - top - bottom);
-    // 入れ子の SVG の表示領域で切り抜く。回転・反転は外側の図形座標系で適用する。
+    // Clip to the nested SVG viewport; rotate and flip in the outer shape coordinates.
     svg.push_str(&format!("<svg width=\"{w}\" height=\"{h}\" overflow=\"hidden\"><image x=\"{}\" y=\"{}\" width=\"{iw}\" height=\"{ih}\" preserveAspectRatio=\"none\" href=\"data:{mime};base64,{}\"/></svg>", -left*iw, -top*ih, STANDARD.encode(data)));
     Ok(())
 }

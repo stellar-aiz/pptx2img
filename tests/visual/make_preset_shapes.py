@@ -1,4 +1,4 @@
-"""対象プリセット5種類の自作比較資料。実資料の素材は含めない。"""
+"""Independent fixture for five presets; contains no assets from provided documents."""
 from pathlib import Path
 import sys
 from pptx import Presentation

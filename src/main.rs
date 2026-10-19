@@ -1,36 +1,42 @@
-//! PPTX → PNG 変換ライブラリの CLI。
+//! CLI for the PPTX-to-PNG conversion library.
 mod cli_output;
 use clap::Parser;
 use pptx2img::{ConvertOptions, SlideReport, convert};
 use std::path::PathBuf;
 
 #[derive(Parser)]
-#[command(version, about = "Office 非依存の PPTX → PNG 変換（初期版）")]
+#[command(
+    version,
+    about = "Convert PPTX to PNG without Office (early release)",
+    after_help = "Fonts: system fonts are loaded by default; application bundles and inaccessible paths may not be searched. Add available font files with --font-file.
+Individual missing glyphs use available fallback fonts with warnings; unrenderable glyphs fail. Family substitution requires --font-fallback.
+Results: YAML on stdout for success, stderr for failure. Detailed diagnostics are saved in manifest.json on success."
+)]
 struct Args {
-    /// 入力 PPTX
+    /// Input PPTX
     input: PathBuf,
-    /// 出力ディレクトリ（省略時は入力と同じ場所の <入力名>.pptx2img、既存は上書きしない）
+    /// Output directory (default: <input>.pptx2img beside the input; never overwritten)
     #[arg(long)]
     out: Option<PathBuf>,
-    /// 出力画像の横幅
+    /// Output image width
     #[arg(long, default_value_t = 1600, value_parser = clap::value_parser!(u32).range(64..=4096))]
     width: u32,
-    /// 警告があれば画像を出力せず失敗する
+    /// Fail on warnings without writing images
     #[arg(long)]
     strict: bool,
-    /// 不足フォント・太さや斜体の不一致を許容して代替描画する
+    /// Allow font-family substitution and approximate weight or italic style
     #[arg(long)]
     font_fallback: bool,
-    /// 行幅が不足するとき句読点の余白を自動圧縮する（実験的・既定は無効）
+    /// Compress punctuation spacing to fit lines (experimental; disabled by default)
     #[arg(long)]
     punctuation_compression: bool,
-    /// システムフォントに加えて読み込むフォント（複数指定可）
+    /// Additional font file (repeatable)
     #[arg(long)]
     font_file: Vec<PathBuf>,
-    /// システムフォントを読まず、指定したフォントだけを使う
+    /// Load only explicitly supplied fonts, without system fonts
     #[arg(long)]
     no_system_fonts: bool,
-    /// 要求書体=代替書体 の対応（複数指定可、一段のみ）
+    /// Requested=Replacement font mapping (repeatable; one step only)
     #[arg(long, value_parser = parse_font_mapping)]
     font_map: Vec<(String, String)>,
 }
@@ -38,9 +44,9 @@ struct Args {
 fn parse_font_mapping(value: &str) -> std::result::Result<(String, String), String> {
     let (from, to) = value
         .split_once('=')
-        .ok_or("要求書体=代替書体 を指定してください")?;
+        .ok_or("Specify Requested=Replacement")?;
     if from.trim().is_empty() || to.trim().is_empty() {
-        return Err("書体名は空にできません".into());
+        return Err("Font family names must not be empty".into());
     }
     Ok((from.trim().into(), to.trim().into()))
 }
@@ -54,19 +60,19 @@ fn print_warnings(slides: &[SlideReport]) {
                     .or_default()
                     .insert(format!("{} ({})", font.post_script_name, font.reason));
             } else {
-                eprintln!("警告 [スライド {}]: {}", slide.slide, diagnostic.message);
+                eprintln!("Warning [slide {}]: {}", slide.slide, diagnostic.message);
             }
         }
     }
     for (requested, actual) in &fonts {
         eprintln!(
-            "フォント代替: {requested} → {}",
+            "Font substitution: {requested} -> {}",
             actual.iter().cloned().collect::<Vec<_>>().join(", ")
         );
     }
     if !fonts.is_empty() {
         eprintln!(
-            "指定書体は --font-file で追加、代替先は --font-map '要求書体=代替書体' で指定できます。詳細は manifest.json の diagnostics.font を参照してください。"
+            "Add fonts with --font-file or select replacements with --font-map 'Requested=Replacement'. See diagnostics.font in manifest.json for details."
         );
     }
 }

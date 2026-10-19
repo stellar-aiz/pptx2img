@@ -1,9 +1,9 @@
-//! Office に依存せず PPTX を PNG と manifest.json に変換するライブラリ。
+//! Convert PPTX to PNG and manifest.json without an Office runtime dependency.
 //!
 //! ```no_run
 //! use pptx2img::{convert, ConvertOptions};
 //! let report = convert("slides.pptx", "images", &ConvertOptions::default())?;
-//! println!("{} 枚を出力", report.slides.len());
+//! println!("Rendered {} slides", report.slides.len());
 //! # Ok::<(), anyhow::Error>(())
 //! ```
 mod pptx;
@@ -16,22 +16,22 @@ use std::{
     path::{Path, PathBuf},
 };
 
-/// CLI と共通の変換設定。
+/// Conversion options shared with the CLI.
 #[derive(Clone, Debug)]
 pub struct ConvertOptions {
-    /// 出力幅。64〜4096 ピクセル。
+    /// Output width in pixels, from 64 to 4096.
     pub width: u32,
-    /// 警告がある場合、ファイルを出力せず StrictModeError を返す。
+    /// Return StrictModeError on warnings without writing files.
     pub strict: bool,
-    /// 書体代替・書体スタイルの近似を許可する。文字単位の代替は既定で許可。
+    /// Allow family substitution and approximate styles. Glyph fallback is allowed by default.
     pub font_fallback: bool,
-    /// 実験的な句読点の自動圧縮。
+    /// Experimental automatic punctuation compression.
     pub punctuation_compression: bool,
-    /// 追加で読み込むフォントファイル。
+    /// Additional font files to load.
     pub font_file: Vec<PathBuf>,
-    /// システムフォントを読み込まない。
+    /// Do not load system fonts.
     pub no_system_fonts: bool,
-    /// 要求 family から代替 family への明示対応（一段のみ）。
+    /// Explicit requested-to-replacement family mappings (one step only).
     pub font_mapping: std::collections::HashMap<String, String>,
 }
 impl Default for ConvertOptions {
@@ -48,7 +48,7 @@ impl Default for ConvertOptions {
     }
 }
 
-/// 出力した manifest.json と同じ内容。警告は呼び出し元が処理する。
+/// Same content as the written manifest.json. The caller handles warnings.
 #[derive(Clone, Debug, Serialize)]
 pub struct ConversionReport {
     pub schema_version: u32,
@@ -75,8 +75,8 @@ pub struct SlideReport {
     pub diagnostics: Vec<Diagnostic>,
 }
 
-/// strict モードで停止した場合の診断。image は予定ファイル名で、未出力。
-/// 返された anyhow::Error の downcast_ref::<StrictModeError>() で取得できる。
+/// Diagnostics when strict mode stops. image names are planned outputs, not written files.
+/// Access through downcast_ref::<StrictModeError>() on the returned anyhow::Error.
 #[derive(Debug)]
 pub struct StrictModeError {
     pub slides: Vec<SlideReport>,
@@ -85,14 +85,14 @@ impl std::fmt::Display for StrictModeError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "未対応・近似描画を検出したため、strict モードで停止しました"
+            "Strict mode stopped because unsupported or approximate rendering was detected"
         )
     }
 }
 impl std::error::Error for StrictModeError {}
 
-/// フォント不足・代替を検出して出力前に停止した場合の診断。
-/// image は予定ファイル名であり、画像・manifest は出力されない。
+/// Diagnostics when font requirements prevent output.
+/// image names are planned; no images or manifest are written.
 #[derive(Debug)]
 pub struct FontFallbackError {
     pub slides: Vec<SlideReport>,
@@ -101,7 +101,7 @@ impl std::fmt::Display for FontFallbackError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         writeln!(
             f,
-            "必要なフォント・字形・スタイルをそのまま使用できません。"
+            "Required fonts, glyphs, or styles cannot be used as requested."
         )?;
         let mut entries =
             std::collections::BTreeMap::<String, std::collections::BTreeSet<usize>>::new();
@@ -109,14 +109,14 @@ impl std::fmt::Display for FontFallbackError {
             for diagnostic in &slide.diagnostics {
                 let detail = if let Some(font) = &diagnostic.font {
                     let reason = match font.reason.as_str() {
-                        "family_missing" => "書体不足",
-                        "mapped_family_missing" => "指定した代替先が不足",
-                        "glyph_fallback" => "必要な文字が未収録",
-                        "style_approximation" => "太さ・斜体が不一致",
-                        "explicit_mapping" => "代替指定あり",
-                        _ => "代替が必要",
+                        "family_missing" => "family unavailable",
+                        "mapped_family_missing" => "mapped family unavailable",
+                        "glyph_fallback" => "required glyph unavailable",
+                        "style_approximation" => "weight or italic style mismatch",
+                        "explicit_mapping" => "explicit mapping",
+                        _ => "substitution required",
                     };
-                    format!("{}（{}）", font.requested_family, reason)
+                    format!("{} ({})", font.requested_family, reason)
                 } else if diagnostic.code == DiagnosticCode::MissingGlyph {
                     diagnostic.message.clone()
                 } else {
@@ -128,7 +128,7 @@ impl std::fmt::Display for FontFallbackError {
         for (detail, slides) in entries {
             writeln!(
                 f,
-                "  {detail} — スライド {}",
+                "  {detail} - slides {}",
                 slides
                     .iter()
                     .map(usize::to_string)
@@ -138,19 +138,19 @@ impl std::fmt::Display for FontFallbackError {
         }
         write!(
             f,
-            "--font-file でフォントを追加してください。代替を許可する場合は --font-fallback を指定してください。"
+            "Add fonts with --font-file. Use --font-fallback to allow font-family substitution."
         )
     }
 }
 impl std::error::Error for FontFallbackError {}
 
-/// PPTX を指定したディレクトリへ同期的に変換する。
+/// Synchronously convert a PPTX into the specified directory.
 ///
-/// 既存の出力先は上書きしない。警告・診断は戻り値に含め、標準出力・
-/// 標準エラーには書き込まない。エラーは anyhow::Error で返す。
-/// 途中の I/O エラーでは画像が残ることがあるが、完了時だけ manifest を書く。
-/// 再帰的な解析のため、内部で 8 MiB のスタックを持つスレッドを使用する。
-/// 描画は近似を含み、警告がなくても PowerPoint 互換性を保証しない。
+/// Never overwrite an existing destination. Return warnings and diagnostics without
+/// writing to stdout or stderr. Return failures as anyhow::Error.
+/// An I/O failure may leave partial images; write the manifest only on completion.
+/// Use an internal thread with an 8 MiB stack for recursive parsing.
+/// Rendering includes approximations; absence of warnings does not guarantee PowerPoint compatibility.
 pub fn convert(
     input: impl AsRef<Path>,
     out: impl AsRef<Path>,
@@ -163,9 +163,9 @@ pub fn convert(
         .name("pptx-render".into())
         .stack_size(8 * 1024 * 1024)
         .spawn(move || convert_inner(input, out, settings))
-        .context("変換用スレッドを作成できません")?
+        .context("Cannot start conversion thread")?
         .join()
-        .map_err(|_| anyhow::anyhow!("変換処理が異常終了しました"))?
+        .map_err(|_| anyhow::anyhow!("Conversion thread panicked"))?
 }
 fn convert_inner(
     input: PathBuf,
@@ -173,10 +173,10 @@ fn convert_inner(
     settings: ConvertOptions,
 ) -> Result<ConversionReport> {
     if !(64..=4096).contains(&settings.width) {
-        bail!("出力画像の横幅は 64〜4096 を指定してください");
+        bail!("Output image width must be between 64 and 4096");
     }
     if out.exists() {
-        bail!("出力先が既に存在します: {}", out.display());
+        bail!("Output already exists: {}", out.display());
     }
     let mut options = resvg::usvg::Options::default();
     if !settings.no_system_fonts {
@@ -186,9 +186,9 @@ fn convert_inner(
         options
             .fontdb_mut()
             .load_font_file(path)
-            .with_context(|| format!("フォントを読めません: {}", path.display()))?;
+            .with_context(|| format!("Cannot read font: {}", path.display()))?;
     }
-    // 計測した face ID を描画にも渡し、同名フォントの再選択を避ける。
+    // Pass measured face IDs to rendering to avoid reselecting a same-name font.
     let aliases: std::collections::HashMap<_, _> = options
         .fontdb
         .faces()
@@ -200,7 +200,7 @@ fn convert_inner(
             _ => None,
         })
     });
-    // 代替は計測時に解決する。描画側だけで別のフォントに変えない。
+    // Resolve fallback during measurement; do not substitute only at rendering time.
     options.font_resolver.select_fallback = Box::new(|_, _, _| None);
     let deck = pptx::read(
         &input,
@@ -211,13 +211,13 @@ fn convert_inner(
     )?;
     let height = (f64::from(settings.width) * deck.height / deck.width).round();
     if !(1.0..=8192.0).contains(&height) {
-        bail!("出力画像の高さが上限を超えています");
+        bail!("Output image height exceeds the limit");
     }
     let height = height as u32;
     if u64::from(settings.width) * u64::from(height) > 16_777_216 {
-        bail!("出力画像の画素数が上限を超えています");
+        bail!("Output image pixel count exceeds the limit");
     }
-    // 欠字を描画できない場合は常に停止する。文字単位の代替成功は通常の警告。
+    // Always stop for unrenderable glyphs. Successful glyph fallback is a normal warning.
     let blocks = |d: &Diagnostic| {
         d.code == DiagnosticCode::MissingGlyph
             || (!settings.font_fallback
@@ -253,7 +253,7 @@ fn convert_inner(
         .into());
     }
     if options.fontdb.is_empty() && deck.slides.iter().any(|s| s.svg.contains("<text")) {
-        bail!("フォントがありません。--font-file で指定してください");
+        bail!("No fonts available; provide one with --font-file");
     }
     let has_warnings = deck.slides.iter().any(|s| !s.warnings.is_empty());
     if settings.strict && has_warnings {
@@ -272,18 +272,18 @@ fn convert_inner(
         }
         .into());
     }
-    // 全スライドの構文を確認してから出力先を作る。失敗した場合は完了 manifest を残さない。
+    // Validate all slides before creating the destination; do not leave a completion manifest on failure.
     let trees: Vec<_> = deck
         .slides
         .iter()
         .map(|slide| resvg::usvg::Tree::from_str(&slide.svg, &options))
         .collect::<Result<_, _>>()?;
-    fs::create_dir(&out).context("出力ディレクトリを作成できません")?;
+    fs::create_dir(&out).context("Cannot create output directory")?;
     let mut reports = Vec::new();
     for (index, (slide, tree)) in deck.slides.iter().zip(trees).enumerate() {
         let name = format!("slide-{:03}.png", index + 1);
         let mut pixmap = resvg::tiny_skia::Pixmap::new(settings.width, height)
-            .context("描画領域を確保できません")?;
+            .context("Cannot allocate rendering buffer")?;
         resvg::render(
             &tree,
             resvg::tiny_skia::Transform::from_scale(

@@ -1,4 +1,4 @@
-"""階層付き記号、開始番号と連番、buNoneを検証する自作資料。"""
+"""Independent fixture for nested bullets, start and sequential numbers, and buNone."""
 import argparse
 from pathlib import Path
 from pptx import Presentation

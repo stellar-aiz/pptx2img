@@ -1,4 +1,4 @@
-//! 外側の影を SourceAlpha から生成し、元の図形の後ろに合成する。
+//! Build outer shadows from SourceAlpha and composite them behind the original shape.
 use super::*;
 pub(super) fn begin(
     list: Node<'_, '_>,
@@ -13,7 +13,7 @@ pub(super) fn begin(
         if !effect.has_tag_name((A, "outerShdw")) {
             warn(
                 warnings,
-                format!("未対応の図形効果: {}", effect.tag_name().name()),
+                format!("Unsupported shape effect: {}", effect.tag_name().name()),
             );
             continue;
         }
@@ -21,8 +21,8 @@ pub(super) fn begin(
         let distance = number(effect, "dist", 0.0).max(0.0) / EMU;
         let angle = (number(effect, "dir", 0.0) / 60000.0).to_radians();
         let (mut dx, mut dy) = (distance * angle.cos(), distance * angle.sin());
-        // resvg のフィルターオフセットは描画座標系に適用される。
-        // 図形に追従させる場合だけ、方向ベクトルへ図形の反転・回転を適用する。
+        // resvg applies filter offsets in rendering coordinates.
+        // Apply shape flips and rotation to the direction vector only when following the shape.
         if theme::bool_attr(effect, "rotWithShape") != Some(false) {
             let r = rotation.to_radians();
             (dx, dy) = (
@@ -35,16 +35,16 @@ pub(super) fn begin(
             || number(effect, "kx", 0.0) != 0.0
             || number(effect, "ky", 0.0) != 0.0
         {
-            warn(warnings, "外側の影の拡縮・傾斜は未対応です");
+            warn(warnings, "Outer shadow scaling and skew are unsupported");
         }
         let (color, alpha) = colors::shadow_color(effect, theme, warnings);
         let id = format!("outer-shadow-{}", svg.len());
         let margin = distance + blur * 3.0 + 2.0;
-        // stellar:debt(scope) ぼかしをGaussianの標準偏差=半径/2で近似。upgrade: Officeのぼかし核を比較検証
+        // stellar:debt(scope) Approximate blur with Gaussian sigma=radius/2. upgrade: compare Office blur kernels
         if blur > 0.0 {
             warnings.push(
                 Code::Approximation,
-                "外側の影のぼかしはGaussianで近似します",
+                "Outer shadow blur is approximated with a Gaussian",
             );
         }
         svg.push_str(&format!("<defs><filter id=\"{id}\" filterUnits=\"userSpaceOnUse\" x=\"{}\" y=\"{}\" width=\"{}\" height=\"{}\" color-interpolation-filters=\"sRGB\"><feGaussianBlur in=\"SourceAlpha\" stdDeviation=\"{}\" result=\"blur\"/><feOffset in=\"blur\" dx=\"{dx}\" dy=\"{dy}\" result=\"offset\"/><feFlood flood-color=\"{color}\" flood-opacity=\"{alpha}\"/><feComposite in2=\"offset\" operator=\"in\" result=\"shadow\"/><feMerge><feMergeNode in=\"shadow\"/><feMergeNode in=\"SourceGraphic\"/></feMerge></filter></defs><g filter=\"url(#{id})\">",-margin,-margin,w+2.0*margin,h+2.0*margin,blur/2.0));

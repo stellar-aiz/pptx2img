@@ -1,4 +1,4 @@
-"""明度変換とテーマfillRefの自作資料。"""
+"""Independent fixture for luminance transforms and theme fillRef."""
 from pathlib import Path
 import sys
 from pptx import Presentation

@@ -1,4 +1,4 @@
-//! スライド → レイアウト → マスター → テーマの関連と色・書体を解決する。
+//! Resolve slide -> layout -> master -> theme relationships, colors, and fonts.
 use super::*;
 
 #[derive(Default)]
@@ -39,7 +39,7 @@ impl Theme {
         }
         let mut theme_path = None;
         let mut master_mapping = HashMap::new();
-        // 下位の明示 override が優先される。
+        // More specific explicit overrides take precedence.
         for name in chain.iter().rev() {
             let doc = xml(parts, name)?;
             if let Some(map) = child(doc.root_element(), P, "clrMap") {
@@ -82,7 +82,7 @@ impl Theme {
                 theme_path = Some(part.target.clone());
             }
             if rels.values().any(|p| p.kind.ends_with("/themeOverride")) {
-                warn(warnings, "themeOverride 部品は未対応です");
+                warn(warnings, "themeOverride parts are unsupported");
             }
         }
         if let Some(path) = theme_path {
@@ -182,10 +182,10 @@ impl Theme {
             return "none".into();
         }
         let Some(source) = &self.source else {
-            warn(warnings, "テーマ塗りを解決できません: テーマ部品なし");
+            warn(warnings, "Cannot resolve theme fill: missing theme part");
             return "none".into();
         };
-        let doc = Document::parse(source).expect("読み込み済みテーマXML");
+        let doc = Document::parse(source).expect("previously parsed theme XML");
         let (list, position) = if index > 1000 {
             ("bgFillStyleLst", index - 1001)
         } else {
@@ -204,7 +204,7 @@ impl Theme {
             _ => {
                 warn(
                     warnings,
-                    format!("テーマ塗り参照 {index} は未解決または単色以外です"),
+                    format!("Theme fill reference {index} is unresolved or not a solid fill"),
                 );
                 "none".into()
             }
@@ -217,7 +217,7 @@ impl Theme {
         match self.fonts.get(value) {
             Some(face) => face.clone(),
             None => {
-                warn(warnings, format!("テーマフォントを解決できません: {value}"));
+                warn(warnings, format!("Cannot resolve theme font: {value}"));
                 "sans-serif".into()
             }
         }

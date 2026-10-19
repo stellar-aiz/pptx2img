@@ -1,4 +1,4 @@
-//! 自作の最小 OOXML パッケージで描画を検証する共通補助。
+//! Shared helpers for rendering tests using independently generated minimal OOXML packages.
 #![allow(dead_code, unused_imports)]
 use resvg::tiny_skia::{Color, Pixmap};
 use std::{fs, io::Write, path::Path, process::Command};

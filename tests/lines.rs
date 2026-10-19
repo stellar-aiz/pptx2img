@@ -147,12 +147,13 @@ fn unresolved_reference_and_unsupported_inherited_properties_are_diagnosed() {
                 .any(|p| p.red() > 200 && p.green() < 50)
         );
         let records = report["slides"][0]["diagnostics"].as_array().unwrap();
-        assert!(
-            records
-                .iter()
-                .any(|d| d["message"].as_str().unwrap().contains("テーマ線参照")
-                    && d["object_id"] == "2")
-        );
+        assert!(records.iter().any(|d| {
+            d["message"]
+                .as_str()
+                .unwrap()
+                .contains("theme line reference")
+                && d["object_id"] == "2"
+        }));
     }
     let line = THEME_LINE
         .replace("<a:prstDash val=\"dash\"/>", "<a:custDash/>")
@@ -167,7 +168,7 @@ fn unresolved_reference_and_unsupported_inherited_properties_are_diagnosed() {
     assert!(
         messages
             .iter()
-            .any(|s| s.as_str().unwrap().contains("複合線"))
+            .any(|s| s.as_str().unwrap().contains("Compound lines"))
     );
 }
 
@@ -206,7 +207,7 @@ fn thin_line_arrow_sizes_keep_visible_direction_without_widening_the_line() {
                 "{size} {width}: {span} < {previous_span}"
             );
             previous_span = span;
-            // 端部から離れた線本体の太さ・色は変わらない。
+            // Shaft thickness and color away from the head stay unchanged.
             for y in 30..50 {
                 for x in 30..50 {
                     assert_eq!(actual.pixel(x, y), bare.pixel(x, y));
@@ -225,7 +226,7 @@ fn thin_line_arrow_sizes_keep_visible_direction_without_widening_the_line() {
 
 #[test]
 fn bent_connector_rotation_after_flip_keeps_saved_bend_and_end_direction() {
-    // ECMA preset: (l,t)→(r,t)→(r,b)。水平反転後に270度回転する。
+    // ECMA preset: (l,t)->(r,t)->(r,b). Flip horizontally, then rotate 270 degrees.
     let (_, pixels) = render("bentConnector2", "", r#"rot="16200000" flipH="1""#);
     assert_eq!(rgb(&pixels, 20, 50), (0, 0, 0));
     assert_eq!(rgb(&pixels, 50, 79), (0, 0, 0));
@@ -265,7 +266,12 @@ fn attached_connector_keeps_saved_pixels_and_reports_targeted_routing_limit() {
             .as_array()
             .unwrap()
             .iter()
-            .filter(|d| d["message"].as_str().unwrap().contains("経路の再計算"))
+            .filter(|d| {
+                d["message"]
+                    .as_str()
+                    .unwrap()
+                    .contains("Connector rerouting")
+            })
             .collect();
         assert_eq!(records.len(), usize::from(attached));
         if attached {
