@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import ctypes
 import hashlib
 import importlib.metadata
 import json
@@ -14,9 +15,11 @@ import shutil
 import subprocess
 import sys
 import tempfile
+from xml.sax.saxutils import escape
 
 from PIL import Image, ImageChops, ImageStat
 import pypdfium2 as pdfium
+import pypdfium2.raw as pdfium_c
 
 
 def digest(path: Path) -> str:
@@ -52,7 +55,7 @@ def load_regions(path: Path | None) -> list[dict]:
     """Rectangles are normalized x, y, width, height (0-1). Reject out-of-bounds values instead of correcting them."""
     if path is None:
         return []
-    regions = json.loads(path.read_text())["regions"]
+    regions = json.loads(path.read_text(encoding="utf-8"))["regions"]
     if not isinstance(regions, list) or not regions:
         raise ValueError("regions must be a nonempty array")
     identities = set()
@@ -95,13 +98,13 @@ def diagnostic_summary(diagnostics: list[dict] | None) -> dict:
 
 
 def execute(command: list[str], directory: Path, name: str, env: dict) -> str:
-    (directory / f"{name}.command.json").write_text(json.dumps(command, ensure_ascii=False, indent=2))
+    (directory / f"{name}.command.json").write_text(json.dumps(command, ensure_ascii=False, indent=2), encoding="utf-8")
     # Preserve partial logs on timeouts and failures.
     with (directory / f"{name}.stdout.log").open("w") as stdout, (directory / f"{name}.stderr.log").open("w") as stderr:
         result = subprocess.run(command, stdout=stdout, stderr=stderr, env=env, timeout=120, check=False)
     if result.returncode != 0:
         raise RuntimeError(f"{name} failed (exit code {result.returncode}). Logs: {directory}")
-    return (directory / f"{name}.stdout.log").read_text(errors="replace").strip()
+    return (directory / f"{name}.stdout.log").read_text(encoding="utf-8", errors="replace").strip()
 
 
 def find_soffice(value: str | None) -> str:
@@ -127,16 +130,69 @@ def font_inventory() -> list[dict]:
     return records
 
 
-def compression_profile(enabled: bool) -> str:
+DEFAULT_SUBSTITUTION_MAP = Path(__file__).resolve().with_name("font-substitution.json")
+
+
+def load_substitutions(path: Path) -> dict[str, str]:
+    """Family -> substitute face. Reject malformed maps instead of silently ignoring entries."""
+    families = json.loads(path.read_text(encoding="utf-8"))["families"]
+    if not isinstance(families, dict) or not families:
+        raise ValueError("families must be a nonempty object")
+    for family, substitute in families.items():
+        if not family or not isinstance(substitute, str) or not substitute:
+            raise ValueError("Each substitution requires a nonempty family and substitute")
+    return dict(sorted(families.items()))
+
+
+def compression_profile(enabled: bool, substitutions: dict[str, str] | None = None) -> str:
     # Pin comparison settings without modifying the user's regular profile.
     mode = 1 if enabled else 0
+    pairs = ""
+    if substitutions:
+        # Replacement table with "Always": applies to PDF export, not only to the screen.
+        pairs = '<item oor:path="/org.openoffice.Office.Common/Font/Substitution">\n' \
+            '<prop oor:name="Replacement" oor:op="fuse"><value>true</value></prop>\n</item>\n'
+        for index, (family, substitute) in enumerate(substitutions.items()):
+            pairs += (
+                f'<item oor:path="/org.openoffice.Office.Common/Font/Substitution/FontPairs">'
+                f'<node oor:name="_{index}" oor:op="replace">'
+                f'<prop oor:name="Always" oor:op="fuse"><value>true</value></prop>'
+                f'<prop oor:name="OnScreenOnly" oor:op="fuse"><value>false</value></prop>'
+                f'<prop oor:name="ReplaceFont" oor:op="fuse"><value>{escape(family)}</value></prop>'
+                f'<prop oor:name="SubstituteFont" oor:op="fuse"><value>{escape(substitute)}</value></prop>'
+                f'</node></item>\n'
+            )
     return f'''<?xml version="1.0" encoding="UTF-8"?>
 <oor:items xmlns:oor="http://openoffice.org/2001/registry">
 <item oor:path="/org.openoffice.Office.Common/AsianLayout">
 <prop oor:name="CompressCharacterDistance" oor:op="fuse"><value>{mode}</value></prop>
 <prop oor:name="IsKerningWesternTextOnly" oor:op="fuse"><value>true</value></prop>
-</item></oor:items>
+</item>
+{pairs}</oor:items>
 '''
+
+
+def pdf_fonts(document: pdfium.PdfDocument) -> list[dict]:
+    """Base font names used by text objects in the reference PDF (subset prefix removed)."""
+    found: dict[str, dict] = {}
+    for index in range(len(document)):
+        page = document[index]
+        try:
+            for item in page.get_objects():
+                if item.type != pdfium_c.FPDF_PAGEOBJ_TEXT:
+                    continue
+                font = pdfium_c.FPDFTextObj_GetFont(item.raw)
+                size = pdfium_c.FPDFFont_GetBaseFontName(font, None, 0)
+                buffer = ctypes.create_string_buffer(size)
+                pdfium_c.FPDFFont_GetBaseFontName(font, buffer, size)
+                name = buffer.value.decode("utf-8", "replace")
+                name = name.split("+", 1)[1] if len(name) > 7 and name[6] == "+" else name
+                record = found.setdefault(name, {"name": name, "embedded": bool(pdfium_c.FPDFFont_GetIsEmbedded(font)), "pages": []})
+                if index + 1 not in record["pages"]:
+                    record["pages"].append(index + 1)
+        finally:
+            page.close()
+    return [found[name] for name in sorted(found)]
 
 
 def run(args: argparse.Namespace) -> bool:
@@ -156,6 +212,9 @@ def run(args: argparse.Namespace) -> bool:
         shutil.copyfile(source, out / "comparator.py")
         if region_path is not None:
             shutil.copyfile(region_path, out / "regions.json")
+        map_path = (args.font_substitution_map or DEFAULT_SUBSTITUTION_MAP).resolve()
+        substitutions = load_substitutions(map_path)
+        shutil.copyfile(map_path, out / "font-substitution.json")
         soffice = find_soffice(args.soffice)
         env = os.environ.copy()
         if sys.platform == "darwin":
@@ -177,6 +236,8 @@ def run(args: argparse.Namespace) -> bool:
             "comparator_sha256": digest(out / "comparator.py"),
             "regions_sha256": digest(out / "regions.json") if region_path else None,
             "width": args.width,
+            "libreoffice_font_substitution": substitutions,
+            "font_substitution_sha256": digest(out / "font-substitution.json"),
         }
         # Preserve the input as evidence and pass the same file to both renderers.
         copied = out / "input.pptx"
@@ -185,24 +246,25 @@ def run(args: argparse.Namespace) -> bool:
         if args.punctuation_compression:
             command.append("--punctuation-compression")
         execute(command, out, "pptx2img", env)
-        manifest = json.loads((out / "actual/manifest.json").read_text())
+        manifest = json.loads((out / "actual/manifest.json").read_text(encoding="utf-8"))
         report["renderer_fonts"] = manifest.get("fonts")
         if any(region["slide"] > len(manifest["slides"]) for region in regions):
             raise ValueError("Region page number exceeds the slide count")
         reference_dir = out / "reference"
         reference_dir.mkdir()
-        profile_xml = compression_profile(args.punctuation_compression)
-        (out / "libreoffice-profile.xcu").write_text(profile_xml)
+        profile_xml = compression_profile(args.punctuation_compression, substitutions)
+        (out / "libreoffice-profile.xcu").write_text(profile_xml, encoding="utf-8")
         with tempfile.TemporaryDirectory(prefix="pptx2img-lo-profile-") as profile:
             user = Path(profile) / "user"
             user.mkdir()
-            (user / "registrymodifications.xcu").write_text(profile_xml)
+            (user / "registrymodifications.xcu").write_text(profile_xml, encoding="utf-8")
             execute([soffice, f"-env:UserInstallation={Path(profile).resolve().as_uri()}", "--headless", "--convert-to", "pdf:impress_pdf_Export", "--outdir", str(reference_dir), str(copied)], out, "libreoffice", env)
         pdf_path = reference_dir / "input.pdf"
         if not pdf_path.is_file() or pdf_path.stat().st_size == 0:
             raise RuntimeError("LibreOffice exited successfully but did not produce a PDF")
         (out / "diff").mkdir()
         with pdfium.PdfDocument(pdf_path) as document:
+            report["reference_pdf_fonts"] = pdf_fonts(document)
             if len(document) != len(manifest["slides"]) or len(document) == 0:
                 raise ValueError(f"Page counts differ: PPTX={len(manifest['slides'])}, PDF={len(document)}")
             for index, slide in enumerate(manifest["slides"]):
@@ -249,7 +311,7 @@ def run(args: argparse.Namespace) -> bool:
         report["error"] = f"{type(error).__name__}: {error}"
         raise
     finally:
-        (out / "report.json").write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n")
+        (out / "report.json").write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
         print(f"Comparison report: {out / 'report.json'}", flush=True)
 
 
@@ -267,6 +329,7 @@ def main() -> int:
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--soffice")
     parser.add_argument("--regions", type=Path, help="JSON with normalized rectangles; compare regions using the whole-page thresholds")
+    parser.add_argument("--font-substitution-map", type=Path, help="JSON {\"families\": {family: substitute}} pinned in the LibreOffice profile (default: tests/visual/font-substitution.json)")
     parser.add_argument("--punctuation-compression", action="store_true", help="Enable automatic punctuation compression in both engines")
     parser.add_argument("--width", type=int, default=1200, choices=range(64, 4097), metavar="64..4096")
     parser.add_argument("--pixel-tolerance", type=int, default=16, choices=range(256), metavar="0..255")

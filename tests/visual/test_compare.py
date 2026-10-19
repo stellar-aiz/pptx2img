@@ -5,7 +5,10 @@ import json
 from pathlib import Path
 import tempfile
 from PIL import Image
-from compare import compare_images, compare_regions, diagnostic_summary, load_regions, passes, fraction
+import xml.etree.ElementTree as ET
+import pypdfium2 as pdfium
+from compare import (DEFAULT_SUBSTITUTION_MAP, compare_images, compare_regions, compression_profile,
+                     diagnostic_summary, fraction, load_regions, load_substitutions, passes, pdf_fonts)
 
 
 class ComparisonTests(unittest.TestCase):
@@ -90,7 +93,7 @@ class LocalComparisonTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "regions.json"
             valid = {"slide": 1, "name": "小図形", "rect": [.1, .1, .2, .2]}
-            path.write_text(json.dumps({"regions": [valid]}))
+            path.write_text(json.dumps({"regions": [valid]}), encoding="utf-8")
             self.assertEqual(load_regions(path), [valid])
             cases = [
                 [], [valid, valid],
@@ -104,7 +107,7 @@ class LocalComparisonTests(unittest.TestCase):
             ]
             for regions in cases:
                 with self.subTest(regions=regions):
-                    path.write_text(json.dumps({"regions": regions}))
+                    path.write_text(json.dumps({"regions": regions}), encoding="utf-8")
                     with self.assertRaises(ValueError):
                         load_regions(path)
         self.assertEqual(load_regions(None), [])
@@ -113,6 +116,55 @@ class LocalComparisonTests(unittest.TestCase):
         self.assertTrue(passes({"mae": .02, "changed_ratio": .05}, .02, .05))
         self.assertFalse(passes({"mae": .020001, "changed_ratio": .05}, .02, .05))
         self.assertFalse(passes({"mae": .02, "changed_ratio": .050001}, .02, .05))
+
+
+class FontSubstitutionTests(unittest.TestCase):
+    NS = {"oor": "http://openoffice.org/2001/registry"}
+
+    def test_profile_pins_replacement_table_and_stays_well_formed(self):
+        profile = compression_profile(False, {"Meiryo UI": "Hiragino Sans", "A&B <C>": "Hiragino Sans"})
+        root = ET.fromstring(profile)
+        pairs = {}
+        for node in root.iter("node"):
+            props = {p.get("{http://openoffice.org/2001/registry}name"): p.find("value").text for p in node.findall("prop")}
+            pairs[props["ReplaceFont"]] = props
+        self.assertEqual(set(pairs), {"Meiryo UI", "A&B <C>"})
+        self.assertEqual(pairs["Meiryo UI"]["SubstituteFont"], "Hiragino Sans")
+        self.assertEqual(pairs["Meiryo UI"]["Always"], "true")
+        self.assertEqual(pairs["Meiryo UI"]["OnScreenOnly"], "false")
+        self.assertIn("Font/Substitution", profile)
+        self.assertIn('<value>true</value>', profile)
+
+    def test_profile_without_substitutions_has_no_table(self):
+        for profile in (compression_profile(True), compression_profile(True, {})):
+            self.assertNotIn("Font/Substitution", profile)
+            ET.fromstring(profile)
+        self.assertIn("<value>1</value>", compression_profile(True))
+
+    def test_profile_is_deterministic(self):
+        mapping = {"B": "X", "A": "X"}
+        self.assertEqual(compression_profile(False, mapping), compression_profile(False, dict(mapping)))
+
+    def test_default_map_loads_and_is_sorted(self):
+        mapping = load_substitutions(DEFAULT_SUBSTITUTION_MAP)
+        self.assertEqual(mapping["Meiryo UI"], "Hiragino Sans")
+        self.assertEqual(list(mapping), sorted(mapping))
+
+    def test_malformed_maps_are_rejected(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "map.json"
+            for families in ({}, [], {"A": ""}, {"A": 1}, {"": "B"}):
+                with self.subTest(families=families):
+                    path.write_text(json.dumps({"families": families}), encoding="utf-8")
+                    with self.assertRaises(ValueError):
+                        load_substitutions(path)
+
+    def test_pdf_without_text_reports_no_fonts(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "blank.pdf"
+            Image.new("RGB", (20, 20), "white").save(path)
+            with pdfium.PdfDocument(path) as document:
+                self.assertEqual(pdf_fonts(document), [])
 
 
 if __name__ == "__main__":
