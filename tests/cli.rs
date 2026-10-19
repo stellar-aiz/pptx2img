@@ -166,7 +166,10 @@ fn default_output_is_next_to_input_and_explicit_output_takes_precedence() {
         "{}",
         String::from_utf8_lossy(&result.stderr)
     );
-    assert!(String::from_utf8_lossy(&result.stderr).contains("資料.v2.pptx2img/"));
+    let stdout = String::from_utf8_lossy(&result.stdout);
+    assert!(stdout.starts_with("status: completed\noutput:\n  created: true\n"));
+    assert!(stdout.contains("資料.v2.pptx2img\""));
+    assert!(stdout.contains("  slides: 2\n"));
     assert!(out.join("slide-001.png").is_file());
     assert!(out.join("slide-002.png").is_file());
     let before = fs::read(out.join("manifest.json")).unwrap();
@@ -323,7 +326,20 @@ fn font_fallback_is_explicit_and_reports_all_affected_slides() {
                 );
             } else if suffix == "default" {
                 assert!(stderr.contains(family), "{stderr}");
-                assert!(stderr.contains("--font-fallback"), "{stderr}");
+                assert!(
+                    stderr.starts_with("status: failed\noutput:\n  created: false\nerrors:\n"),
+                    "{stderr}"
+                );
+                assert!(stderr.contains("suggestion:"), "{stderr}");
+                assert!(!stderr.contains("--font-fallback"), "{stderr}");
+                assert!(!stderr.contains("recovery:"), "{stderr}");
+                assert!(!stderr.contains("constraints:"), "{stderr}");
+                assert!(result.stdout.is_empty());
+                if value == "あ" {
+                    assert!(stderr.contains("code: FONT_GLYPH_MISSING"), "{stderr}");
+                    assert!(stderr.contains("character: \"あ\""), "{stderr}");
+                    assert!(stderr.contains("codepoint: \"U+3042\""), "{stderr}");
+                }
             }
         }
     }
@@ -367,4 +383,26 @@ fn exact_font_needs_no_flag_but_mapping_requires_permission() {
     assert!(error.is::<FontFallbackError>());
     assert!(error.to_string().contains("Pptx Latin"));
     assert!(!out.exists());
+}
+
+#[test]
+fn invalid_arguments_are_yaml_but_help_and_version_remain_available() {
+    let invalid = Command::new(env!("CARGO_BIN_EXE_pptx2img"))
+        .arg("--invalid-option")
+        .output()
+        .unwrap();
+    assert_eq!(invalid.status.code(), Some(2));
+    assert!(invalid.stdout.is_empty());
+    let stderr = String::from_utf8_lossy(&invalid.stderr);
+    assert!(stderr.starts_with("status: failed\n"));
+    assert!(stderr.contains("code: INVALID_ARGUMENTS"));
+    for arg in ["--help", "--version"] {
+        let result = Command::new(env!("CARGO_BIN_EXE_pptx2img"))
+            .arg(arg)
+            .output()
+            .unwrap();
+        assert!(result.status.success());
+        assert!(!result.stdout.is_empty());
+        assert!(result.stderr.is_empty());
+    }
 }

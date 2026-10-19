@@ -1,7 +1,7 @@
 //! PPTX → PNG 変換ライブラリの CLI。
-use anyhow::Result;
+mod cli_output;
 use clap::Parser;
-use pptx2img::{ConvertOptions, SlideReport, StrictModeError, convert};
+use pptx2img::{ConvertOptions, SlideReport, convert};
 use std::path::PathBuf;
 
 #[derive(Parser)]
@@ -71,19 +71,26 @@ fn print_warnings(slides: &[SlideReport]) {
     }
 }
 fn main() {
-    if let Err(error) = run(Args::parse()) {
-        if let Some(strict) = error.downcast_ref::<StrictModeError>() {
-            print_warnings(&strict.slides);
+    let args = match Args::try_parse() {
+        Ok(args) => args,
+        Err(error)
+            if matches!(
+                error.kind(),
+                clap::error::ErrorKind::DisplayHelp | clap::error::ErrorKind::DisplayVersion
+            ) =>
+        {
+            error.exit()
         }
-        eprintln!("エラー: {error:#}");
-        std::process::exit(1);
-    }
-}
-fn run(args: Args) -> Result<()> {
+        Err(error) => {
+            eprint!("{}", cli_output::invalid_arguments(&error.to_string()));
+            std::process::exit(2);
+        }
+    };
     let out = args
         .out
         .unwrap_or_else(|| args.input.with_extension("pptx2img"));
-    let report = convert(
+    let existed = out.exists();
+    match convert(
         &args.input,
         &out,
         &ConvertOptions {
@@ -95,12 +102,17 @@ fn run(args: Args) -> Result<()> {
             no_system_fonts: args.no_system_fonts,
             font_mapping: args.font_map.into_iter().collect(),
         },
-    )?;
-    print_warnings(&report.slides);
-    eprintln!(
-        "{} 枚を出力しました。出力先: {}/",
-        report.slides.len(),
-        out.display()
-    );
-    Ok(())
+    ) {
+        Ok(report) => {
+            print_warnings(&report.slides);
+            print!("{}", cli_output::completed(&out, report.slides.len()));
+        }
+        Err(error) => {
+            eprint!(
+                "{}",
+                cli_output::failed(&error, Some(&out), !existed && out.exists())
+            );
+            std::process::exit(1);
+        }
+    }
 }

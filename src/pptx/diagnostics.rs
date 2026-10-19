@@ -30,6 +30,10 @@ pub struct Diagnostic {
     pub message: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub font: Option<FontResolution>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub required_font: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub missing_character: Option<char>,
 }
 #[derive(Clone, Debug, Default)]
 pub(super) struct Target {
@@ -52,19 +56,67 @@ impl Deref for Warnings {
 }
 impl Warnings {
     pub fn push(&mut self, code: Code, message: impl Into<String>) {
-        self.record(code, message.into(), None);
+        self.record(code, message.into(), None, None, None);
+    }
+    pub fn missing_font(&mut self, family: &str) {
+        self.record(
+            Code::MissingGlyph,
+            format!("必要なフォントがありません: {family}"),
+            None,
+            Some(family.into()),
+            None,
+        );
+    }
+    pub fn missing_glyph(&mut self, family: &str, ch: char) {
+        self.record(
+            Code::MissingGlyph,
+            format!(
+                "フォント {family} に文字がなく幅を近似します: U+{:04X}",
+                ch as u32
+            ),
+            None,
+            Some(family.into()),
+            Some(ch),
+        );
     }
     pub fn font(&mut self, resolution: FontResolution) {
+        self.font_character(resolution, None);
+    }
+    pub fn font_character(&mut self, resolution: FontResolution, character: Option<char>) {
         let message = format!(
             "フォント代替: {} → {} ({})",
             resolution.requested_family, resolution.post_script_name, resolution.reason
         );
-        self.record(Code::FontSubstitution, message, Some(resolution));
+        self.record(
+            Code::FontSubstitution,
+            message,
+            Some(resolution),
+            None,
+            character,
+        );
     }
-    fn record(&mut self, code: Code, message: String, font: Option<FontResolution>) {
+    pub fn measured(&mut self, diagnostic: Diagnostic) {
+        self.record(
+            diagnostic.code,
+            diagnostic.message,
+            diagnostic.font,
+            diagnostic.required_font,
+            diagnostic.missing_character,
+        );
+    }
+    fn record(
+        &mut self,
+        code: Code,
+        message: String,
+        font: Option<FontResolution>,
+        required_font: Option<String>,
+        missing_character: Option<char>,
+    ) {
         let record = Diagnostic {
             code,
             font,
+            required_font,
+            missing_character,
             message: message.clone(),
             part: self.target.part.clone(),
             object_id: self.target.object_id.clone(),

@@ -118,10 +118,7 @@ impl<'a> Resolver<'a> {
             }
         }
         if id.is_none() {
-            warnings.push(
-                super::diagnostics::Code::MissingGlyph,
-                format!("必要なフォントがありません: {family}"),
-            );
+            warnings.missing_font(family);
         }
         id
     }
@@ -143,7 +140,7 @@ impl<'a> Resolver<'a> {
             id
         });
         if let Some(id) = id {
-            self.record(family, id, "glyph_fallback", warnings);
+            self.record_character(family, id, "glyph_fallback", Some(ch), warnings);
             let f = self.database.face(id).unwrap();
             if f.style != if italic { Style::Italic } else { Style::Normal }
                 || f.weight != if bold { Weight::BOLD } else { Weight::NORMAL }
@@ -154,8 +151,18 @@ impl<'a> Resolver<'a> {
         id
     }
     fn record(&self, requested: &str, id: ID, reason: &str, warnings: &mut Warnings) {
+        self.record_character(requested, id, reason, None, warnings);
+    }
+    fn record_character(
+        &self,
+        requested: &str,
+        id: ID,
+        reason: &str,
+        character: Option<char>,
+        warnings: &mut Warnings,
+    ) {
         let face = self.database.face(id).unwrap();
-        warnings.font(FontResolution {
+        let resolution = FontResolution {
             requested_family: requested.into(),
             actual_family: face
                 .families
@@ -165,7 +172,12 @@ impl<'a> Resolver<'a> {
             post_script_name: face.post_script_name.clone(),
             face_index: face.index,
             reason: reason.into(),
-        });
+        };
+        if character.is_some() {
+            warnings.font_character(resolution, character);
+        } else {
+            warnings.font(resolution);
+        }
     }
 }
 

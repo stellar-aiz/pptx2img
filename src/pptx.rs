@@ -416,11 +416,7 @@ fn render_shape(
             }
             // 中間寸法の診断を残さず、採用した配置の診断だけを公開する。
             for record in measured_warnings.records {
-                if let Some(font) = record.font {
-                    warnings.font(font);
-                } else {
-                    warnings.push(record.code, record.message);
-                }
+                warnings.measured(record);
             }
             break;
         }
