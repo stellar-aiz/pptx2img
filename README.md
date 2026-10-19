@@ -14,7 +14,7 @@ Python / Node ランタイムを実行時に必要としません。
 
 ```sh
 cargo build --release --locked
-./target/release/pptx2img examples/basic.pptx --out images --width 1600
+./target/release/pptx2img examples/basic.pptx --out images --width 1600 --font-fallback
 ```
 
 `--out` を省略すると、入力ファイルと同じ場所に、最後の拡張子を
@@ -36,7 +36,10 @@ cargo build --release --locked
 ```
 
 警告は標準エラーと manifest の両方に残します。
-通常モードは警告付きプレビューを許し、終了コード 0 を返します。
+既定ではフォント不足・欠字・太さや斜体の不一致を検出すると、
+書体名と対象スライドを表示し、出力先を作らず終了コード 1 を返します。
+`--font-fallback` を指定すると代替描画を許可し、警告付きで出力します。
+それ以外の警告は通常モードでは出力を妨げません。
 これは表示互換性の保証を意味しません。
 `--strict` で警告があれば終了コード 1、出力先は作成しません。
 テキストを含むスライドは、現時点では必ず近似描画の警告になります。
@@ -662,7 +665,11 @@ PowerPoint の参照画像との照合は未確認です。GitHub 上の CI 結�
 ### 不足フォントと明示的な代替
 
 `--font-file /path/font.ttf` で利用権のあるフォントを追加できます。
+代替を許可する場合だけ `--font-fallback` を指定します。Rust API では
+`ConvertOptions.font_fallback = true` に相当し、既定は `false` です。
+停止時は `FontFallbackError.slides` から構造化診断を取得できます。
 `--font-map 'Meiryo UI=Noto Sans CJK JP'` は要求書体を別 family に対応させます。
+この明示対応にも `--font-fallback` が必要です。
 複数指定でき、同じ要求名の再指定は最後を採用します。対応は一段のみで、
 循環する指定でも連鎖探索しません。Rust API では `ConvertOptions.font_mapping`
 に同じ対応を設定します。代替先が存在しない場合は診断して自動選択へ戻ります。

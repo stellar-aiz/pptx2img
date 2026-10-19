@@ -156,7 +156,10 @@ fn glyphs(
                             }
                             warnings.push(
                                 Code::MissingGlyph,
-                                format!("フォントに文字がなく幅を近似します: U+{:04X}", ch as u32),
+                                format!(
+                                    "フォント {requested} に文字がなく幅を近似します: U+{:04X}",
+                                    ch as u32
+                                ),
                             );
                         }
                         Glyph {

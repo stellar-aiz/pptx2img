@@ -15,6 +15,7 @@ fn deck(shapes: &str) -> (pptx2img::ConversionReport, resvg::tiny_skia::Pixmap) 
         &input,
         &out,
         &pptx2img::ConvertOptions {
+            font_fallback: true,
             width: 100,
             no_system_fonts: true,
             font_file: vec![
