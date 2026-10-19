@@ -535,6 +535,7 @@ dependencies = [
  "base64 0.22.1",
  "clap",
  "imagesize",
+ "png",
  "resvg",
  "roxmltree 0.21.1",
  "serde",
@@ -542,6 +543,7 @@ dependencies = [
  "skrifa",
  "tempfile",
  "zip",
+ "zune-jpeg",
 ]
 
 [[package]]

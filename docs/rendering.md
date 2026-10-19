@@ -108,7 +108,18 @@ recorded visual comparison measurements are from macOS.
 
 Input size: 128 MiB. Total uncompressed data: 256 MiB. Per part: 32 MiB.
 Maximum slides: 200. Group nesting: 64 levels. Tables: 100000 cells.
-Output and embedded images also have pixel-count limits.
+Output images have pixel-count limits. Embedded PNG/JPEG pictures are handled per
+picture and never abort the deck:
+
+- Up to 8192 px per side and 16,777,216 pixels: embedded unchanged.
+- Above that, up to 32768 px per side and 67,108,864 pixels (64 Mpx): decoded and
+  box-filtered so the longest side is at most 2048 px, then embedded with an
+  `approximation` diagnostic that records the original and downscaled sizes. The
+  2048 px target bounds memory; it is not derived from the output width, so a
+  picture shown large or heavily cropped can look softer than in Office.
+  Non-interlaced PNG is decoded row by row; JPEG is decoded at full size first.
+- Above the ceiling, interlaced (Adam7) PNG above the first limit, or data that
+  fails to decode: omitted with an `omitted` diagnostic naming the media part.
 
 ZIP entries are read without extracting files to the filesystem. External images
 are not fetched. Recursive conversion uses an 8 MiB thread stack so OS main-stack

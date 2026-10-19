@@ -78,6 +78,18 @@ a known limitation, not a regression.
 target/debug/pptx2img /tmp/unsupported-images.pptx --out /tmp/unsupported-images --width 1600 --font-fallback
 ```
 
+## Independent oversized-image fixture
+
+Generate a deck with a 4400x4400 PNG and a 5800x3456 JPEG, plus a same-layout
+baseline deck without pictures for peak-memory comparison. pptx2img downscales both
+pictures (longest side 2048 px) with `approximation` diagnostics.
+
+```sh
+.venv-visual/bin/python tests/visual/make_oversized_images.py /tmp/oversized-images.pptx
+/usr/bin/time -l target/release/pptx2img /tmp/oversized-images.pptx --out /tmp/oversized --width 1600 --font-fallback
+/usr/bin/time -l target/release/pptx2img /tmp/oversized-images-baseline.pptx --out /tmp/oversized-baseline --width 1600 --font-fallback
+```
+
 ## Reproducibility
 
 Output retains input PPTX, commands, stdout/stderr, reference PDF, both PNG sets,

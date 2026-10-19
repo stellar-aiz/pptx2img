@@ -13,6 +13,7 @@ pub(crate) use fonts::Resolver as FontResolver;
 mod layout;
 mod lines;
 mod objects;
+mod raster;
 mod table_styles;
 mod text;
 pub use diagnostics::{Code as DiagnosticCode, Diagnostic, FontResolution};
@@ -134,6 +135,7 @@ pub struct RenderOptions<'a> {
 }
 
 pub fn read(path: &Path, options: &RenderOptions<'_>) -> Result<Deck> {
+    let _images = raster::CacheScope::new();
     let file = File::open(path).context("Cannot open input PPTX")?;
     if file.metadata()?.len() > 128 * 1024 * 1024 {
         bail!("Input must not exceed 128 MiB");
@@ -604,19 +606,19 @@ fn render_image(
     h: f64,
     svg: &mut String,
     warnings: &mut Warnings,
-) -> Result<()> {
+) -> Result<bool> {
     let Some(blip) = node.descendants().find(|n| n.has_tag_name((A, "blip"))) else {
         warnings.push(Code::Omitted, "Missing image reference");
-        return Ok(());
+        return Ok(false);
     };
     let Some(id) = blip.attribute((R, "embed")) else {
         warnings.push(Code::Omitted, "Externally linked images are not loaded");
-        return Ok(());
+        return Ok(false);
     };
     let part = rels.get(id).context("Missing image relationship")?;
     if part.external {
         warnings.push(Code::Omitted, "Externally linked images are not loaded");
-        return Ok(());
+        return Ok(false);
     }
     let data = parts.get(&part.target).context("Missing image part")?;
     // Sniff the format before probing dimensions: the probe cannot read EMF/WMF/SVG/WDP,
@@ -630,21 +632,16 @@ fn render_image(
             Code::Omitted,
             format!("Only PNG/JPEG images are supported: {}", part.target),
         );
-        return Ok(());
+        return Ok(false);
     };
     let Ok(dimensions) = imagesize::blob_size(data) else {
         warnings.push(
             Code::Omitted,
             format!("Cannot read image dimensions: {}", part.target),
         );
-        return Ok(());
+        return Ok(false);
     };
-    if dimensions.width > 8192
-        || dimensions.height > 8192
-        || dimensions.width.saturating_mul(dimensions.height) > 16_777_216
-    {
-        bail!("Embedded image pixel count exceeds the limit");
-    }
+    let (width, height) = (dimensions.width, dimensions.height);
     if node.descendants().any(|n| {
         n.has_tag_name((A, "tile")) || (n.has_tag_name((A, "fillRect")) && n.attributes().len() > 0)
     }) || blip.children().any(|n| n.is_element())
@@ -665,9 +662,30 @@ fn render_image(
     }
     let iw = w / (1.0 - left - right);
     let ih = h / (1.0 - top - bottom);
+    let href = match raster::prepare(&part.target, data, mime, width, height) {
+        Ok(raster::Prepared::Embed) => format!("data:{mime};base64,{}", STANDARD.encode(data)),
+        Ok(raster::Prepared::Downscaled {
+            href,
+            width: tw,
+            height: th,
+        }) => {
+            warnings.push(
+                Code::Approximation,
+                format!(
+                    "Downscaled oversized image from {width}x{height} to {tw}x{th} px: {}",
+                    part.target
+                ),
+            );
+            href.to_string()
+        }
+        Err(reason) => {
+            warnings.push(Code::Omitted, format!("{reason}: {}", part.target));
+            return Ok(false);
+        }
+    };
     // Clip to the nested SVG viewport; rotate and flip in the outer shape coordinates.
-    svg.push_str(&format!("<svg width=\"{w}\" height=\"{h}\" overflow=\"hidden\"><image x=\"{}\" y=\"{}\" width=\"{iw}\" height=\"{ih}\" preserveAspectRatio=\"none\" href=\"data:{mime};base64,{}\"/></svg>", -left*iw, -top*ih, STANDARD.encode(data)));
-    Ok(())
+    svg.push_str(&format!("<svg width=\"{w}\" height=\"{h}\" overflow=\"hidden\"><image x=\"{}\" y=\"{}\" width=\"{iw}\" height=\"{ih}\" preserveAspectRatio=\"none\" href=\"{href}\"/></svg>", -left*iw, -top*ih));
+    Ok(true)
 }
 #[cfg(test)]
 mod tests {
