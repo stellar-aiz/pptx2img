@@ -55,7 +55,7 @@ def load_regions(path: Path | None) -> list[dict]:
     """Rectangles are normalized x, y, width, height (0-1). Reject out-of-bounds values instead of correcting them."""
     if path is None:
         return []
-    regions = json.loads(path.read_text())["regions"]
+    regions = json.loads(path.read_text(encoding="utf-8"))["regions"]
     if not isinstance(regions, list) or not regions:
         raise ValueError("regions must be a nonempty array")
     identities = set()
@@ -98,13 +98,13 @@ def diagnostic_summary(diagnostics: list[dict] | None) -> dict:
 
 
 def execute(command: list[str], directory: Path, name: str, env: dict) -> str:
-    (directory / f"{name}.command.json").write_text(json.dumps(command, ensure_ascii=False, indent=2))
+    (directory / f"{name}.command.json").write_text(json.dumps(command, ensure_ascii=False, indent=2), encoding="utf-8")
     # Preserve partial logs on timeouts and failures.
     with (directory / f"{name}.stdout.log").open("w") as stdout, (directory / f"{name}.stderr.log").open("w") as stderr:
         result = subprocess.run(command, stdout=stdout, stderr=stderr, env=env, timeout=120, check=False)
     if result.returncode != 0:
         raise RuntimeError(f"{name} failed (exit code {result.returncode}). Logs: {directory}")
-    return (directory / f"{name}.stdout.log").read_text(errors="replace").strip()
+    return (directory / f"{name}.stdout.log").read_text(encoding="utf-8", errors="replace").strip()
 
 
 def find_soffice(value: str | None) -> str:
@@ -135,7 +135,7 @@ DEFAULT_SUBSTITUTION_MAP = Path(__file__).resolve().with_name("font-substitution
 
 def load_substitutions(path: Path) -> dict[str, str]:
     """Family -> substitute face. Reject malformed maps instead of silently ignoring entries."""
-    families = json.loads(path.read_text())["families"]
+    families = json.loads(path.read_text(encoding="utf-8"))["families"]
     if not isinstance(families, dict) or not families:
         raise ValueError("families must be a nonempty object")
     for family, substitute in families.items():
@@ -246,18 +246,18 @@ def run(args: argparse.Namespace) -> bool:
         if args.punctuation_compression:
             command.append("--punctuation-compression")
         execute(command, out, "pptx2img", env)
-        manifest = json.loads((out / "actual/manifest.json").read_text())
+        manifest = json.loads((out / "actual/manifest.json").read_text(encoding="utf-8"))
         report["renderer_fonts"] = manifest.get("fonts")
         if any(region["slide"] > len(manifest["slides"]) for region in regions):
             raise ValueError("Region page number exceeds the slide count")
         reference_dir = out / "reference"
         reference_dir.mkdir()
         profile_xml = compression_profile(args.punctuation_compression, substitutions)
-        (out / "libreoffice-profile.xcu").write_text(profile_xml)
+        (out / "libreoffice-profile.xcu").write_text(profile_xml, encoding="utf-8")
         with tempfile.TemporaryDirectory(prefix="pptx2img-lo-profile-") as profile:
             user = Path(profile) / "user"
             user.mkdir()
-            (user / "registrymodifications.xcu").write_text(profile_xml)
+            (user / "registrymodifications.xcu").write_text(profile_xml, encoding="utf-8")
             execute([soffice, f"-env:UserInstallation={Path(profile).resolve().as_uri()}", "--headless", "--convert-to", "pdf:impress_pdf_Export", "--outdir", str(reference_dir), str(copied)], out, "libreoffice", env)
         pdf_path = reference_dir / "input.pdf"
         if not pdf_path.is_file() or pdf_path.stat().st_size == 0:
@@ -311,7 +311,7 @@ def run(args: argparse.Namespace) -> bool:
         report["error"] = f"{type(error).__name__}: {error}"
         raise
     finally:
-        (out / "report.json").write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n")
+        (out / "report.json").write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
         print(f"Comparison report: {out / 'report.json'}", flush=True)
 
 

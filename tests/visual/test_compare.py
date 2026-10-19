@@ -93,7 +93,7 @@ class LocalComparisonTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "regions.json"
             valid = {"slide": 1, "name": "小図形", "rect": [.1, .1, .2, .2]}
-            path.write_text(json.dumps({"regions": [valid]}))
+            path.write_text(json.dumps({"regions": [valid]}), encoding="utf-8")
             self.assertEqual(load_regions(path), [valid])
             cases = [
                 [], [valid, valid],
@@ -107,7 +107,7 @@ class LocalComparisonTests(unittest.TestCase):
             ]
             for regions in cases:
                 with self.subTest(regions=regions):
-                    path.write_text(json.dumps({"regions": regions}))
+                    path.write_text(json.dumps({"regions": regions}), encoding="utf-8")
                     with self.assertRaises(ValueError):
                         load_regions(path)
         self.assertEqual(load_regions(None), [])
@@ -155,7 +155,7 @@ class FontSubstitutionTests(unittest.TestCase):
             path = Path(directory) / "map.json"
             for families in ({}, [], {"A": ""}, {"A": 1}, {"": "B"}):
                 with self.subTest(families=families):
-                    path.write_text(json.dumps({"families": families}))
+                    path.write_text(json.dumps({"families": families}), encoding="utf-8")
                     with self.assertRaises(ValueError):
                         load_substitutions(path)
 
