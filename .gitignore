@@ -29,3 +29,6 @@ Thumbs.db
 /auth.json
 /internal_storage.json
 /version.json
+
+# ローカルの実験用資料と生成結果
+/playground/
