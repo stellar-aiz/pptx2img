@@ -7,9 +7,33 @@ permissions:
   contents: read
 jobs:
   visual:
-    name: Comparison with pinned LibreOffice
-    runs-on: macos-15
-    timeout-minutes: 30
+    name: Comparison with pinned LibreOffice (${{ matrix.name }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: macOS
+            os: macos-15
+            exe: ''
+            substitution_map: tests/visual/font-substitution.json
+          - name: Linux
+            os: ubuntu-24.04
+            exe: ''
+            substitution_map: tests/visual/font-substitution.linux.json
+          - name: Windows
+            os: windows-2025
+            exe: .exe
+            substitution_map: tests/visual/font-substitution.windows.json
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    defaults:
+      run:
+        shell: bash
+    env:
+      # Per-OS replacement table pinned in every LibreOffice profile, including runs that cannot
+      # pass --font-substitution-map (cargo-driven comparisons).
+      PPTX2IMG_FONT_SUBSTITUTION_MAP: ${{ github.workspace }}/${{ matrix.substitution_map }}
+      NOTO_SANS_CJK_TAG: Sans2.004
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -20,7 +44,8 @@ jobs:
           rustup toolchain install 1.97.0 --profile minimal
           rustup override set 1.97.0
           python -m pip install -r tests/visual/requirements.txt
-      - name: Download pinned LibreOffice
+      - name: Download pinned LibreOffice (macOS)
+        if: runner.os == 'macOS'
         run: |
           curl --fail --location --retry 3 -o "$RUNNER_TEMP/libreoffice.dmg" https://downloadarchive.documentfoundation.org/libreoffice/old/26.2.5.2/mac/aarch64/LibreOffice_26.2.5.2_MacOS_aarch64.dmg
           echo "c99fb4fe574437fc4cb820a4ca15271bca325920861f7139858b36d7f9df78ad  $RUNNER_TEMP/libreoffice.dmg" | shasum -a 256 --check
@@ -28,15 +53,68 @@ jobs:
           ditto "$RUNNER_TEMP/lo-volume/LibreOffice.app" "$RUNNER_TEMP/LibreOffice.app"
           hdiutil detach "$RUNNER_TEMP/lo-volume"
           echo "SOFFICE=$RUNNER_TEMP/LibreOffice.app/Contents/MacOS/soffice" >> "$GITHUB_ENV"
+      - name: Download pinned LibreOffice (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          curl --fail --location --retry 3 -o "$RUNNER_TEMP/libreoffice.tar.gz" https://downloadarchive.documentfoundation.org/libreoffice/old/26.2.5.2/deb/x86_64/LibreOffice_26.2.5.2_Linux_x86-64_deb.tar.gz
+          echo "2f03bfb2ac9f33ea7c77331b4b7a23300fb0ed7443566046bf8b5bc51c1bed1e  $RUNNER_TEMP/libreoffice.tar.gz" | sha256sum --check
+          mkdir "$RUNNER_TEMP/lo-debs" "$RUNNER_TEMP/lo"
+          tar -xzf "$RUNNER_TEMP/libreoffice.tar.gz" -C "$RUNNER_TEMP/lo-debs"
+          # Unpack without installing so the system package state stays untouched.
+          for deb in "$RUNNER_TEMP"/lo-debs/*/DEBS/*.deb; do dpkg -x "$deb" "$RUNNER_TEMP/lo"; done
+          sudo apt-get update
+          sudo apt-get install --yes libxinerama1 libcups2t64 libdbus-glib-1-2 libnss3 libgl1 libxrandr2 libxrender1 libxext6 libsm6 fontconfig
+          echo "SOFFICE=$(find "$RUNNER_TEMP/lo" -name soffice -path '*/program/*' | head -n 1)" >> "$GITHUB_ENV"
+      - name: Download pinned LibreOffice (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          curl --fail --location --retry 3 -o "$RUNNER_TEMP/libreoffice.msi" https://downloadarchive.documentfoundation.org/libreoffice/old/26.2.5.2/win/x86_64/LibreOffice_26.2.5.2_Win_x86-64.msi
+          echo "f15ba07bfcb0186986cf3171063506f5d207c11f8cc051ba0d135209e9e915f9  $RUNNER_TEMP/libreoffice.msi" | sha256sum --check
+          # Administrative extraction keeps the runner's installed programs untouched.
+          powershell -NoProfile -Command "Start-Process msiexec.exe -Wait -ArgumentList '/a','$env:RUNNER_TEMP\libreoffice.msi','/qn','TARGETDIR=$env:RUNNER_TEMP\lo'"
+          echo "SOFFICE=$(find "$RUNNER_TEMP/lo" -name soffice.exe -path '*/program/*' | head -n 1)" >> "$GITHUB_ENV"
+      - name: Install pinned Noto Sans CJK JP (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          mkdir -p "$HOME/.fonts"
+          for face in Regular:68a3fc98800b2a27b371f2fb79991daf3633bd89309d4ffaa6946fd587f375b5 Bold:e53dcb0dcb2922e45d01aae1ebd2f382bb81d4229b18b6b883bd170678af1f76; do
+            curl --fail --location --retry 3 -o "$HOME/.fonts/NotoSansCJKjp-${face%%:*}.otf" "https://raw.githubusercontent.com/notofonts/noto-cjk/$NOTO_SANS_CJK_TAG/Sans/OTF/Japanese/NotoSansCJKjp-${face%%:*}.otf"
+            echo "${face##*:}  $HOME/.fonts/NotoSansCJKjp-${face%%:*}.otf" | sha256sum --check
+          done
+          fc-cache -f
+          fc-match "Noto Sans CJK JP"
+      - name: Install pinned Noto Sans CJK JP (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $dir = Join-Path $env:LOCALAPPDATA 'Microsoft\Windows\Fonts'
+          New-Item -ItemType Directory -Force $dir | Out-Null
+          $faces = @{ Regular = '68a3fc98800b2a27b371f2fb79991daf3633bd89309d4ffaa6946fd587f375b5'; Bold = 'e53dcb0dcb2922e45d01aae1ebd2f382bb81d4229b18b6b883bd170678af1f76' }
+          foreach ($face in $faces.Keys) {
+            $file = Join-Path $dir "NotoSansCJKjp-$face.otf"
+            Invoke-WebRequest -Uri "https://raw.githubusercontent.com/notofonts/noto-cjk/$env:NOTO_SANS_CJK_TAG/Sans/OTF/Japanese/NotoSansCJKjp-$face.otf" -OutFile $file
+            if ((Get-FileHash $file -Algorithm SHA256).Hash.ToLower() -ne $faces[$face]) { throw "Noto Sans CJK JP $face differs from the pinned release" }
+            New-ItemProperty -Path 'HKCU:\Software\Microsoft\Windows NT\CurrentVersion\Fonts' -Name "Noto Sans CJK JP $face (OpenType)" -Value $file -PropertyType String -Force | Out-Null
+          }
       - name: Verify Japanese font versions
+        if: runner.os == 'macOS'
         run: python tests/visual/check_environment.py
+      - name: Build release binary
+        run: cargo build --release --locked
       - name: Rendering comparison with unchanged thresholds
         run: cargo test --locked --test libreoffice -- --ignored --nocapture --test-threads=1
+      - name: Reference determinism and pinned table
+        if: always()
+        run: |
+          python tests/visual/check_determinism.py --binary "target/release/pptx2img${{ matrix.exe }}" \
+            --fixture examples/text-bullets.pptx --font-substitution-map "${{ matrix.substitution_map }}" \
+            --soffice "$SOFFICE" --out target/visual-tests/determinism | tee determinism-summary.md
+          { echo "## ${{ matrix.name }}"; cat determinism-summary.md; } >> "$GITHUB_STEP_SUMMARY"
       - name: Save images, differences, and environment details even on failure
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: rendering-comparison-evidence
+          name: rendering-comparison-evidence-${{ matrix.name }}
           path: target/visual-tests/
           if-no-files-found: warn
           retention-days: 14

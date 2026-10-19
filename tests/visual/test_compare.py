@@ -1,13 +1,15 @@
 """Verify the comparator handles matches and differences correctly without Office."""
 import argparse
+import os
 import unittest
+from unittest import mock
 import json
 from pathlib import Path
 import tempfile
 from PIL import Image
 import xml.etree.ElementTree as ET
 import pypdfium2 as pdfium
-from compare import (DEFAULT_SUBSTITUTION_MAP, compare_images, compare_regions, compression_profile,
+from compare import (DEFAULT_SUBSTITUTION_MAP, SUBSTITUTION_MAP_ENV, default_substitution_map, compare_images, compare_regions, compression_profile,
                      diagnostic_summary, fraction, load_regions, load_substitutions, passes, pdf_fonts,
                      visible_slides)
 
@@ -150,6 +152,21 @@ class FontSubstitutionTests(unittest.TestCase):
         mapping = load_substitutions(DEFAULT_SUBSTITUTION_MAP)
         self.assertEqual(mapping["Meiryo UI"], "Hiragino Sans")
         self.assertEqual(list(mapping), sorted(mapping))
+
+    def test_per_os_maps_cover_the_same_families(self):
+        base = load_substitutions(DEFAULT_SUBSTITUTION_MAP)
+        for name, face in (("linux", "Noto Sans CJK JP"), ("windows", "Noto Sans CJK JP")):
+            with self.subTest(os=name):
+                mapping = load_substitutions(DEFAULT_SUBSTITUTION_MAP.with_name(f"font-substitution.{name}.json"))
+                self.assertEqual(set(mapping), set(base))
+                self.assertEqual(set(mapping.values()), {face})
+
+    def test_environment_selects_the_default_map(self):
+        with mock.patch.dict(os.environ, {}, clear=False):
+            os.environ.pop(SUBSTITUTION_MAP_ENV, None)
+            self.assertEqual(default_substitution_map(), DEFAULT_SUBSTITUTION_MAP)
+            os.environ[SUBSTITUTION_MAP_ENV] = "/tmp/map.json"
+            self.assertEqual(default_substitution_map(), Path("/tmp/map.json"))
 
     def test_malformed_maps_are_rejected(self):
         with tempfile.TemporaryDirectory() as directory:

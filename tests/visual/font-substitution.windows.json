@@ -1,0 +1,25 @@
+{
+  "comment": "Pins the LibreOffice reference on Windows runners to Noto Sans CJK JP, which the visual job installs from a pinned release (see README, Deterministic reference fonts). Keys match font-substitution.json.",
+  "families": {
+    "Meiryo": "Noto Sans CJK JP",
+    "Meiryo UI": "Noto Sans CJK JP",
+    "Yu Gothic": "Noto Sans CJK JP",
+    "Yu Gothic UI": "Noto Sans CJK JP",
+    "游ゴシック": "Noto Sans CJK JP",
+    "MS Gothic": "Noto Sans CJK JP",
+    "MS PGothic": "Noto Sans CJK JP",
+    "MS UI Gothic": "Noto Sans CJK JP",
+    "ＭＳ ゴシック": "Noto Sans CJK JP",
+    "ＭＳ Ｐゴシック": "Noto Sans CJK JP",
+    "MS Mincho": "Noto Sans CJK JP",
+    "MS PMincho": "Noto Sans CJK JP",
+    "ＭＳ 明朝": "Noto Sans CJK JP",
+    "ＭＳ Ｐ明朝": "Noto Sans CJK JP",
+    "Yu Mincho": "Noto Sans CJK JP",
+    "游明朝": "Noto Sans CJK JP",
+    "Calibri": "Noto Sans CJK JP",
+    "Calibri Light": "Noto Sans CJK JP",
+    "Cambria": "Noto Sans CJK JP",
+    "Segoe UI": "Noto Sans CJK JP"
+  }
+}

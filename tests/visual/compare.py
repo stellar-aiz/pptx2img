@@ -137,6 +137,17 @@ def font_inventory() -> list[dict]:
 
 
 DEFAULT_SUBSTITUTION_MAP = Path(__file__).resolve().with_name("font-substitution.json")
+SUBSTITUTION_MAP_ENV = "PPTX2IMG_FONT_SUBSTITUTION_MAP"
+
+
+def default_substitution_map() -> Path:
+    """The map used without --font-substitution-map: the environment override, else the macOS table.
+
+    The environment variable lets runs that cannot pass the flag (cargo-driven comparisons and
+    scripts that call run() directly) pin the per-OS table chosen by the CI job.
+    """
+    override = os.environ.get(SUBSTITUTION_MAP_ENV)
+    return Path(override) if override else DEFAULT_SUBSTITUTION_MAP
 
 
 def load_substitutions(path: Path) -> dict[str, str]:
@@ -218,7 +229,7 @@ def run(args: argparse.Namespace) -> bool:
         shutil.copyfile(source, out / "comparator.py")
         if region_path is not None:
             shutil.copyfile(region_path, out / "regions.json")
-        map_path = (args.font_substitution_map or DEFAULT_SUBSTITUTION_MAP).resolve()
+        map_path = (getattr(args, "font_substitution_map", None) or default_substitution_map()).resolve()
         substitutions = load_substitutions(map_path)
         shutil.copyfile(map_path, out / "font-substitution.json")
         soffice = find_soffice(args.soffice)
@@ -342,7 +353,7 @@ def main() -> int:
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--soffice")
     parser.add_argument("--regions", type=Path, help="JSON with normalized rectangles; compare regions using the whole-page thresholds")
-    parser.add_argument("--font-substitution-map", type=Path, help="JSON {\"families\": {family: substitute}} pinned in the LibreOffice profile (default: tests/visual/font-substitution.json)")
+    parser.add_argument("--font-substitution-map", type=Path, help="JSON {\"families\": {family: substitute}} pinned in the LibreOffice profile (default: $PPTX2IMG_FONT_SUBSTITUTION_MAP, else tests/visual/font-substitution.json)")
     parser.add_argument("--punctuation-compression", action="store_true", help="Enable automatic punctuation compression in both engines")
     parser.add_argument("--width", type=int, default=1200, choices=range(64, 4097), metavar="64..4096")
     parser.add_argument("--pixel-tolerance", type=int, default=16, choices=range(256), metavar="0..255")
