@@ -1,4 +1,4 @@
-"""保存経路と接続点参照の有無を比較する自作資料。"""
+"""Independent fixtures comparing saved routes with and without connection-site references."""
 import sys
 from make_lines import line
 from pptx import Presentation

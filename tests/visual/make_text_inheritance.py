@@ -1,4 +1,4 @@
-"""一般テキストボックスとプレゼン既定書式の自作比較資料。"""
+"""Independent fixture for ordinary text boxes and presentation default styles."""
 import argparse
 from pathlib import Path
 from pptx import Presentation
@@ -17,7 +17,7 @@ def make(output):
     run = OxmlElement('a:defRPr'); run.set('sz', '1800')
     face = OxmlElement('a:latin'); face.set('typeface', 'Arial'); run.append(face)
     level.append(run); default.append(level)
-    # textboxの既定と異なる値。誤ったotherStyleの適用を単独再現する。
+    # Use values different from text box defaults to isolate incorrect otherStyle application.
     other = deck.slide_masters[0]._element.find(qn('p:txStyles')).find(qn('p:otherStyle'))
     for node in list(other): other.remove(node)
     lev = OxmlElement('a:lvl1pPr'); props = OxmlElement('a:defRPr'); props.set('sz', '2400')

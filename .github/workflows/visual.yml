@@ -1,4 +1,4 @@
-name: 定期の描画比較
+name: Scheduled rendering comparison
 on:
   schedule:
     - cron: '0 20 * * 0'
@@ -7,7 +7,7 @@ permissions:
   contents: read
 jobs:
   visual:
-    name: 固定版 LibreOffice との比較
+    name: Comparison with pinned LibreOffice
     runs-on: macos-15
     timeout-minutes: 30
     steps:
@@ -15,12 +15,12 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.14'
-      - name: 検証用ツールを準備
+      - name: Prepare validation tools
         run: |
           rustup toolchain install 1.97.0 --profile minimal
           rustup override set 1.97.0
           python -m pip install -r tests/visual/requirements.txt
-      - name: 固定版 LibreOffice を取得
+      - name: Download pinned LibreOffice
         run: |
           curl --fail --location --retry 3 -o "$RUNNER_TEMP/libreoffice.dmg" https://downloadarchive.documentfoundation.org/libreoffice/old/26.2.5.2/mac/aarch64/LibreOffice_26.2.5.2_MacOS_aarch64.dmg
           echo "c99fb4fe574437fc4cb820a4ca15271bca325920861f7139858b36d7f9df78ad  $RUNNER_TEMP/libreoffice.dmg" | shasum -a 256 --check
@@ -28,15 +28,15 @@ jobs:
           ditto "$RUNNER_TEMP/lo-volume/LibreOffice.app" "$RUNNER_TEMP/LibreOffice.app"
           hdiutil detach "$RUNNER_TEMP/lo-volume"
           echo "SOFFICE=$RUNNER_TEMP/LibreOffice.app/Contents/MacOS/soffice" >> "$GITHUB_ENV"
-      - name: 日本語フォントの一致を確認
+      - name: Verify Japanese font versions
         run: python tests/visual/check_environment.py
-      - name: 描画比較（判定基準は既存のまま）
+      - name: Rendering comparison with unchanged thresholds
         run: cargo test --locked --test libreoffice -- --ignored --nocapture --test-threads=1
-      - name: 失敗時も画像・差分・環境情報を保存
+      - name: Save images, differences, and environment details even on failure
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: 描画比較の証跡
+          name: rendering-comparison-evidence
           path: target/visual-tests/
           if-no-files-found: warn
           retention-days: 14

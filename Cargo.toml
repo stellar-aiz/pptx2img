@@ -2,7 +2,7 @@
 name = "pptx2img"
 version = "0.1.0"
 edition = "2024"
-description = "Office に依存せず PPTX を PNG に変換する CLI・Rust ライブラリ（初期実装）"
+description = "CLI and Rust library for converting PPTX to PNG without Office (early implementation)"
 
 [dependencies]
 anyhow = "1"

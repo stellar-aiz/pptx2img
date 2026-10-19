@@ -1,4 +1,4 @@
-//! スライド・レイアウト・マスターを保持し、プレースホルダーを解決する。
+//! Store slides, layouts, and masters, and resolve placeholders.
 use super::*;
 
 pub(super) fn placeholder<'a>(node: Node<'a, 'a>) -> Option<Node<'a, 'a>> {
@@ -54,7 +54,7 @@ pub(super) fn chain(parts: &Parts, slide: &str) -> Result<Vec<String>> {
             .find(|p| p.kind.ends_with(kind) && !p.external)
         {
             if paths.contains(&part.target) {
-                bail!("レイアウトの参照が循環しています");
+                bail!("Cyclic layout reference");
             }
             paths.push(part.target.clone());
         } else {

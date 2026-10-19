@@ -1,4 +1,4 @@
-//! グループの座標系と、明示書式の表を描画する。
+//! Render group coordinate systems and explicitly formatted tables.
 use super::*;
 
 pub(super) struct Shape<'a> {
@@ -19,7 +19,7 @@ pub(super) struct Renderer<'a, 'd> {
 impl<'d> Renderer<'_, 'd> {
     pub fn node(&mut self, node: Node<'d, 'd>, location: &str, depth: usize) -> Result<()> {
         if depth > 64 {
-            bail!("グループの入れ子は 64 段までです");
+            bail!("Group nesting is limited to 64 levels");
         }
         let previous = self.warnings.target.clone();
         let identity = node.children().find_map(|n| child(n, P, "cNvPr"));
@@ -34,7 +34,7 @@ impl<'d> Renderer<'_, 'd> {
         if node.tag_name().namespace() != Some(P) {
             self.warnings.push(
                 Code::Omitted,
-                format!("未対応の要素を省略しました: {}", node.tag_name().name()),
+                format!("Omitted unsupported element: {}", node.tag_name().name()),
             );
         } else {
             match node.tag_name().name() {
@@ -72,7 +72,7 @@ impl<'d> Renderer<'_, 'd> {
                 }
                 other => self.warnings.push(
                     Code::Omitted,
-                    format!("未対応の要素を省略しました: {other}"),
+                    format!("Omitted unsupported element: {other}"),
                 ),
             }
         }
@@ -80,19 +80,22 @@ impl<'d> Renderer<'_, 'd> {
         Ok(())
     }
     fn group(&mut self, node: Node<'d, 'd>, location: &str, depth: usize) -> Result<()> {
-        let props = child(node, P, "grpSpPr").context("グループ属性がありません")?;
-        let t = child(props, A, "xfrm").context("グループ座標がありません")?;
+        let props = child(node, P, "grpSpPr").context("Missing group properties")?;
+        let t = child(props, A, "xfrm").context("Missing group transform")?;
         let (w, h) = transform(t, self.svg)?;
-        let off = child(t, A, "chOff").context("グループの子座標原点がありません")?;
-        let ext = child(t, A, "chExt").context("グループの子座標寸法がありません")?;
+        let off = child(t, A, "chOff").context("Missing group child origin")?;
+        let ext = child(t, A, "chExt").context("Missing group child extent")?;
         let cw = number(ext, "cx", 0.0) / EMU;
         let ch = number(ext, "cy", 0.0) / EMU;
         if cw <= 0.0 || ch <= 0.0 {
-            bail!("グループの子座標寸法は正数が必要です");
+            bail!("Group child extents must be positive");
         }
         for prop in props.children().filter(|n| n.is_element()) {
             if !prop.has_tag_name((A, "xfrm")) {
-                warn(self.warnings, "グループの塗り・効果の継承は未対応です");
+                warn(
+                    self.warnings,
+                    "Group fill and effect inheritance is unsupported",
+                );
             }
         }
         self.svg.push_str(&format!(
@@ -108,9 +111,9 @@ impl<'d> Renderer<'_, 'd> {
         self.svg.push_str("</g></g>");
         Ok(())
     }
-    /// OLE 本体にはアクセスせず、同一パッケージの静止画だけを表示する。
+    /// Display only a static image from the same package, without accessing the OLE payload.
     fn ole(&mut self, frame: Node<'d, 'd>, ole: Node<'d, 'd>) -> Result<()> {
-        let kind = ole.attribute("progId").unwrap_or("種別不明");
+        let kind = ole.attribute("progId").unwrap_or("unknown type");
         let preview = child(ole, P, "pic");
         let hidden = [frame, preview.unwrap_or(ole)].iter().any(|node| {
             node.children()
@@ -121,54 +124,54 @@ impl<'d> Renderer<'_, 'd> {
         if hidden {
             self.warnings.push(
                 Code::Omitted,
-                format!("OLE ({kind}) は hidden 指定のため非表示です。OLE は実行しません"),
+                format!("OLE ({kind}) is hidden; OLE is never executed"),
             );
             return Ok(());
         }
         let reason = (|| {
-            let pic = preview.ok_or("プレビュー画像がありません")?;
+            let pic = preview.ok_or("Missing preview image")?;
             let blip = pic
                 .descendants()
                 .find(|n| n.has_tag_name((A, "blip")))
-                .ok_or("プレビューの画像参照がありません")?;
+                .ok_or("Missing preview image reference")?;
             let id = blip
                 .attribute((R, "embed"))
-                .ok_or("外部参照のプレビューは取得しません")?;
-            let rel = self.rels.get(id).ok_or("プレビューの関連がありません")?;
+                .ok_or("External preview references are not fetched")?;
+            let rel = self.rels.get(id).ok_or("Missing preview relationship")?;
             if rel.external {
-                return Err("外部参照のプレビューは取得しません");
+                return Err("External preview references are not fetched");
             }
             if !rel.kind.ends_with("/image") {
-                return Err("プレビューの関連が画像ではありません");
+                return Err("Preview relationship is not an image");
             }
             let data = self
                 .parts
                 .get(&rel.target)
-                .ok_or("プレビュー画像の部品がありません")?;
+                .ok_or("Missing preview image part")?;
             if !data.starts_with(b"\x89PNG\r\n\x1a\n") && !data.starts_with(b"\xff\xd8\xff") {
-                return Err("プレビュー形式は PNG/JPEG 以外のため未対応です");
+                return Err("Unsupported preview format; only PNG/JPEG are supported");
             }
             if imagesize::blob_size(data).is_err() {
-                return Err("プレビュー画像が不正です");
+                return Err("Invalid preview image");
             }
             Ok(())
         })();
         if let Err(reason) = reason {
             self.warnings.push(
                 Code::Omitted,
-                format!("OLE ({kind}) を省略しました: {reason}。OLE は実行しません"),
+                format!("Omitted OLE ({kind}): {reason}. OLE is never executed"),
             );
             return Ok(());
         }
         let Some(t) = child(frame, P, "xfrm") else {
             self.warnings.push(
                 Code::Omitted,
-                format!("OLE ({kind}) の表示座標がありません"),
+                format!("Missing display transform for OLE ({kind})"),
             );
             return Ok(());
         };
         let (w, h) = transform(t, self.svg)?;
-        // pic の内側座標を重ねて適用しない。graphicFrame が表示領域を持つ。
+        // Do not reapply the inner pic transform; graphicFrame defines the display area.
         render_image(
             preview.unwrap(),
             self.parts,
@@ -181,7 +184,7 @@ impl<'d> Renderer<'_, 'd> {
         self.svg.push_str("</g>");
         self.warnings.push(
             Code::Approximation,
-            format!("OLE ({kind}) は実行せず、内部 PNG/JPEG プレビューを静的描画しました"),
+            format!("Rendered embedded PNG/JPEG preview for OLE ({kind}) without executing OLE"),
         );
         Ok(())
     }
@@ -192,13 +195,13 @@ impl<'d> Renderer<'_, 'd> {
         let Some(table) = table else {
             self.warnings.push(
                 Code::Omitted,
-                "未対応の要素を省略しました: graphicFrame（表以外）",
+                "Omitted unsupported element: non-table graphicFrame",
             );
             return Ok(());
         };
-        let t = child(node, P, "xfrm").context("表の座標がありません")?;
+        let t = child(node, P, "xfrm").context("Missing table transform")?;
         let (w, h) = transform(t, self.svg)?;
-        let grid = child(table, A, "tblGrid").context("表の列幅がありません")?;
+        let grid = child(table, A, "tblGrid").context("Missing table column widths")?;
         let widths: Vec<_> = grid
             .children()
             .filter(|n| n.has_tag_name((A, "gridCol")))
@@ -213,7 +216,7 @@ impl<'d> Renderer<'_, 'd> {
             || heights.is_empty()
             || widths.iter().chain(&heights).any(|v| *v <= 0.0)
         {
-            bail!("表の行列寸法が不正です");
+            bail!("Invalid table row or column dimensions");
         }
         let style_source = table_styles::load(self.parts, table, self.warnings)?;
         let style_doc = style_source.as_deref().map(Document::parse).transpose()?;
@@ -225,9 +228,9 @@ impl<'d> Renderer<'_, 'd> {
         let cell_count = widths
             .len()
             .checked_mul(rows.len())
-            .context("表のセル数が上限を超えています")?;
+            .context("Table cell count exceeds the limit")?;
         if cell_count > 100_000 {
-            bail!("表は 100000 セルまでです");
+            bail!("Tables are limited to 100000 cells");
         }
         let mut covered = vec![false; cell_count];
         let mut y = 0.0;
@@ -237,7 +240,7 @@ impl<'d> Renderer<'_, 'd> {
                 .filter(|n| n.has_tag_name((A, "tc")))
                 .collect();
             if cells.len() != widths.len() {
-                bail!("表のセル数と列数が一致しません");
+                bail!("Table cell count does not match column count");
             }
             let mut x = 0.0;
             for (col, cell) in cells.iter().enumerate() {
@@ -246,7 +249,7 @@ impl<'d> Renderer<'_, 'd> {
                 let merged = theme::bool_attr(*cell, "hMerge") == Some(true)
                     || theme::bool_attr(*cell, "vMerge") == Some(true);
                 if merged != covered[row_index * widths.len() + col] {
-                    bail!("結合セルの範囲と継続セルが一致しません");
+                    bail!("Merged cell span does not match continuation cells");
                 }
                 if theme::bool_attr(*cell, "hMerge") != Some(true)
                     && theme::bool_attr(*cell, "vMerge") != Some(true)
@@ -254,23 +257,32 @@ impl<'d> Renderer<'_, 'd> {
                     let span = |key: &str| -> Result<usize> {
                         let value = cell.attribute(key).unwrap_or("1").parse::<usize>()?;
                         if value == 0 {
-                            bail!("結合セルの範囲は正数が必要です");
+                            bail!("Merged cell spans must be positive");
                         }
                         Ok(value)
                     };
                     let cols = span("gridSpan")?;
                     let rs = span("rowSpan")?;
                     let ws = widths
-                        .get(col..col.checked_add(cols).context("結合列数が不正です")?)
-                        .context("結合セルが列の範囲を超えています")?;
+                        .get(
+                            col..col
+                                .checked_add(cols)
+                                .context("Invalid merged column count")?,
+                        )
+                        .context("Merged cell exceeds column bounds")?;
                     let hs = heights
-                        .get(row_index..row_index.checked_add(rs).context("結合行数が不正です")?)
-                        .context("結合セルが行の範囲を超えています")?;
+                        .get(
+                            row_index
+                                ..row_index
+                                    .checked_add(rs)
+                                    .context("Invalid merged row count")?,
+                        )
+                        .context("Merged cell exceeds row bounds")?;
                     for r in row_index..row_index + rs {
                         for c in col..col + cols {
                             let index = r * widths.len() + c;
                             if covered[index] {
-                                bail!("結合セルの範囲が重なっています");
+                                bail!("Merged cell spans overlap");
                             }
                             if (r, c) != (row_index, col) {
                                 covered[index] = true;
@@ -329,12 +341,12 @@ impl<'d> Renderer<'_, 'd> {
                             ) {
                                 warn(
                                     self.warnings,
-                                    format!("未対応のセル属性: {}", n.tag_name().name()),
+                                    format!("Unsupported cell property: {}", n.tag_name().name()),
                                 );
                             }
                         }
                         if props.attribute("vert").is_some_and(|s| s != "horz") {
-                            warn(self.warnings, "表の縦書きは未対応です");
+                            warn(self.warnings, "Vertical table text is unsupported");
                         }
                     }
                     if let Some(body) = child(cell, A, "txBody") {
@@ -364,8 +376,8 @@ impl<'d> Renderer<'_, 'd> {
     }
 }
 fn transform(t: Node<'_, '_>, svg: &mut String) -> Result<(f64, f64)> {
-    let off = child(t, A, "off").context("座標原点がありません")?;
-    let ext = child(t, A, "ext").context("座標寸法がありません")?;
+    let off = child(t, A, "off").context("Missing transform origin")?;
+    let ext = child(t, A, "ext").context("Missing transform extent")?;
     let (x, y, w, h) = (
         number(off, "x", 0.0) / EMU,
         number(off, "y", 0.0) / EMU,
@@ -373,7 +385,7 @@ fn transform(t: Node<'_, '_>, svg: &mut String) -> Result<(f64, f64)> {
         number(ext, "cy", 0.0) / EMU,
     );
     if w < 0.0 || h < 0.0 {
-        bail!("座標寸法が負です");
+        bail!("Transform extent is negative");
     }
     let rotation = number(t, "rot", 0.0) / 60000.0;
     let fx = if theme::bool_attr(t, "flipH") == Some(true) {

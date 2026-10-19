@@ -1,6 +1,6 @@
-"""本プロジェクト用の字間比較資料。再生成時のみ python-pptx が必要。
+"""Character-spacing comparison fixtures for this project; python-pptx is needed only for regeneration.
 
-spc は 1/100 pt。負値を句読点の連続 run に明示し、自動圧縮とは区別する。
+spc uses 1/100pt. Explicit negative values on punctuation runs are distinct from automatic compression.
 """
 import argparse
 from pathlib import Path
@@ -48,7 +48,7 @@ def make(output: Path):
         slide = deck.slides.add_slide(deck.slide_layouts[6])
         for i, align in enumerate((PP_ALIGN.LEFT, PP_ALIGN.CENTER, PP_ALIGN.RIGHT)):
             box(slide, text, .1 + i * .8, mode=mode, align=align)
-        # 書式を変えた境界で、直前の字間が後続文字に漏れないことも確認する。
+        # Verify that preceding character spacing does not leak across style boundaries.
         box(slide, "あ、い。う、え。お", 2.5, mode=mode)
 
     slide = deck.slides.add_slide(deck.slide_layouts[6])
@@ -58,7 +58,7 @@ def make(output: Path):
     box(slide, "あいうえおかきく", 1.9, width=2.5, x=3.2, mode="inherit", explicit=300)
 
     slide = deck.slides.add_slide(deck.slide_layouts[6])
-    # 段落既定の継承、明示ゼロによる取消、正の字間、別サイズ。
+    # Paragraph default inheritance, explicit zero overrides, positive spacing, and different sizes.
     for i, (inherited, explicit, size) in enumerate(((-600,None,24),(-600,0,24),(-600,300,24),(-600,None,18))):
         box(slide, "あ」、い。。う、、え", .1 + i * .8, mode="inherit",
             inherited=inherited, explicit=explicit, size=size, align=PP_ALIGN.RIGHT)

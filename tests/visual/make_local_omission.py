@@ -1,4 +1,4 @@
-"""余白中の小さなグラフ省略を再現する自作資料。生成時だけ python-pptx が必要。"""
+"""Independent fixture for a small omitted chart in whitespace. python-pptx is needed only for generation."""
 import json
 from pathlib import Path
 import sys

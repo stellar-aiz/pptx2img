@@ -1,4 +1,4 @@
-//! 実際の ZIP/XML 入力と PNG の画素を使って CLI の契約を確認する。
+//! Verify the CLI contract using real ZIP/XML inputs and PNG pixels.
 use std::{fs, io::Write, path::Path, process::Command};
 use zip::{ZipWriter, write::SimpleFileOptions};
 const P: &str = "http://schemas.openxmlformats.org/presentationml/2006/main";
@@ -17,7 +17,7 @@ fn fixture(path: &Path, extra: &str) {
             r#"<Relationships xmlns="{PR}"><Relationship Id="r1" Type="{R}/officeDocument" Target="ppt/presentation.xml"/></Relationships>"#
         ),
     );
-    // ファイル名の順序と異なる presentation 順序を検証する。
+    // Verify presentation order when it differs from filename order.
     add(
         "ppt/presentation.xml",
         format!(
@@ -182,7 +182,7 @@ fn default_output_is_next_to_input_and_explicit_output_takes_precedence() {
     let before = fs::read(out.join("manifest.json")).unwrap();
     let repeated = invoke();
     assert!(!repeated.status.success());
-    assert!(String::from_utf8_lossy(&repeated.stderr).contains("出力先が既に存在します"));
+    assert!(String::from_utf8_lossy(&repeated.stderr).contains("Output already exists"));
     assert_eq!(before, fs::read(out.join("manifest.json")).unwrap());
     let explicit = dir.path().join("指定出力");
     assert!(run(&input, &explicit, true).status.success());
@@ -263,7 +263,7 @@ fn library_returns_strict_diagnostics_and_validates_width() {
             convert(&input, &out, &settings)
                 .unwrap_err()
                 .to_string()
-                .contains("横幅")
+                .contains("width")
         );
         assert!(!out.exists());
     }
@@ -276,11 +276,11 @@ fn library_returns_strict_diagnostics_and_validates_width() {
 fn font_fallback_is_explicit_and_reports_all_affected_slides() {
     use pptx2img::{ConvertOptions, FontFallbackError, convert};
     let font = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/latin.ttf");
-    // 書体不足、字形の不足、スタイルの不足を OS のフォントに依存せず検証する。
+    // Verify missing families, glyphs, and styles independently of OS fonts.
     for (family, value, attributes, reason) in [
-        ("不在の書体", "A", "", "書体不足"),
+        ("不在の書体", "A", "", "family unavailable"),
         ("Pptx Latin", "あ", "", "U+3042"),
-        ("Pptx Latin", "A", "b=\"1\"", "太さ・斜体"),
+        ("Pptx Latin", "A", "b=\"1\"", "weight or italic"),
     ] {
         let dir = tempfile::tempdir().unwrap();
         let input = dir.path().join("fonts.pptx");
@@ -304,7 +304,7 @@ fn font_fallback_is_explicit_and_reports_all_affected_slides() {
         let text = diagnostic.to_string();
         assert!(text.contains(family), "{text}");
         assert!(text.contains(reason), "{text}");
-        assert!(text.contains("スライド 1, 2"), "{text}");
+        assert!(text.contains("slides 1, 2"), "{text}");
         for (suffix, flags, success) in [
             ("default", vec![], false),
             ("fallback", vec!["--font-fallback"], value != "あ"),
@@ -396,6 +396,16 @@ fn exact_font_needs_no_flag_but_mapping_requires_permission() {
 
 #[test]
 fn invalid_arguments_are_yaml_but_help_and_version_remain_available() {
+    let help = Command::new(env!("CARGO_BIN_EXE_pptx2img"))
+        .arg("--help")
+        .output()
+        .unwrap();
+    let help = String::from_utf8(help.stdout).unwrap();
+    assert!(help.contains("Convert PPTX to PNG without Office"));
+    assert!(help.contains("application bundles and inaccessible paths"));
+    assert!(help.contains("Individual missing glyphs"));
+    assert!(!help.chars().any(|c| ('\u{3040}'..='\u{30ff}').contains(&c)));
+
     let invalid = Command::new(env!("CARGO_BIN_EXE_pptx2img"))
         .arg("--invalid-option")
         .output()

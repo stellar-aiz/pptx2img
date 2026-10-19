@@ -16,7 +16,7 @@ fn render(mode: &str) -> (Pixmap, serde_json::Value) {
     let pic = if mode == "missing" {
         String::new()
     } else {
-        // 内側座標が異なっても外枠の座標を一度だけ適用する。
+        // Apply the outer frame transform once even if inner coordinates differ.
         format!(
             r#"<p:pic><p:blipFill><a:blip r:embed="preview"/><a:stretch><a:fillRect/></a:stretch></p:blipFill><p:spPr>{}</p:spPr></p:pic>"#,
             transform(70, 70, 10, 10)
@@ -74,7 +74,7 @@ fn internal_preview_uses_frame_coordinates_once() {
             .as_array()
             .unwrap()
             .iter()
-            .any(|w| w.as_str().unwrap().contains("静的描画"))
+            .any(|w| w.as_str().unwrap().contains("Rendered embedded"))
     );
     let (fallback, _) = render("fallback");
     assert_eq!(fallback.data(), png.data());
@@ -85,11 +85,11 @@ fn internal_preview_uses_frame_coordinates_once() {
 #[test]
 fn unavailable_previews_have_concrete_diagnostics() {
     for (mode, reason) in [
-        ("missing", "プレビュー画像がありません"),
-        ("unsupported", "PNG/JPEG 以外"),
-        ("external", "外部参照"),
-        ("missing-part", "部品がありません"),
-        ("hidden", "hidden 指定"),
+        ("missing", "Missing preview image"),
+        ("unsupported", "only PNG/JPEG"),
+        ("external", "External preview"),
+        ("missing-part", "Missing preview image part"),
+        ("hidden", "is hidden"),
     ] {
         let (img, report) = render(mode);
         assert_eq!(rgb(&img, 30, 40), (255, 255, 255));

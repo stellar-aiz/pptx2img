@@ -1,4 +1,4 @@
-//! DrawingML の色を解決し、HSL 明度変換を記述順に適用する。
+//! Resolve DrawingML colors and apply HSL luminance transforms in document order.
 use super::*;
 pub(super) fn resolve(
     node: Node<'_, '_>,
@@ -79,7 +79,7 @@ fn resolve_inner(
                     "alphaOff" if alpha_enabled => {
                         alpha = (alpha + number(transform, "val", 0.0) / 100000.0).clamp(0.0, 1.0)
                     }
-                    name => warn(warnings, format!("未対応の色変換: {name}")),
+                    name => warn(warnings, format!("Unsupported color transform: {name}")),
                 }
             }
             return (
@@ -92,7 +92,7 @@ fn resolve_inner(
             );
         }
     }
-    warn(warnings, "色を解決できないため代替色で描画しました");
+    warn(warnings, "Cannot resolve color; using a fallback color");
     (default.into(), 1.0)
 }
 fn components(rgb: &str) -> [f64; 3] {

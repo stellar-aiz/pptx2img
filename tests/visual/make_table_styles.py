@@ -1,4 +1,4 @@
-"""自作表スタイルと同等の直接書式、結合セルを比較する。"""
+"""Compare independently created table styles with equivalent direct formatting and merged cells."""
 from pathlib import Path
 from zipfile import ZipFile,ZIP_DEFLATED
 from io import BytesIO

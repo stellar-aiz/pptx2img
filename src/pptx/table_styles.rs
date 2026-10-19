@@ -1,4 +1,4 @@
-//! 表スタイルをセルの明示書式へ重ねる。通常の文字配置処理は変更しない。
+//! Combine table styles with explicit cell formatting without changing text layout.
 use super::*;
 #[derive(Clone)]
 struct Element {
@@ -62,7 +62,7 @@ impl Element {
             self.name
         )
     }
-    /// 上位の属性と子要素が下位の同名項目を置き換える。
+    /// Higher-priority attributes and children replace lower-priority entries of the same name.
     fn overlay(&mut self, other: &Self) {
         for (k, v) in &other.attrs {
             self.attrs.retain(|(key, _)| key != k);
@@ -88,14 +88,17 @@ pub(super) fn load(
             attr.name(),
             "firstRow" | "lastRow" | "firstCol" | "lastCol" | "bandRow" | "bandCol"
         ) {
-            warn(warnings, format!("未対応の表全体属性: {}", attr.name()));
+            warn(
+                warnings,
+                format!("Unsupported table attribute: {}", attr.name()),
+            );
         }
     }
     for node in props.children().filter(|n| n.is_element()) {
         if !node.has_tag_name((A, "tableStyleId")) {
             warn(
                 warnings,
-                format!("未対応の表全体書式: {}", node.tag_name().name()),
+                format!("Unsupported table formatting: {}", node.tag_name().name()),
             );
         }
     }
@@ -117,7 +120,7 @@ pub(super) fn load(
     else {
         warn(
             warnings,
-            "表スタイル部品がないためセルの明示書式で代替しました",
+            "Table style part is missing; using explicit cell formatting",
         );
         return Ok(None);
     };
@@ -131,7 +134,7 @@ pub(super) fn load(
     } else {
         warn(
             warnings,
-            format!("表スタイルID {id} を解決できないためセルの明示書式で代替しました"),
+            format!("Cannot resolve table style ID {id}; using explicit cell formatting"),
         );
         Ok(None)
     }
@@ -219,7 +222,7 @@ pub(super) fn cell(
                 }
             }
             if child(tc, A, "fillRef").is_some() {
-                warn(warnings, "表スタイルのfillRefは未対応です");
+                warn(warnings, "Table style fillRef is unsupported");
             }
             if let Some(borders) = child(tc, A, "tcBdr") {
                 for (edge, source) in [
@@ -246,7 +249,7 @@ pub(super) fn cell(
                             properties.children.retain(|c| c.name != edge);
                             properties.children.push(line);
                         } else {
-                            warn(warnings, "表スタイルの線参照は未対応です");
+                            warn(warnings, "Table style line references are unsupported");
                         }
                     }
                 }

@@ -1,4 +1,4 @@
-"""線幅0.25〜6ptと端部sm/med/lgの視認性を比較する自作資料。"""
+"""Independent fixture comparing 0.25-6pt line widths and sm/med/lg arrowheads."""
 import sys
 from pptx import Presentation
 from pptx.enum.shapes import MSO_CONNECTOR

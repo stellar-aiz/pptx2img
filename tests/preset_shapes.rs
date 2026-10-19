@@ -71,7 +71,12 @@ fn adjustment_changes_home_plate_outline() {
     assert_ne!(default.data(), adjusted.data());
     assert_eq!(rgb(&default, 55, 24), (36, 90, 81));
     assert_eq!(rgb(&adjusted, 55, 24), (255, 255, 255));
-    assert!(!report.slides[0].warnings.iter().any(|w| w.contains("調整")));
+    assert!(
+        !report.slides[0]
+            .warnings
+            .iter()
+            .any(|w| w.contains("adjustment"))
+    );
 }
 #[test]
 fn unknown_preset_and_adjustment_remain_diagnosed() {
@@ -91,6 +96,6 @@ fn unknown_preset_and_adjustment_remain_diagnosed() {
         invalid.slides[0]
             .warnings
             .iter()
-            .any(|w| w.contains("調整式"))
+            .any(|w| w.contains("adjustment formulas"))
     );
 }

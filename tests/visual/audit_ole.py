@@ -1,4 +1,4 @@
-"""OLE の構造・関連・画像形式だけを読み取り、本文と画像を出力せず監査する。"""
+"""Audit only OLE structure, relationships, and image formats without exporting text or images."""
 from io import BytesIO
 import json
 from pathlib import Path

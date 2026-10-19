@@ -1,4 +1,4 @@
-"""外部フォントを転用せず、幅計測専用の最小フォントを作る。生成時のみ fontTools が必要。"""
+"""Generate a minimal width-measurement font without reusing external fonts. Requires fontTools only for generation."""
 from pathlib import Path
 from fontTools.fontBuilder import FontBuilder
 from fontTools.pens.ttGlyphPen import TTGlyphPen

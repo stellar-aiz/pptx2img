@@ -1,4 +1,4 @@
-//! 描画と計測で共有する、読み込み順に依存しないフォント選択。
+//! Load-order-independent font selection shared by measurement and rendering.
 use super::diagnostics::{FontResolution, Warnings};
 use resvg::usvg::fontdb::{Database, ID, Style, Weight};
 use skrifa::{FontRef, MetadataProvider};

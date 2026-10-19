@@ -1,9 +1,9 @@
-//! ECMA-376 Part 1 のプリセット定義から独立に構成した輪郭と文字領域。
+//! Outlines and text areas independently implemented from ECMA-376 Part 1 presets.
 use super::*;
 
 pub(super) struct Geometry {
     pub svg: String,
-    /// 左上と幅・高さ。図形のローカル座標系を使う。
+    /// Top-left position, width, and height in shape-local coordinates.
     pub text: (f64, f64, f64, f64),
 }
 
@@ -24,7 +24,7 @@ fn adjustments(node: Node<'_, '_>, defaults: &[(&str, f64)], warnings: &mut Warn
             } else {
                 warn(
                     warnings,
-                    "プリセット図形の調整式を解決できないため既定値を使いました",
+                    "Cannot resolve preset shape adjustment formulas; using defaults",
                 );
             }
         }
@@ -64,7 +64,7 @@ pub(super) fn preset(
         }
         "rightArrow" | "upArrow" => {
             let a = adjustments(node, &[("adj1", 50000.0), ("adj2", 50000.0)], warnings);
-            // 上矢印は同じ輪郭を縦横交換し、反時計回りに変換する。
+            // Build the up arrow by swapping axes and transforming the same outline counterclockwise.
             let (u, v) = if kind == "upArrow" { (h, w) } else { (w, h) };
             let head = (ss * a[1] / 100000.0).clamp(0.0, u);
             let x = u - head;
@@ -108,7 +108,7 @@ pub(super) fn preset(
                 h - radius
             );
             let inset = radius * (1.0 - std::f64::consts::FRAC_1_SQRT_2);
-            // 塗りは閉じるが、左端に輪郭線を追加しない。
+            // Close the fill without adding an outline at the left edge.
             return Some(Geometry {
                 svg: format!(
                     "<g {style}><path d=\"{path} Z\" stroke=\"none\"/><path d=\"{path}\" fill=\"none\"/></g>"

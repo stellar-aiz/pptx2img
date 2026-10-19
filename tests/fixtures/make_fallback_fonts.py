@@ -1,12 +1,12 @@
-"""代替順位検証用。字形・メトリクスを本プロジェクトで生成する。"""
+"""Fallback priority fixtures with glyphs and metrics generated in this project."""
 from pathlib import Path
 from zipfile import ZipFile
 from xml.etree import ElementTree
 from fontTools.fontBuilder import FontBuilder
 from fontTools.pens.ttGlyphPen import TTGlyphPen
 
-# 日本語サンプルの構造・色・画像の検証を OS のフォントから独立させる。
-# 輪郭は他のテスト書体と同じ矩形であり、日本語字形の忠実度を検証する用途ではない。
+# Make structural, color, and image checks for Japanese samples independent of OS fonts.
+# Outlines are rectangles, like the other test fonts; they do not test Japanese glyph fidelity.
 sample_chars = set(' ')
 for filename in ['basic.pptx', 'theme.pptx']:
     with ZipFile(Path(__file__).resolve().parents[2] / 'examples' / filename) as archive:

@@ -1,4 +1,4 @@
-"""自作の PNG/JPEG プレビューを持つ OLE と通常画像を並べて比較する。"""
+"""Compare OLE objects with independently created PNG/JPEG previews against regular images."""
 from io import BytesIO
 from pathlib import Path
 import sys
@@ -19,7 +19,7 @@ def main(out):
         data = BytesIO()
         image.save(data, format=fmt)
         raw = data.getvalue()
-        # OLE 本体は自作の無効データ。実行・解析に依存しないプレビュー検証。
+        # OLE payload is independently generated invalid data; preview tests require no execution or parsing.
         slide.shapes.add_ole_object(
             BytesIO(b'own inert OLE fixture'), 'Own.Document',
             Inches(.7), Inches(1.4), Inches(3.6), Inches(2.16),

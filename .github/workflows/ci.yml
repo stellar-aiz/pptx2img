@@ -1,4 +1,4 @@
-name: 通常の検証
+name: Continuous integration
 on:
   push:
   pull_request:
@@ -6,7 +6,7 @@ permissions:
   contents: read
 jobs:
   test:
-    name: Rust と比較器の検証
+    name: Rust and comparison tests
     strategy:
       fail-fast: false
       matrix:
@@ -18,11 +18,11 @@ jobs:
         shell: bash
     steps:
       - uses: actions/checkout@v4
-      - name: Rust を固定
+      - name: Pin Rust toolchain
         run: |
           rustup toolchain install 1.97.0 --profile minimal --component clippy,rustfmt
           rustup override set 1.97.0
-      - name: 書式・静的解析・通常テスト
+      - name: Formatting, linting, and unit tests
         run: |
           cargo fmt --check
           cargo clippy --locked --all-targets -- -D warnings
@@ -30,7 +30,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.14'
-      - name: 画像比較器の単体テスト
+      - name: Image comparison unit tests
         run: |
           python -m pip install -r tests/visual/requirements.txt
           python -m unittest discover -s tests/visual -p 'test_*.py'

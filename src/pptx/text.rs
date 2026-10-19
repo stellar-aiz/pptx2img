@@ -1,5 +1,5 @@
-//! フォントの公称 advance と行メトリクスによる横書き配置。
-//! 句読点のぶら下がりと固定行送りを解釈する。複雑な shaping などは未対応。
+//! Horizontal text layout using nominal font advances and line metrics.
+//! Handle hanging punctuation and fixed line spacing; complex shaping is unsupported.
 mod bullets;
 use super::fonts::Resolver;
 use super::*;
@@ -82,8 +82,8 @@ fn style(
 fn is_east_asian(ch: char) -> bool {
     matches!(ch as u32, 0x3000..=0x9fff | 0xf900..=0xfaff | 0xff00..=0xffef | 0x20000..=0x323af)
 }
-// Impress の 600 DPI 参照デバイスに合わせた計測用サイズ。
-// 字形の描画サイズは変更しない。根拠と比較範囲は README のフォント幅計測を参照。
+// Measurement size matching Impress's 600 DPI reference device.
+// Keep glyph rendering size unchanged. See docs/rendering-notes.md for evidence and scope.
 fn measurement_size(css_px: f64) -> f64 {
     let hundredth_mm = (css_px * 2540.0 / 96.0).round();
     (hundredth_mm * 600.0 / 2540.0).round().max(1.0) * 96.0 / 600.0
@@ -108,8 +108,8 @@ fn glyphs(
             let font = FontRef::from_index(data, index).ok()?;
             let size = Size::new(style.size as f32);
             let metrics = font.metrics(size, LocationRef::default());
-            // Office 系の横書きでは Windows のセルメトリクスを基準にする。
-            // OS/2 がない書体は標準の typographic/hhea メトリクスへ戻す。
+            // Use Windows cell metrics for Office-style horizontal text.
+            // Fall back to standard typographic/hhea metrics when OS/2 is absent.
             let (ascent, descent, leading) = font
                 .os2()
                 .ok()
@@ -131,8 +131,8 @@ fn glyphs(
             if metrics.units_per_em == 0 {
                 return None;
             }
-            // サイズ指定の glyph_metrics は固定小数点の丸めを含む。
-            // フォント単位で取得した幅を、計測用サイズへ倍精度で換算する。
+            // Sized glyph_metrics include fixed-point rounding.
+            // Convert font-unit advances to the measurement size with double precision.
             let advance_scale = measurement_size(style.size) / f64::from(metrics.units_per_em);
             let map = font.charmap();
             Some(
@@ -177,7 +177,7 @@ fn glyphs(
     }
     warnings.push(
         Code::Approximation,
-        "フォントのメトリクスを取得できないため文字幅を近似します",
+        "Cannot read font metrics; character widths are approximate",
     );
     value
         .chars()
@@ -212,8 +212,8 @@ fn paragraph_hanging(nodes: [Option<Node<'_, '_>>; 3], inherited: bool) -> bool 
 fn can_hang(ch: char) -> bool {
     "、。，．".contains(ch)
 }
-// 字間は同じ文字書式が続く文字間にだけ加える。行末には加えない。
-// LibreOffice の描画でも書式境界では字間がリセットされる。
+// Add spacing only between characters with the same style, never at line ends.
+// LibreOffice also resets character spacing at style boundaries.
 fn step(glyph: &Glyph, next: Option<&Glyph>) -> f64 {
     let spacing = next
         .filter(|next| glyph.style == next.style)
@@ -251,22 +251,22 @@ fn baseline_offset(
         .and_then(|n| child(n, A, "lnSpc"))
         .and_then(|n| child(n, A, "spcPts"))
         .is_some();
-    // 固定行送りはベースライン下の領域を保ち、上側の空きを増減する。
-    // 百分率は次行までの距離を変えるが、初行の ascent は変えない。
+    // Fixed line spacing preserves the area below the baseline and adjusts space above it.
+    // Percentage spacing changes distance to the next line, not the first line's ascent.
     if fixed {
         ascent + advance - natural
     } else {
         ascent
     }
 }
-// LibreOffice 比較で確認したレイアウト単位（1/100 mm）。
-// 枠と書式区間は四捨五入。収まり判定の累積幅と文字ごとの圧縮余白は切り捨てる。
+// Layout units verified against LibreOffice (1/100 mm).
+// Round boxes and style spans; truncate cumulative fit widths and per-character compression space.
 const LAYOUT_UNITS_PER_PX: f64 = 2540.0 / 96.0;
 fn layout_units(width: f64) -> f64 {
     (width * LAYOUT_UNITS_PER_PX).round()
 }
 fn fits_line(width: f64, compressed_units: f64, available: f64) -> bool {
-    // 境界での収まり判定は累積幅の整数部を使う。文字ごとの切り捨てはしない。
+    // Use the integer part of cumulative width for boundary fitting, not per-character truncation.
     (width * LAYOUT_UNITS_PER_PX).floor() - compressed_units <= layout_units(available)
 }
 fn wrap(glyphs: &[Glyph], available: f64, enabled: bool, hanging: bool) -> Vec<Vec<Glyph>> {
@@ -291,7 +291,7 @@ fn wrap(glyphs: &[Glyph], available: f64, enabled: bool, hanging: bool) -> Vec<V
                         + step(&remaining[end - 1], Some(&remaining[end]))
                         + remaining[end].advance
                 };
-                // 明示字間を含む行は、同じ書式の区間ごとに幅を丸める。
+                // With explicit character spacing, round widths per same-style span.
                 if end > 0 && remaining[end - 1].style != remaining[end].style {
                     completed_units += layout_units(segment_width);
                     segment_width = remaining[end].advance;
@@ -309,7 +309,7 @@ fn wrap(glyphs: &[Glyph], available: f64, enabled: bool, hanging: bool) -> Vec<V
                 sum = candidate;
                 end += 1;
             }
-            // hangingPunct は句読点を 1 文字だけ枠外に置ける。禁則による追い出しより先に扱う。
+            // hangingPunct allows one punctuation character outside the box, before prohibited-break handling.
             if hanging && end < remaining.len() && can_hang(remaining[end].ch) {
                 end += 1;
             }
@@ -329,8 +329,8 @@ fn wrap(glyphs: &[Glyph], available: f64, enabled: bool, hanging: bool) -> Vec<V
     }
     result
 }
-// 全角約物の半角分の余白を上限に、行に必要な分だけ縮める。
-// 中点・感嘆符・疑問符・仮名はこのモードでは圧縮しない。
+// Compress only as much as needed, up to half-width spacing for full-width punctuation.
+// Do not compress middle dots, exclamation marks, question marks, or kana in this mode.
 fn opening(ch: char) -> bool {
     "「『（［｛〈《【〔".contains(ch)
 }
@@ -357,7 +357,7 @@ fn compress_line(glyphs: &[Glyph], ratio: f64) -> Vec<Glyph> {
             let reduction = capacity(g) * ratio;
             result.advance -= reduction;
             result.compressed = ratio > 0.0;
-            // 行頭の開き括弧は字形を左へ突き出さず、後続の位置も同じ量だけ戻す。
+            // Keep leading opening brackets inside the box and shift following positions back equally.
             result.offset = if i == 0 {
                 0.0
             } else {
@@ -407,8 +407,8 @@ fn compress_wrap(glyphs: &[Glyph], available: f64, hanging: bool) -> Vec<Vec<Gly
             let line = &remaining[..end];
             let total: f64 = line.iter().map(capacity).sum();
             let width = layout_width(line, available, hanging);
-            // 折り返した行が自然幅へ戻る整数境界では、圧縮済みの字形位置が残る。
-            // 境界の 1 単位（1/100 mm）はこの保持判定にだけ適用する。
+            // At integer boundaries where wrapped lines regain natural width, compressed glyph positions persist.
+            // Apply the one-unit (1/100 mm) boundary allowance only to this retention decision.
             let ratio = if total == 0.0 {
                 0.0
             } else if end < candidate
@@ -501,7 +501,7 @@ fn auto_fit(nodes: &[Node<'_, '_>], warnings: &mut Warnings) -> AutoFit {
                             None => {
                                 warn(
                                     warnings,
-                                    format!("不正な自動調整値 {key}={raw} を既定値で近似します"),
+                                    format!("Invalid autofit value {key}={raw}; using the default"),
                                 );
                                 default
                             }
@@ -533,12 +533,12 @@ pub(super) fn render<'a>(
         .collect();
     warnings.push(
         Code::Approximation,
-        "文字組みは近似です。複雑な shaping・完全な Office 互換は未対応です",
+        "Text layout is approximate; complex shaping and full Office compatibility are unsupported",
     );
     if options.punctuation_compression {
         warn(
             warnings,
-            "自動句読点圧縮は実験的な描画方針です。PPTX 内の指定ではありません",
+            "Automatic punctuation compression is an experimental rendering policy, not a setting in the PPTX",
         );
     }
     let resolver = &options.fonts;
@@ -547,7 +547,7 @@ pub(super) fn render<'a>(
         .filter_map(|n| child(*n, A, "bodyPr"))
         .collect();
     if attr(&body_props, "vert").is_some_and(|s| s != "horz") {
-        warn(warnings, "縦書きは未対応です");
+        warn(warnings, "Vertical text is unsupported");
     }
     let autofit = auto_fit(&body_props, warnings);
     let text_style = |nodes: &[Node<'_, '_>], east: bool, warnings: &mut Warnings| {
@@ -580,8 +580,8 @@ pub(super) fn render<'a>(
         Some("body" | "obj" | "subTitle") => "bodyStyle",
         _ => "otherStyle",
     };
-    // 通常のテキストボックスはプレゼン既定を使用し、プレースホルダーの
-    // マスター書式を流用しない。図形内文字は従来のotherStyleを維持する。
+    // Ordinary text boxes use presentation defaults, not placeholder
+    // master styles. Text inside shapes continues to use otherStyle.
     let textbox = body
         .parent()
         .and_then(|n| child(n, P, "nvSpPr"))
@@ -661,7 +661,7 @@ pub(super) fn render<'a>(
                     .chain(defaults.iter().copied())
                     .collect();
                 let value = child(run, A, "t").and_then(|n| n.text()).unwrap_or("");
-                // 欧文と東アジア文字では別のフォント指定を解決する。
+                // Resolve Latin and East Asian font declarations separately.
                 let mut segment = String::new();
                 let mut last = None;
                 for ch in value.chars() {
@@ -724,18 +724,21 @@ pub(super) fn render<'a>(
         if marker.is_some() && text_width(&marker_glyphs) > -indent && !marker_glyphs.is_empty() {
             warn(
                 warnings,
-                "箇条書き記号と本文の間隔が不足しています。marL/indentを確認してください",
+                "Insufficient space between bullet and text; check marL/indent",
             );
         }
         if marker.is_some() && attr(&paragraph_props, "algn").is_some_and(|a| a != "l") {
-            warn(warnings, "左揃え以外の箇条書き記号位置は近似です");
+            warn(
+                warnings,
+                "Bullet positions for non-left-aligned paragraphs are approximate",
+            );
         }
         if all.windows(2).any(|pair| {
             pair[0].style == pair[1].style && pair[0].advance + pair[0].style.spacing < 0.0
         }) {
             warn(
                 warnings,
-                "文字幅を超える負の字間は未対応のため送り幅を 0 に制限します",
+                "Negative character spacing exceeding character width is unsupported; advance is clamped to 0",
             );
         }
         let end_defaults: Vec<_> = child(paragraph, A, "endParaRPr")
@@ -767,7 +770,7 @@ pub(super) fn render<'a>(
         if compressed && all.iter().any(|g| g.style.spacing != 0.0) {
             warn(
                 warnings,
-                "自動句読点圧縮と明示字間の併用は未対応のため明示字間を優先します",
+                "Automatic punctuation compression with explicit character spacing is unsupported; explicit spacing takes precedence",
             );
         }
         let wrap_lines = |glyphs: &[Glyph], width| {
@@ -795,7 +798,7 @@ pub(super) fn render<'a>(
             let line_available = paragraph_width - line_indent;
             let width = layout_width(&glyph_line, line_available, hanging);
             if width > line_available + 0.01 {
-                warnings.push(Code::TextOverflow, "文字がテキスト枠の横幅を超えています");
+                warnings.push(Code::TextOverflow, "Text exceeds the text box width");
             }
             let metrics = glyph_line
                 .iter()
@@ -861,12 +864,15 @@ pub(super) fn render<'a>(
         && source.cell_props.is_none()
         && attr(&body_props, "vert").is_none_or(|s| s == "horz");
     if autofit.expand && !can_expand {
-        warn(warnings, "表セル・縦書きの自動枠拡張は未対応です");
+        warn(
+            warnings,
+            "Shape autofit for table cells or vertical text is unsupported",
+        );
     }
     if autofit.expand && !wrap_enabled {
         warn(
             warnings,
-            "折り返しなしの横方向自動枠拡張は未対応です。高さだけ拡張します",
+            "Horizontal shape autofit without wrapping is unsupported; only height is expanded",
         );
     }
     let expanded_height = if can_expand {
@@ -885,14 +891,14 @@ pub(super) fn render<'a>(
     };
     let h = expanded_height;
     if content_height > h - top - bottom + 0.01 {
-        warnings.push(Code::TextOverflow, "文字がテキスト枠の高さを超えています");
+        warnings.push(Code::TextOverflow, "Text exceeds the text box height");
     }
     let vertical = match anchor {
         Some("ctr") => top + (h - top - bottom - content_height) / 2.0,
         Some("b") => h - bottom - content_height,
         Some("t") | None => top,
         _ => {
-            warn(warnings, "均等割付の縦配置は未対応です");
+            warn(warnings, "Distributed vertical alignment is unsupported");
             top
         }
     };
@@ -984,7 +990,7 @@ mod tests {
                 assert_eq!(lines.concat(), text);
             }
         }
-        // 各文字を切り捨ててから合計すると狭すぎる枠にも収まってしまう。
+        // Truncating each character before summing incorrectly fits overly narrow boxes.
         let mut glyphs = sample("あいうえお");
         for glyph in &mut glyphs {
             glyph.advance = 16.0;
@@ -1019,7 +1025,7 @@ mod tests {
             glyph.style.size = 32.0;
             glyph.style.spacing = index as f64;
         }
-        // 区間はすべて別書式なので字間は加わらないが、各区間の丸めは蓄積する。
+        // All spans have different styles: no character spacing, but span rounding accumulates.
         assert_eq!(strings(wrap(&glyphs, 96.0, true, false)), ["あい", "う"]);
         assert_eq!(strings(wrap(&glyphs, 96.04, true, false)), ["あいう"]);
     }
@@ -1096,7 +1102,7 @@ mod tests {
             assert_eq!(lines[1][0].advance, 32.0);
         }
         assert_eq!(compress_wrap(&glyphs, 120.01 * 4.0 / 3.0, false).len(), 1);
-        // 残りの文字がない行では、枠に必要な分だけ縮める。
+        // For a final line, compress only enough to fit the box.
         let last = compress_wrap(&glyphs[..5], 119.95 * 4.0 / 3.0, false);
         assert!(last[0][1].advance > 31.9);
     }
@@ -1180,10 +1186,16 @@ mod tests {
             );
             assert!(svg.contains(&format!("<tspan x=\"{expected}\"")), "{svg}");
             assert_eq!(
-                warnings.iter().any(|s| s.contains("明示字間を優先")),
+                warnings
+                    .iter()
+                    .any(|s| s.contains("explicit spacing takes precedence")),
                 warn_spacing
             );
-            assert!(warnings.iter().any(|s| s.contains("実験的な描画方針")));
+            assert!(
+                warnings
+                    .iter()
+                    .any(|s| s.contains("experimental rendering policy"))
+            );
         }
     }
     #[test]
@@ -1249,7 +1261,7 @@ mod tests {
     }
     #[test]
     fn svg_positions_use_spacing_and_alignment() {
-        // フォント未登録時の決定的な幅 10px を用い、SVG 出力まで検証する。
+        // Verify SVG output with a deterministic 10px width when no fonts are registered.
         for (align, expected) in [
             ("l", "0 5 10 15"),
             ("ctr", "12.5 17.5 22.5 27.5"),
@@ -1297,7 +1309,7 @@ mod tests {
         assert!(
             warnings
                 .iter()
-                .any(|s| s.contains("文字幅を超える負の字間"))
+                .any(|s| s.contains("Negative character spacing exceeding character width"))
         );
     }
     #[test]
@@ -1372,7 +1384,7 @@ mod tests {
             .children()
             .filter(|n| n.is_element())
             .collect();
-        // ascent 20 / descent 5 のセルを 24px の固定行送りに置く。下端 5px を保持。
+        // Place an ascent-20/descent-5 cell in a fixed 24px line; preserve 5px below the baseline.
         let fixed = spacing(Some(props[0]), "lnSpc", 25.0, 25.0);
         assert_eq!(fixed, 24.0);
         assert_eq!(baseline_offset(Some(props[0]), 20.0, 25.0, fixed), 19.0);

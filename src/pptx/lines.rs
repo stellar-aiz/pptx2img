@@ -1,8 +1,8 @@
-//! DrawingML の線種・端部を SVG の線属性とマーカーへ変換する。
+//! Convert DrawingML line styles and ends into SVG stroke attributes and markers.
 use super::*;
 use std::collections::BTreeMap;
 
-/// 線の継承用の小さなXML表現。部品ごとのnamespace prefixに依存しない。
+/// Small XML representation for line inheritance, independent of part namespace prefixes.
 #[derive(Clone)]
 pub(super) struct Element {
     name: String,
@@ -103,7 +103,10 @@ pub(super) fn resolve(
                 .find(|n| n.is_element())
                 .map(Element::from)
                 .unwrap_or_else(|| {
-                    warn(warnings, "テーマ線の参照色がないため黒で近似します");
+                    warn(
+                        warnings,
+                        "Theme line reference color is missing; using black",
+                    );
                     Element {
                         name: "srgbClr".into(),
                         attrs: BTreeMap::from([("val".into(), "000000".into())]),
@@ -116,13 +119,13 @@ pub(super) fn resolve(
             warn(
                 warnings,
                 format!(
-                    "テーマ線参照 {} を解決できません",
-                    reference.attribute("idx").unwrap_or("未指定")
+                    "Cannot resolve theme line reference {}",
+                    reference.attribute("idx").unwrap_or("unspecified")
                 ),
             );
         }
     }
-    // 遠い親から適用し、最も近い直接指定を最後に重ねる。
+    // Apply distant ancestors first and the nearest explicit properties last.
     for node in direct.iter().rev() {
         let line = Element::from(*node);
         if let Some(current) = &mut resolved {
@@ -142,7 +145,10 @@ pub(super) fn decorations(
 ) -> String {
     for attr in line.attributes() {
         if !matches!(attr.name(), "w" | "cap" | "cmpd" | "algn") {
-            warn(warnings, format!("未対応の線属性: {}", attr.name()));
+            warn(
+                warnings,
+                format!("Unsupported line property: {}", attr.name()),
+            );
         }
     }
     let cap = match line.attribute("cap").unwrap_or("flat") {
@@ -150,7 +156,7 @@ pub(super) fn decorations(
         "rnd" => "round",
         "sq" => "square",
         other => {
-            warn(warnings, format!("未対応の線端: {other}"));
+            warn(warnings, format!("Unsupported line cap: {other}"));
             "butt"
         }
     };
@@ -196,7 +202,7 @@ pub(super) fn decorations(
                 ));
             }
         } else {
-            warn(warnings, "未対応のプリセット破線です");
+            warn(warnings, "Unsupported preset dash pattern");
         }
     }
     if ["headEnd", "tailEnd"].iter().any(|tag| {
@@ -205,10 +211,10 @@ pub(super) fn decorations(
                 .is_some_and(|t| matches!(t, "triangle" | "stealth" | "arrow" | "diamond" | "oval"))
         })
     }) {
-        // stellar:debt(scope) 矢印と線本体の接合は重ね描き。upgrade: 端部形状に応じた線の短縮
+        // stellar:debt(scope) Arrowheads overlap the shaft. upgrade: shorten shafts for each head geometry
         warnings.push(
             Code::Approximation,
-            "矢印端は近似です。2pt未満の線では端部の基準幅を2ptとし、接合部は重ね描きします",
+            "Arrowheads are approximate: lines thinner than 2pt use a 2pt reference width for heads, and joins overlap",
         );
     }
     for (tag, side) in [("headEnd", "start"), ("tailEnd", "end")] {
@@ -224,8 +230,8 @@ pub(super) fn decorations(
             "lg" => 5.0,
             _ => 3.0,
         };
-        // 自作0.25〜6pt系列とLibreOffice比較では、端部の基準幅は2pt未満で一定。
-        // 線本体の幅は変えず、端部の縦横寸法だけを近似する。
+        // Our 0.25-6pt fixtures and LibreOffice comparisons show a constant head reference width below 2pt.
+        // Approximate only head dimensions, without changing shaft width.
         let end_scale = (8.0 / 3.0 / width).max(1.0);
         let (length, height) = (dimension("len") * end_scale, dimension("w") * end_scale);
         let middle = height / 2.0;
@@ -249,7 +255,7 @@ pub(super) fn decorations(
                 length / 2.0
             ),
             _ => {
-                warn(warnings, format!("未対応の矢印端: {kind}"));
+                warn(warnings, format!("Unsupported arrowhead: {kind}"));
                 continue;
             }
         };
@@ -263,10 +269,10 @@ pub(super) fn decorations(
         attrs.push_str(&format!(" marker-{side}=\"url(#{id})\""));
     }
     if line.attribute("cmpd").is_some_and(|v| v != "sng") {
-        warn(warnings, "複合線は未対応です");
+        warn(warnings, "Compound lines are unsupported");
     }
     if line.attribute("algn").is_some_and(|v| v != "ctr") {
-        warn(warnings, "内側配置の線は中央配置で近似します");
+        warn(warnings, "Inset lines are approximated as centered lines");
     }
     attrs
 }

@@ -1,4 +1,4 @@
-//! 表示用の警告文と、機械判定用の分類・部品・対象を同時に保持する。
+//! Keep readable warnings alongside machine-readable categories, parts, and targets.
 use serde::Serialize;
 use std::ops::Deref;
 
@@ -61,7 +61,7 @@ impl Warnings {
     pub fn missing_font(&mut self, family: &str) {
         self.record(
             Code::MissingGlyph,
-            format!("必要なフォントがありません: {family}"),
+            format!("Required font is unavailable: {family}"),
             None,
             Some(family.into()),
             None,
@@ -71,7 +71,7 @@ impl Warnings {
         self.record(
             Code::MissingGlyph,
             format!(
-                "フォント {family} に文字がなく幅を近似します: U+{:04X}",
+                "Font {family} lacks a glyph; width is approximate: U+{:04X}",
                 ch as u32
             ),
             None,
@@ -84,7 +84,7 @@ impl Warnings {
     }
     pub fn font_character(&mut self, resolution: FontResolution, character: Option<char>) {
         let message = format!(
-            "フォント代替: {} → {} ({})",
+            "Font substitution: {} -> {} ({})",
             resolution.requested_family, resolution.post_script_name, resolution.reason
         );
         self.record(

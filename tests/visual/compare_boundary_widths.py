@@ -1,4 +1,4 @@
-"""白背景・黒文字・単一文字枠の専用資料で、改行差を画像から検出する。"""
+"""Detect line-break differences from black-on-white, single-text-box fixture images."""
 import argparse
 import json
 from pathlib import Path
@@ -28,8 +28,8 @@ def line_ink(image, merge_gap):
 
 
 def same_breaks(actual, reference):
-    # 書体のラスタライズの濃さは全体量で正規化する。1文字の移動は行の割合に現れる。
-    # OCR ではなく、この専用資料の境界回帰を検出するための検査。
+    # Normalize total ink to account for rasterization darkness; moving one character changes line shares.
+    # This detects boundary regressions in dedicated fixtures; it is not OCR.
     a, b = actual['shares'], reference['shares']
     return bool(a) and len(a) == len(b) and all(abs(x - y) <= .02 for x, y in zip(a, b))
 
@@ -39,7 +39,7 @@ def check_images(directory, cases):
     for case in cases:
         name = f"slide-{case['slide']:03}.png"
         with Image.open(directory / 'actual' / name) as a, Image.open(directory / 'reference' / name) as b:
-            # スライド幅 4 inch。文字内の小さな縦の隙間だけを結合する。
+            # Slide width is 4 inches; merge only small vertical gaps within characters.
             gap = max(1, int(case['font_pt'] * a.width / 288 * .1))
             actual, reference = line_ink(a, gap), line_ink(b, gap)
         records.append({**case, 'actual': actual, 'reference': reference,

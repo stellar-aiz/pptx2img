@@ -1,4 +1,4 @@
-//! CLI の結果文書。文字列は JSON の引用規則（YAML 1.2 の部分集合）で保護する。
+//! CLI result documents. Quote strings using JSON rules, a subset of YAML 1.2.
 use pptx2img::{FontFallbackError, SlideReport, StrictModeError};
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -7,7 +7,7 @@ use std::{
 
 fn quoted(value: &str) -> String {
     serde_json::to_string(value)
-        .expect("文字列のシリアライズ")
+        .expect("string serialization")
         .replace('\u{0085}', "\\u0085")
         .replace('\u{2028}', "\\u2028")
         .replace('\u{2029}', "\\u2029")
@@ -119,25 +119,25 @@ pub fn failed(error: &anyhow::Error, folder: Option<&Path>, created: bool) -> St
             }
             let suggestion = match code {
                 "FONT_GLYPH_MISSING" => {
-                    "列挙した文字を収録したフォントを --font-file <path> で追加してください。入手できない場合は依頼者に提供を求めてください。"
+                    "Add a font containing the listed characters with --font-file <path>. If unavailable, ask the requester to provide it."
                 }
                 "FONT_STYLE_MISSING" => {
-                    "必要な太さ・斜体を含む同書体のフォントを --font-file <path> で追加してください。"
+                    "Add the required weight or italic style of the same family with --font-file <path>."
                 }
                 "FONT_MAPPING_TARGET_NOT_FOUND" => {
-                    "--font-map の指定先を確認し、指定先のフォントを --font-file <path> で追加してください。"
+                    "Check the target of --font-map and add that font with --font-file <path>."
                 }
                 "FONT_SUBSTITUTION_REQUIRED" => {
-                    "元の書体を利用する場合は --font-map を外し、必要なフォントを --font-file <path> で追加してください。"
+                    "To use the original family, remove --font-map and add the required font with --font-file <path>."
                 }
                 _ => {
-                    "必要なフォントを --font-file <path> で追加してください。入手できない場合は依頼者に提供を求めてください。"
+                    "Add the required font with --font-file <path>. If unavailable, ask the requester to provide it."
                 }
             };
             result.push_str(&format!("    suggestion: {}\n", quoted(suggestion)));
         }
     } else if let Some(strict) = error.downcast_ref::<StrictModeError>() {
-        result.push_str("  - code: STRICT_MODE_REJECTED\n    suggestion: 検出された未対応・近似描画を確認してください。\n    diagnostics:\n");
+        result.push_str("  - code: STRICT_MODE_REJECTED\n    suggestion: Review the reported unsupported or approximate rendering.\n    diagnostics:\n");
         for slide in &strict.slides {
             for d in &slide.diagnostics {
                 result.push_str(&format!(
@@ -148,14 +148,14 @@ pub fn failed(error: &anyhow::Error, folder: Option<&Path>, created: bool) -> St
             }
         }
     } else {
-        result.push_str(&format!("  - code: CONVERSION_FAILED\n    message: {}\n    suggestion: 入力ファイル・出力先・実行条件を確認してください。\n", quoted(&format!("{error:#}"))));
+        result.push_str(&format!("  - code: CONVERSION_FAILED\n    message: {}\n    suggestion: Check the input file, output location, and execution environment.\n", quoted(&format!("{error:#}"))));
     }
     result
 }
 
 pub fn invalid_arguments(message: &str) -> String {
     format!(
-        "status: failed\noutput:\n  created: false\nerrors:\n  - code: INVALID_ARGUMENTS\n    message: {}\n    suggestion: --help で引数の形式を確認してください。\n",
+        "status: failed\noutput:\n  created: false\nerrors:\n  - code: INVALID_ARGUMENTS\n    message: {}\n    suggestion: Use --help to check the argument syntax.\n",
         quoted(message)
     )
 }

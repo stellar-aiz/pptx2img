@@ -1,4 +1,4 @@
-//! 継承・複合図形・診断を、独立に生成した PPTX と画素で検証する。
+//! Verify inheritance, composite shapes, and diagnostics with independently generated PPTX files and pixels.
 use resvg::tiny_skia::{Color, Pixmap};
 use std::{fs, io::Write, path::Path, process::Command};
 use zip::{ZipWriter, write::SimpleFileOptions};
@@ -346,7 +346,7 @@ fn invalid_table_merge_is_rejected_before_output() {
         let result = run(&input, &out, false);
         assert!(!result.status.success());
         assert!(!out.exists());
-        assert!(String::from_utf8_lossy(&result.stderr).contains("結合セル"));
+        assert!(String::from_utf8_lossy(&result.stderr).contains("Merged cell"));
     }
 }
 
@@ -368,7 +368,7 @@ fn nested_group_limit_keeps_valid_input_and_rejects_excess_before_output() {
             check(result);
             assert_eq!(rgb(&image(&out), 5, 5), (0, 0, 0));
         } else {
-            // 通常のエラー終了を要求する。クラッシュを入力拒否として扱わない。
+            // Require a normal error exit; a crash is not input rejection.
             assert_eq!(
                 result.status.code(),
                 Some(1),
@@ -378,7 +378,7 @@ fn nested_group_limit_keeps_valid_input_and_rejects_excess_before_output() {
             );
             assert!(!out.exists());
             assert!(
-                String::from_utf8_lossy(&result.stderr).contains("64 段"),
+                String::from_utf8_lossy(&result.stderr).contains("64 levels"),
                 "{}",
                 String::from_utf8_lossy(&result.stderr)
             );
@@ -457,7 +457,7 @@ fn font_mapping_matches_api_and_cli_and_aggregates_targets() {
         .unwrap();
     let stderr = String::from_utf8_lossy(&cli.stderr);
     assert_eq!(
-        stderr.matches("フォント代替: 要求書体").count(),
+        stderr.matches("Font substitution: 要求書体").count(),
         1,
         "{stderr}"
     );
@@ -684,7 +684,10 @@ fn preset_autofit_bounds_degenerate_areas_and_keeps_final_diagnostics_once() {
         assert_eq!(
             records
                 .iter()
-                .filter(|d| d["message"].as_str().unwrap().contains("自動拡張が上限"))
+                .filter(|d| d["message"]
+                    .as_str()
+                    .unwrap()
+                    .contains("autofit reached its limit"))
                 .count(),
             usize::from(limited)
         );
@@ -698,13 +701,16 @@ fn preset_autofit_bounds_degenerate_areas_and_keeps_final_diagnostics_once() {
         assert_eq!(
             records
                 .iter()
-                .filter(|d| d["message"].as_str().unwrap().contains("文字組みは近似"))
+                .filter(|d| d["message"]
+                    .as_str()
+                    .unwrap()
+                    .contains("Text layout is approximate"))
                 .count(),
             1
         );
         assert!(records.iter().all(|d| d["object_id"] == "2"));
         if !limited {
-            // ゼロ高さからでも文字高24pxを収める48pxの矢印へ拡張する。
+            // Even from zero height, expand to a 48px arrow accommodating 24px text.
             let img = image(&out);
             assert_eq!(rgb(&img, 10, 25), (0, 255, 0));
             assert_eq!(rgb(&img, 10, 47), (255, 255, 255));

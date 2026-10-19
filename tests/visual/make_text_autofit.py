@@ -1,4 +1,4 @@
-"""保存済み自動縮小率と枠拡張を単独検証する自作資料。"""
+"""Independent fixture isolating saved text scaling and shape autofit."""
 import argparse
 from pathlib import Path
 from pptx import Presentation
