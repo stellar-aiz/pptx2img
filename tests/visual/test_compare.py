@@ -8,7 +8,8 @@ from PIL import Image
 import xml.etree.ElementTree as ET
 import pypdfium2 as pdfium
 from compare import (DEFAULT_SUBSTITUTION_MAP, compare_images, compare_regions, compression_profile,
-                     diagnostic_summary, fraction, load_regions, load_substitutions, passes, pdf_fonts)
+                     diagnostic_summary, fraction, load_regions, load_substitutions, passes, pdf_fonts,
+                     visible_slides)
 
 
 class ComparisonTests(unittest.TestCase):
@@ -165,6 +166,19 @@ class FontSubstitutionTests(unittest.TestCase):
             Image.new("RGB", (20, 20), "white").save(path)
             with pdfium.PdfDocument(path) as document:
                 self.assertEqual(pdf_fonts(document), [])
+
+
+class HiddenSlideTests(unittest.TestCase):
+    def test_hidden_slides_are_dropped_before_pairing(self):
+        manifest = {"slides": [
+            {"slide": 1, "hidden": False}, {"slide": 2, "hidden": True},
+            {"slide": 3, "hidden": False}, {"slide": 4},
+        ]}
+        self.assertEqual([s["slide"] for s in visible_slides(manifest)], [1, 3, 4])
+
+    def test_old_manifest_without_hidden_field_is_kept_whole(self):
+        manifest = {"slides": [{"slide": 1}, {"slide": 2}]}
+        self.assertEqual(visible_slides(manifest), manifest["slides"])
 
 
 if __name__ == "__main__":

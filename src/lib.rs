@@ -33,6 +33,8 @@ pub struct ConvertOptions {
     pub no_system_fonts: bool,
     /// Explicit requested-to-replacement family mappings (one step only).
     pub font_mapping: std::collections::HashMap<String, String>,
+    /// Also render slides hidden with `show="0"`. By default they are skipped.
+    pub include_hidden: bool,
 }
 impl Default for ConvertOptions {
     fn default() -> Self {
@@ -44,6 +46,7 @@ impl Default for ConvertOptions {
             font_file: Vec::new(),
             no_system_fonts: false,
             font_mapping: Default::default(),
+            include_hidden: false,
         }
     }
 }
@@ -57,6 +60,10 @@ pub struct ConversionReport {
     pub width: u32,
     pub height: u32,
     pub punctuation_compression: bool,
+    /// Whether hidden slides were rendered (`--include-hidden`).
+    pub include_hidden: bool,
+    /// One-based deck positions of hidden slides that were skipped, in deck order.
+    pub skipped_hidden_slides: Vec<usize>,
     pub system_fonts: bool,
     pub fonts: Vec<FontReport>,
     pub slides: Vec<SlideReport>,
@@ -69,7 +76,10 @@ pub struct FontReport {
 }
 #[derive(Clone, Debug, Serialize)]
 pub struct SlideReport {
+    /// One-based position in the deck. Skipped hidden slides leave gaps in the numbering.
     pub slide: usize,
+    /// The slide is hidden in the deck (`show="0"`); only rendered when `include_hidden` is set.
+    pub hidden: bool,
     pub image: String,
     pub warnings: Vec<String>,
     pub diagnostics: Vec<Diagnostic>,
@@ -208,6 +218,7 @@ fn convert_inner(
             fonts: pptx::FontResolver::new(&options.fontdb, &settings.font_mapping),
             punctuation_compression: settings.punctuation_compression,
         },
+        settings.include_hidden,
     )?;
     let height = (f64::from(settings.width) * deck.height / deck.width).round();
     if !(1.0..=8192.0).contains(&height) {
@@ -236,10 +247,10 @@ fn convert_inner(
             slides: deck
                 .slides
                 .iter()
-                .enumerate()
-                .map(|(index, slide)| SlideReport {
-                    slide: index + 1,
-                    image: format!("slide-{:03}.png", index + 1),
+                .map(|slide| SlideReport {
+                    slide: slide.number,
+                    hidden: slide.hidden,
+                    image: format!("slide-{:03}.png", slide.number),
                     warnings: slide.warnings.clone(),
                     diagnostics: slide
                         .diagnostics
@@ -261,10 +272,10 @@ fn convert_inner(
             slides: deck
                 .slides
                 .iter()
-                .enumerate()
-                .map(|(index, slide)| SlideReport {
-                    slide: index + 1,
-                    image: format!("slide-{:03}.png", index + 1),
+                .map(|slide| SlideReport {
+                    slide: slide.number,
+                    hidden: slide.hidden,
+                    image: format!("slide-{:03}.png", slide.number),
                     warnings: slide.warnings.clone(),
                     diagnostics: slide.diagnostics.clone(),
                 })
@@ -280,8 +291,8 @@ fn convert_inner(
         .collect::<Result<_, _>>()?;
     fs::create_dir(&out).context("Cannot create output directory")?;
     let mut reports = Vec::new();
-    for (index, (slide, tree)) in deck.slides.iter().zip(trees).enumerate() {
-        let name = format!("slide-{:03}.png", index + 1);
+    for (slide, tree) in deck.slides.iter().zip(trees) {
+        let name = format!("slide-{:03}.png", slide.number);
         let mut pixmap = resvg::tiny_skia::Pixmap::new(settings.width, height)
             .context("Cannot allocate rendering buffer")?;
         resvg::render(
@@ -294,14 +305,15 @@ fn convert_inner(
         );
         pixmap.save_png(out.join(&name))?;
         reports.push(SlideReport {
-            slide: index + 1,
+            slide: slide.number,
+            hidden: slide.hidden,
             image: name,
             warnings: slide.warnings.clone(),
             diagnostics: slide.diagnostics.clone(),
         });
     }
     let manifest = ConversionReport {
-        schema_version: 2,
+        schema_version: 3,
         version: env!("CARGO_PKG_VERSION"),
         status: if has_warnings {
             "preview_with_warnings"
@@ -311,6 +323,8 @@ fn convert_inner(
         width: settings.width,
         height,
         punctuation_compression: settings.punctuation_compression,
+        include_hidden: settings.include_hidden,
+        skipped_hidden_slides: deck.skipped_hidden.clone(),
         system_fonts: !settings.no_system_fonts,
         fonts: options
             .fontdb

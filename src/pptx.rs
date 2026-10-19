@@ -38,8 +38,13 @@ pub struct Deck {
     pub width: f64,
     pub height: f64,
     pub slides: Vec<Slide>,
+    /// One-based deck positions of hidden slides that were not rendered.
+    pub skipped_hidden: Vec<usize>,
 }
 pub struct Slide {
+    /// One-based position in the deck, counting hidden slides that were skipped.
+    pub number: usize,
+    pub hidden: bool,
     pub svg: String,
     pub warnings: Vec<String>,
     pub diagnostics: Vec<Diagnostic>,
@@ -142,7 +147,7 @@ pub struct RenderOptions<'a> {
     pub punctuation_compression: bool,
 }
 
-pub fn read(path: &Path, options: &RenderOptions<'_>) -> Result<Deck> {
+pub fn read(path: &Path, options: &RenderOptions<'_>, include_hidden: bool) -> Result<Deck> {
     let _images = raster::CacheScope::new();
     let file = File::open(path).context("Cannot open input PPTX")?;
     if file.metadata()?.len() > 128 * 1024 * 1024 {
@@ -221,7 +226,12 @@ pub fn read(path: &Path, options: &RenderOptions<'_>) -> Result<Deck> {
     }
     let rels = relationships(&parts, &root.target)?;
     let mut slides = Vec::new();
-    for id in doc.descendants().filter(|n| n.has_tag_name((P, "sldId"))) {
+    let mut skipped_hidden = Vec::new();
+    for (position, id) in doc
+        .descendants()
+        .filter(|n| n.has_tag_name((P, "sldId")))
+        .enumerate()
+    {
         if slides.len() >= 200 {
             bail!("This release supports up to 200 slides");
         }
@@ -232,15 +242,31 @@ pub fn read(path: &Path, options: &RenderOptions<'_>) -> Result<Deck> {
         if part.external || !part.kind.ends_with("/slide") {
             bail!("Invalid slide relationship");
         }
-        slides.push(render_slide(&parts, &part.target, width, height, options)?);
+        // `show` is an xsd:boolean attribute on p:sld that defaults to true.
+        let hidden = xml(&parts, &part.target)?
+            .root_element()
+            .attribute("show")
+            .is_some_and(|value| matches!(value.trim(), "0" | "false"));
+        if hidden && !include_hidden {
+            skipped_hidden.push(position + 1);
+            continue;
+        }
+        let mut slide = render_slide(&parts, &part.target, width, height, options)?;
+        slide.number = position + 1;
+        slide.hidden = hidden;
+        slides.push(slide);
     }
     if slides.is_empty() {
-        bail!("No slides found");
+        if skipped_hidden.is_empty() {
+            bail!("No slides found");
+        }
+        bail!("All slides are hidden; use --include-hidden to render them");
     }
     Ok(Deck {
         width,
         height,
         slides,
+        skipped_hidden,
     })
 }
 
@@ -455,6 +481,8 @@ fn render_slide(
     svg.push_str("</svg>");
     let (warnings, diagnostics) = warnings.into_parts();
     Ok(Slide {
+        number: 0,
+        hidden: false,
         svg,
         warnings,
         diagnostics,

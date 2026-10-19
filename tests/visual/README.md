@@ -90,6 +90,21 @@ pictures (longest side 2048 px) with `approximation` diagnostics.
 /usr/bin/time -l target/release/pptx2img /tmp/oversized-images-baseline.pptx --out /tmp/oversized-baseline --width 1600 --font-fallback
 ```
 
+## Hidden slides
+
+LibreOffice's PDF export skips hidden slides. pptx2img does too by default, so pages pair
+one to one; the comparator additionally drops manifest entries with `hidden: true` before
+pairing (so a deck rendered with `--include-hidden` elsewhere still lines up) and records
+`hidden_slides` in `report.json`. A renderer older than manifest schema 3 draws hidden
+slides, and the comparator then stops with `Page counts differ`. In the report, `slides[].slide` is the
+PDF page number and `slides[].deck_slide` is the position in the deck.
+
+```sh
+.venv-visual/bin/python tests/visual/make_hidden_slides.py /tmp/hidden-slides.pptx
+.venv-visual/bin/python tests/visual/compare.py --binary target/release/pptx2img \
+  --fixture /tmp/hidden-slides.pptx --width 1600 --out target/visual-tests/hidden-slides
+```
+
 ## Deterministic reference fonts
 
 LibreOffice resolves families that are missing from the machine (Meiryo UI, Yu Gothic,

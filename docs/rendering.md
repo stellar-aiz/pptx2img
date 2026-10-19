@@ -109,6 +109,13 @@ Fixture: `examples/text-bullets.pptx`; generator: `tests/visual/make_text_bullet
 Numbers, levels, and wrapping were checked against LibreOffice, but vertical
 position and line-spacing differences still exceed existing image thresholds.
 
+## Hidden slides
+
+`p:sld/@show` is read for every slide. Hidden slides (`0` or `false`) are not rendered
+unless `--include-hidden` is passed, and the manifest records them (`hidden`,
+`skipped_hidden_slides`). This matches LibreOffice's PDF export, which also skips them,
+so the comparator pairs pages one to one. See [usage](usage.md#hidden-slides).
+
 ## Known limitations
 
 - Complete layout/master property and text-style inheritance; `themeOverride` and
