@@ -44,6 +44,44 @@ cargo build --release --locked
 `--strict` で警告があれば終了コード 1、出力先は作成しません。
 テキストを含むスライドは、現時点では必ず近似描画の警告になります。
 
+### CLI の結果形式
+
+変換成功時は標準出力に、失敗時は標準エラーに、1つの YAML 文書を返します。
+成功時の警告は従来どおり標準エラーと manifest に残します。
+`--help` と `--version` は通常の表示です。
+
+```yaml
+status: completed
+output:
+  created: true
+  folder: "./images"
+  slides: 20
+```
+
+```yaml
+status: failed
+output:
+  created: false
+errors:
+  - code: FONT_NOT_FOUND
+    family: "Calibri"
+    slides: [6, 14]
+    suggestion: "必要なフォントを --font-file <path> で追加してください。入手できない場合は依頼者に提供を求めてください。"
+```
+
+`errors` は問題の種類と書体ごとにまとめ、対象スライドを重複なく列挙します。
+`FONT_GLYPH_MISSING` は `characters` に `character` と `codepoint` を含みます。
+ほかに `FONT_STYLE_MISSING`、`FONT_MAPPING_TARGET_NOT_FOUND`、
+`FONT_SUBSTITUTION_REQUIRED`、`STRICT_MODE_REJECTED`、
+`CONVERSION_FAILED`、`INVALID_ARGUMENTS` を返します。
+不足エラーには代替描画を推奨する案内を含めません。
+
+`output.created` は今回の実行で出力先を作成したかを示します。
+途中の書き込み失敗では `status: failed` でも `created: true` になり、
+その場合は `folder` を返します。既存出力先への拒否では `created: false` です。
+引数エラーの終了コードは 2、変換エラーは 1、成功は 0 です。
+文字列は引用・エスケープし、書体名やパスに含まれる記号・改行を保護します。
+
 ## Rust ライブラリとして使う
 
 CLI と同じパッケージが library crate も提供します。

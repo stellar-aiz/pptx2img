@@ -154,13 +154,7 @@ fn glyphs(
                                 return glyphs(&ch.to_string(), replacement, resolver, warnings)
                                     .remove(0);
                             }
-                            warnings.push(
-                                Code::MissingGlyph,
-                                format!(
-                                    "フォント {requested} に文字がなく幅を近似します: U+{:04X}",
-                                    ch as u32
-                                ),
-                            );
+                            warnings.missing_glyph(&requested, ch);
                         }
                         Glyph {
                             ch,
