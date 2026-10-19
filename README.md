@@ -1,9 +1,10 @@
 # pptx2img
 
 Convert PPTX slides to PNG with a standalone CLI or Rust library.
-No Office, LibreOffice, browser, Python, or Node runtime required.
 
-**Early implementation: rendering is approximate, not fully PowerPoint-compatible.**
+**😎 No Office, LibreOffice, browser, Python, or Node runtime required.**
+
+Early implementation: rendering is approximate, not fully PowerPoint-compatible.
 
 ## Quick start
 
