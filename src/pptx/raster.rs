@@ -80,7 +80,7 @@ pub(super) fn prepare(part: &str, data: &[u8], mime: &str, width: usize, height:
             if let Some(outcome) = CACHE.with(|c| c.borrow().get(part).cloned()) {
                 return outcome;
             }
-            let outcome = downscale(data, mime == "image/png")
+            let outcome = downscale(data, mime == "image/png", (width, height))
                 .map(|(png, width, height)| Prepared::Downscaled {
                     href: format!("data:image/png;base64,{}", STANDARD.encode(png)).into(),
                     width,
@@ -96,11 +96,13 @@ pub(super) fn prepare(part: &str, data: &[u8], mime: &str, width: usize, height:
 }
 
 /// Decode a PNG/JPEG and return a PNG whose longest side is at most `TARGET_SIDE`.
-fn downscale(data: &[u8], png: bool) -> Result<(Vec<u8>, usize, usize)> {
+/// `probed` is the size the ceiling was checked against; the decoder must agree with it
+/// before any pixel buffer is allocated, so a header parsed differently cannot bypass the cap.
+fn downscale(data: &[u8], png: bool, probed: (usize, usize)) -> Result<(Vec<u8>, usize, usize)> {
     let shrink = if png {
-        downscale_png(data)?
+        downscale_png(data, probed)?
     } else {
-        downscale_jpeg(data)?
+        downscale_jpeg(data, probed)?
     };
     let mut encoded = Vec::new();
     let mut encoder = png::Encoder::new(&mut encoded, shrink.tw as u32, shrink.th as u32);
@@ -112,7 +114,20 @@ fn downscale(data: &[u8], png: bool) -> Result<(Vec<u8>, usize, usize)> {
     Ok((encoded, shrink.tw, shrink.th))
 }
 
-fn downscale_png(data: &[u8]) -> Result<Shrink> {
+fn agree(decoded: (usize, usize), probed: (usize, usize)) -> Result<()> {
+    if decoded != probed {
+        bail!(
+            "decoder reports {}x{} px, header probe {}x{} px",
+            decoded.0,
+            decoded.1,
+            probed.0,
+            probed.1
+        );
+    }
+    Ok(())
+}
+
+fn downscale_png(data: &[u8], probed: (usize, usize)) -> Result<Shrink> {
     let mut decoder = png::Decoder::new(Cursor::new(data));
     decoder.set_transformations(png::Transformations::normalize_to_color8());
     let mut reader = decoder.read_info().context("Cannot decode PNG")?;
@@ -122,6 +137,7 @@ fn downscale_png(data: &[u8]) -> Result<Shrink> {
         bail!("interlaced PNG is not downscaled");
     }
     let (width, height) = (reader.info().width as usize, reader.info().height as usize);
+    agree((width, height), probed)?;
     let channels = reader.output_color_type().0.samples();
     let mut shrink = Shrink::new(width, height);
     let mut y = 0;
@@ -132,18 +148,19 @@ fn downscale_png(data: &[u8]) -> Result<Shrink> {
     shrink.finish(y)
 }
 
-fn downscale_jpeg(data: &[u8]) -> Result<Shrink> {
+fn downscale_jpeg(data: &[u8], probed: (usize, usize)) -> Result<Shrink> {
     let options = DecoderOptions::default()
         .jpeg_set_out_colorspace(ColorSpace::RGB)
-        .set_max_width(CEILING_SIDE)
-        .set_max_height(CEILING_SIDE);
+        .set_max_width(probed.0)
+        .set_max_height(probed.1);
     let mut decoder = JpegDecoder::new_with_options(Cursor::new(data), options);
-    // stellar:debt(perf) JPEG is decoded at full size (no scaled decode in zune-jpeg). upgrade: DCT-domain scaling.
-    let pixels = decoder
-        .decode()
-        .map_err(|e| anyhow::anyhow!("Cannot decode JPEG: {e:?}"))?;
+    let error = |e| anyhow::anyhow!("Cannot decode JPEG: {e:?}");
+    decoder.decode_headers().map_err(error)?;
     let info = decoder.info().context("Cannot decode JPEG")?;
     let (width, height) = (usize::from(info.width), usize::from(info.height));
+    agree((width, height), probed)?;
+    // stellar:debt(perf) JPEG is decoded at full size (no scaled decode in zune-jpeg). upgrade: DCT-domain scaling.
+    let pixels = decoder.decode().map_err(error)?;
     if pixels.len() != width * height * 3 {
         bail!("Cannot decode JPEG: unexpected pixel buffer size");
     }
@@ -247,6 +264,22 @@ mod tests {
         let shrink = shrink.finish(2048).unwrap();
         assert_eq!(shrink.out.len(), 2048 * 1024 * 4);
         assert_eq!(&shrink.out[..4], &[255, 0, 0, 128]);
+    }
+    #[test]
+    fn decoder_size_must_match_the_probed_size() {
+        let mut data = Vec::new();
+        {
+            let mut encoder = png::Encoder::new(&mut data, 9000, 2);
+            encoder.set_color(png::ColorType::Grayscale);
+            let mut writer = encoder.write_header().unwrap();
+            writer.write_image_data(&[0; 18000]).unwrap();
+        }
+        assert!(downscale(&data, true, (9000, 2)).is_ok());
+        let error = downscale(&data, true, (9000, 1)).unwrap_err().to_string();
+        assert_eq!(error, "decoder reports 9000x2 px, header probe 9000x1 px");
+        let jpeg = include_bytes!("../../tests/fixtures/oversized.jpg");
+        assert!(downscale(jpeg, false, (8400, 64)).is_ok());
+        assert!(downscale(jpeg, false, (8400, 63)).is_err());
     }
     #[test]
     fn size_policy_boundaries() {
