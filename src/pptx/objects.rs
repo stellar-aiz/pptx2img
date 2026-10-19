@@ -137,9 +137,13 @@ impl<'d> Renderer<'_, 'd> {
                 .descendants()
                 .find(|n| n.has_tag_name((A, "blip")))
                 .ok_or("Missing preview image reference")?;
-            let id = blip
-                .attribute((R, "embed"))
-                .ok_or("External preview references are not fetched")?;
+            let id =
+                blip.attribute((R, "embed"))
+                    .ok_or(if blip.attribute((R, "link")).is_some() {
+                        "External preview references are not fetched"
+                    } else {
+                        "Missing preview image reference"
+                    })?;
             let rel = self.rels.get(id).ok_or("Missing preview relationship")?;
             if rel.external {
                 return Err("External preview references are not fetched");

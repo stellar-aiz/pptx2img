@@ -152,3 +152,17 @@ the other two with `omitted` diagnostics instead of aborting the deck.
 .venv-visual/bin/python tests/visual/make_image_references.py /tmp/image-references.pptx
 target/debug/pptx2img /tmp/image-references.pptx --out /tmp/image-references --width 1600 --font-fallback
 ```
+
+## Independent SVG-picture fixture
+
+Generate a slide with one generated SVG icon placed three ways: SVG only (`svgBlip`
+without `r:embed`), SVG with a coarser PNG fallback drawn with Pillow, and SVG only
+stretched to a wide frame. pptx2img renders the SVG for the first and third pictures
+and the PNG fallback for the second (LibreOffice draws the SVG there, so its edges are
+smoother in the reference).
+
+```sh
+.venv-visual/bin/python tests/visual/make_svg_pictures.py /tmp/svg-pictures.pptx
+.venv-visual/bin/python tests/visual/compare.py --binary target/release/pptx2img \
+  --fixture /tmp/svg-pictures.pptx --width 1600 --out target/visual-tests/svg-pictures
+```
