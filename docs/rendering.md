@@ -8,7 +8,9 @@ Strict mode gates known warnings, not all incompatibilities.
 
 - Transitional OOXML PPTX, using presentation-defined slide order.
 - Explicit positions, sizes, rotation, and flips for basic shapes and selected
-  [presets and connectors](preset-shapes.md).
+  [presets and connectors](preset-shapes.md), including chevrons, triangles,
+  arrows, pie, star5, cloud, callouts, flowchart shapes, and bent/curved connectors
+  evaluated from DrawingML shape guides.
 - Solid backgrounds, fills, and lines using RGB, system `lastClr`, and theme
   colors; selected [color transforms and theme fills](colors.md), including
   translucent (`alpha`) fills, lines, and text, and `tint`/`shade`/`satMod`.
