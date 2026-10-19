@@ -1,0 +1,25 @@
+{
+  "comment": "Pins the LibreOffice reference to the face pptx2img resolves to on the comparison machine, so the comparison measures layout rather than font fallback. Keys are families usually missing from the machine.",
+  "families": {
+    "Meiryo": "Hiragino Sans",
+    "Meiryo UI": "Hiragino Sans",
+    "Yu Gothic": "Hiragino Sans",
+    "Yu Gothic UI": "Hiragino Sans",
+    "游ゴシック": "Hiragino Sans",
+    "MS Gothic": "Hiragino Sans",
+    "MS PGothic": "Hiragino Sans",
+    "MS UI Gothic": "Hiragino Sans",
+    "ＭＳ ゴシック": "Hiragino Sans",
+    "ＭＳ Ｐゴシック": "Hiragino Sans",
+    "MS Mincho": "Hiragino Sans",
+    "MS PMincho": "Hiragino Sans",
+    "ＭＳ 明朝": "Hiragino Sans",
+    "ＭＳ Ｐ明朝": "Hiragino Sans",
+    "Yu Mincho": "Hiragino Sans",
+    "游明朝": "Hiragino Sans",
+    "Calibri": "Hiragino Sans",
+    "Calibri Light": "Hiragino Sans",
+    "Cambria": "Hiragino Sans",
+    "Segoe UI": "Hiragino Sans"
+  }
+}

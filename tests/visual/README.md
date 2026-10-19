@@ -90,6 +90,34 @@ pictures (longest side 2048 px) with `approximation` diagnostics.
 /usr/bin/time -l target/release/pptx2img /tmp/oversized-images-baseline.pptx --out /tmp/oversized-baseline --width 1600 --font-fallback
 ```
 
+## Deterministic reference fonts
+
+LibreOffice resolves families that are missing from the machine (Meiryo UI, Yu Gothic,
+Calibri, ...) through CoreText/fontconfig, and the result was observed to differ between
+runs, which made reference images fluctuate independently of any pptx2img change. The
+comparator therefore writes a replacement table (`Font/Substitution`, "Always") into the
+generated LibreOffice profile. The default table, `tests/visual/font-substitution.json`,
+maps those families to Hiragino Sans, the face pptx2img resolves to on macOS, so the
+comparison measures layout rather than font choice. Override it with
+`--font-substitution-map map.json` (`{"families": {"Family": "Substitute"}}`).
+
+| Report field | Meaning |
+|---|---|
+| `environment.libreoffice_font_substitution` | The family-to-substitute table pinned in the profile |
+| `environment.font_substitution_sha256` | Hash of the copied `font-substitution.json` |
+| `reference_pdf_fonts` | Fonts used by text in the reference PDF (`name`, `embedded`, `pages`) |
+
+The table pins only the listed families. A family that is not listed, or a substitute that
+is not installed, still falls back inside LibreOffice, so compare `reference_pdf_fonts`
+between runs when reference images differ. The substitution replaces font choice, not font
+metrics: pinned references still differ from pptx2img where layout differs.
+
+```sh
+.venv-visual/bin/python tests/visual/make_font_substitution.py /tmp/font-substitution.pptx
+.venv-visual/bin/python tests/visual/compare.py --binary target/release/pptx2img \
+  --fixture /tmp/font-substitution.pptx --width 1600 --out target/visual-tests/font-substitution
+```
+
 ## Reproducibility
 
 Output retains input PPTX, commands, stdout/stderr, reference PDF, both PNG sets,
