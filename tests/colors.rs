@@ -88,3 +88,95 @@ fn presentation_text_defaults_and_theme_fill_survive_together() {
         image(&d.path().join("true")).data()
     );
 }
+
+#[test]
+fn alpha_blends_fills_and_lines_over_the_background() {
+    let d = tempfile::tempdir().unwrap();
+    let p = d.path().join("alpha.pptx");
+    let out = d.path().join("out");
+    let translucent = |x, fill: &str, line: &str| {
+        format!(
+            r#"<p:sp><p:spPr>{}<a:prstGeom prst="rect"/>{fill}{line}</p:spPr></p:sp>"#,
+            transform(x, 10, 30, 80)
+        )
+    };
+    let shapes = rect(0, 0, 100, 100, "000000")
+        + &translucent(
+            5,
+            r#"<a:solidFill><a:srgbClr val="FFFFFF"><a:alpha val="50000"/></a:srgbClr></a:solidFill>"#,
+            "<a:ln><a:noFill/></a:ln>",
+        )
+        + &translucent(
+            50,
+            "<a:noFill/>",
+            r#"<a:ln w="190500"><a:solidFill><a:srgbClr val="FFFFFF"><a:alpha val="50000"/></a:srgbClr></a:solidFill></a:ln>"#,
+        );
+    write_deck(&p, page("sld", "", "", &shapes), vec![]);
+    check(run(&p, &out, true));
+    let pixels = image(&out);
+    let (r, g, b) = rgb(&pixels, 20, 50);
+    for channel in [r, g, b] {
+        assert!(channel.abs_diff(128) <= 2, "fill blend {r},{g},{b}");
+    }
+    let (r, g, b) = rgb(&pixels, 50, 50);
+    for channel in [r, g, b] {
+        assert!(channel.abs_diff(128) <= 2, "line blend {r},{g},{b}");
+    }
+    assert_eq!(rgb(&pixels, 65, 50), (0, 0, 0));
+}
+
+#[test]
+fn tint_and_shade_fill_shapes_and_table_style_bands() {
+    let d = tempfile::tempdir().unwrap();
+    let p = d.path().join("tint.pptx");
+    let out = d.path().join("out");
+    let shaded = |x, transform_xml: &str| {
+        format!(
+            r#"<p:sp><p:spPr>{}<a:prstGeom prst="rect"/><a:solidFill><a:schemeClr val="accent1">{transform_xml}</a:schemeClr></a:solidFill></p:spPr></p:sp>"#,
+            transform(x, 0, 20, 40)
+        )
+    };
+    let rows = (0..2)
+        .map(|_| r#"<a:tr h="190500"><a:tc><a:txBody><a:bodyPr/><a:p><a:endParaRPr/></a:p></a:txBody><a:tcPr/></a:tc></a:tr>"#)
+        .collect::<String>();
+    let shapes = shaded(0, r#"<a:tint val="20000"/>"#)
+        + &shaded(30, r#"<a:shade val="50000"/>"#)
+        + &format!(
+            r#"<p:graphicFrame><p:xfrm><a:off x="0" y="476250"/><a:ext cx="952500" cy="381000"/></p:xfrm><a:graphic><a:graphicData><a:tbl><a:tblPr firstRow="1" bandRow="1"><a:tableStyleId>{{5C22544A-7EE6-4342-B048-85BDC9FD1C3A}}</a:tableStyleId></a:tblPr><a:tblGrid><a:gridCol w="952500"/></a:tblGrid>{rows}</a:tbl></a:graphicData></a:graphic></p:graphicFrame>"#
+        );
+    let style = format!(
+        r#"<a:tblStyleLst xmlns:a="{A}"><a:tblStyle styleId="{{5C22544A-7EE6-4342-B048-85BDC9FD1C3A}}" styleName="Medium Style 2 - Accent 1"><a:wholeTbl><a:tcStyle><a:fill><a:solidFill><a:schemeClr val="accent1"><a:tint val="20000"/></a:schemeClr></a:solidFill></a:fill></a:tcStyle></a:wholeTbl><a:firstRow><a:tcStyle><a:fill><a:solidFill><a:schemeClr val="accent1"/></a:solidFill></a:fill></a:tcStyle></a:firstRow></a:tblStyle></a:tblStyleLst>"#
+    );
+    let theme = format!(
+        r#"<a:theme xmlns:a="{A}"><a:themeElements><a:clrScheme><a:accent1><a:srgbClr val="4472C4"/></a:accent1></a:clrScheme></a:themeElements></a:theme>"#
+    );
+    let rels = format!(
+        r#"<Relationships xmlns="{PR}"><Relationship Id="r1" Type="{R}/slide" Target="slides/slide1.xml"/><Relationship Id="r2" Type="{R}/tableStyles" Target="tableStyles.xml"/></Relationships>"#
+    );
+    write_deck(
+        &p,
+        page("sld", "", "", &shapes),
+        vec![
+            ("ppt/_rels/presentation.xml.rels", rels.into_bytes()),
+            ("ppt/tableStyles.xml", style.into_bytes()),
+            (
+                "ppt/slides/_rels/slide1.xml.rels",
+                rel("theme", "../theme/theme.xml").into_bytes(),
+            ),
+            ("ppt/theme/theme.xml", theme.into_bytes()),
+        ],
+    );
+    let output = run(&p, &out, false);
+    check(output);
+    let pixels = image(&out);
+    assert_eq!(rgb(&pixels, 10, 20), (0xE9, 0xEB, 0xF5));
+    assert_eq!(rgb(&pixels, 40, 20), (0x2F, 0x52, 0x8F));
+    // Header row keeps the accent; the body row uses the 20% tint, not the saturated accent.
+    assert_eq!(rgb(&pixels, 50, 60), (0x44, 0x72, 0xC4));
+    assert_eq!(rgb(&pixels, 50, 80), (0xE9, 0xEB, 0xF5));
+    let manifest = std::fs::read_to_string(out.join("manifest.json")).unwrap();
+    assert!(
+        !manifest.contains("Unsupported color transform"),
+        "{manifest}"
+    );
+}

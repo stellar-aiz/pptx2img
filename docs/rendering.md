@@ -10,7 +10,8 @@ Strict mode gates known warnings, not all incompatibilities.
 - Explicit positions, sizes, rotation, and flips for basic shapes and selected
   [presets and connectors](preset-shapes.md).
 - Solid backgrounds, fills, and lines using RGB, system `lastClr`, and theme
-  colors; selected [color transforms and theme fills](colors.md).
+  colors; selected [color transforms and theme fills](colors.md), including
+  translucent (`alpha`) fills, lines, and text, and `tint`/`shade`/`satMod`.
 - Slide -> layout -> master -> theme relationships, color mappings, and major/
   minor Latin and Japanese theme fonts, including the Jpan supplemental font.
 - Explicit font, size, color, bold/italic, and left/center/right paragraph alignment.
