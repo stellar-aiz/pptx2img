@@ -1,14 +1,37 @@
-# pptx2img 開発指針
+---
+project_common_language: en
+---
 
-- ドキュメントと作業報告は日本語で記述する。
-- ibis-office は着想の参考である。コード、テスト、アセットを
-  コピー・移植・翻訳して取り込まない。
-- 実装は OOXML / OpenType 等の仕様、利用ライブラリの公開 API、
-  本プロジェクトで作成したテスト、比較描画の結果に基づいて独立に行う。
-- ibis-office の公開資料を閲覧した事実と、コードを転用していない事実を
-  区別する。「ソースを一切見ていない」とは説明しない。
-- 第三者ライブラリは依存として明示し、そのライセンスと帰属を扱う。
-  独立実装とは第三者ライブラリを一切使わないという意味ではない。
-- LibreOffice は開発時の比較対象であり、CLI の実行時依存にしない。
-- 比較の不一致を隠すために閾値を緩めない。既知の差は再現資料とともに残す。
-- 未対応・近似描画は警告として記録し、互換性を確認済みと誤認させない。
+# pptx2img Development Guidelines
+
+## Language policy
+
+- English is the language of public project artifacts: documentation (including
+  README and development guides), CLI help, error and warning messages, code
+  comments, test names, and new issues, pull requests, and commit messages.
+- Discussions with the user, design conversations, and conversational progress
+  reports may remain in Japanese. Follow the user's preferred language.
+- Apply this policy to new content and content being updated. Existing content
+  may be translated incrementally; a repository-wide translation is not required.
+- Do not rewrite historical issues or commits solely to change their language.
+- Preserve Japanese text when it is part of an input, fixture, font name, or other
+  data whose exact text matters to the behavior being tested or reported.
+- This project-specific policy supersedes inherited Japanese-only requirements
+  for project artifacts. Explicit user instructions take precedence.
+
+## Independent implementation and rendering quality
+
+- ibis-office is a source of inspiration. Do not copy, port, or translate its
+  code, tests, or assets into this project.
+- Implement independently using specifications such as OOXML and OpenType,
+  public library APIs, tests created in this project, and rendering comparisons.
+- Distinguish having consulted public ibis-office materials from not reusing its
+  code. Do not claim that its source has never been viewed.
+- Declare third-party libraries as dependencies and address their licenses and
+  attribution. Independent implementation does not mean avoiding all libraries.
+- LibreOffice is a development-time comparison reference, not a CLI runtime
+  dependency.
+- Do not relax thresholds to hide rendering differences. Preserve known
+  differences together with materials that reproduce them.
+- Record unsupported and approximate rendering as warnings. Do not imply that
+  compatibility has been verified when it has not.
