@@ -30,6 +30,7 @@ const A: &str = "http://schemas.openxmlformats.org/drawingml/2006/main";
 const P: &str = "http://schemas.openxmlformats.org/presentationml/2006/main";
 const R: &str = "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
 const PKG_R: &str = "http://schemas.openxmlformats.org/package/2006/relationships";
+const ASVG: &str = "http://schemas.microsoft.com/office/drawing/2016/SVG/main";
 const EMU: f64 = 9525.0;
 pub struct Deck {
     pub width: f64,
@@ -169,18 +170,34 @@ pub fn read(path: &Path, options: &RenderOptions<'_>) -> Result<Deck> {
         }
     }
     let mut reachable = BTreeSet::new();
+    // Per source, the internal targets whose relationship type no renderer follows.
+    let mut skipped = Vec::new();
     for source in sources {
         // Malformed relationship parts are ignored here; they still fail when a renderer reads them.
-        for part in relationships(&parts, &source)
-            .unwrap_or_default()
-            .into_values()
-        {
-            if !part.external && !is_unrendered(&part.kind) && names.contains(&part.target) {
+        let mut unrendered = HashMap::new();
+        for (id, part) in relationships(&parts, &source).unwrap_or_default() {
+            if part.external || !names.contains(&part.target) {
+                continue;
+            }
+            if is_unrendered(&part.kind) {
+                unrendered.insert(id, part.target);
+            } else {
                 reachable.insert(part.target);
             }
         }
+        if !unrendered.is_empty() {
+            skipped.push((source, unrendered));
+        }
     }
     for name in reachable {
+        if !parts.contains_key(&name) {
+            load_part(&mut archive, &name, &mut parts, &mut total)?;
+        }
+    }
+    // Some writers give picture data a relationship type the filter above skips; load what a
+    // picture actually references so the picture is rendered or omitted on its own.
+    // stellar:debt(scope) Only `a:blip`/`asvg:svgBlip` references override the type filter. upgrade: load parts on demand where a renderer reads them.
+    for name in picture_targets(&parts, &skipped) {
         if !parts.contains_key(&name) {
             load_part(&mut archive, &name, &mut parts, &mut total)?;
         }
@@ -254,6 +271,31 @@ fn relationship_source(name: &str) -> Option<String> {
         return None;
     }
     Some(dir.map_or_else(|| file.into(), |dir| format!("{dir}/{file}")))
+}
+/// Skipped targets that their source part references from `a:blip` or `asvg:svgBlip`.
+fn picture_targets(
+    parts: &Parts,
+    skipped: &[(String, HashMap<String, String>)],
+) -> BTreeSet<String> {
+    let mut targets = BTreeSet::new();
+    for (source, unrendered) in skipped {
+        // Unloaded or malformed sources are not rendered, so nothing they reference is needed.
+        let Ok(doc) = xml(parts, source) else {
+            continue;
+        };
+        for node in doc
+            .descendants()
+            .filter(|n| n.has_tag_name((A, "blip")) || n.has_tag_name((ASVG, "svgBlip")))
+        {
+            if let Some(target) = node
+                .attribute((R, "embed"))
+                .and_then(|id| unrendered.get(id))
+            {
+                targets.insert(target.clone());
+            }
+        }
+    }
+    targets
 }
 /// Relationship types whose targets no renderer path reads (playback, embeddings, metadata).
 fn is_unrendered(kind: &str) -> bool {
@@ -695,12 +737,21 @@ fn render_image(
         warnings.push(Code::Omitted, "Externally linked images are not loaded");
         return Ok(false);
     };
-    let part = rels.get(id).context("Missing image relationship")?;
+    let Some(part) = rels.get(id) else {
+        warnings.push(Code::Omitted, format!("Missing image relationship: {id}"));
+        return Ok(false);
+    };
     if part.external {
         warnings.push(Code::Omitted, "Externally linked images are not loaded");
         return Ok(false);
     }
-    let data = parts.get(&part.target).context("Missing image part")?;
+    let Some(data) = parts.get(&part.target) else {
+        warnings.push(
+            Code::Omitted,
+            format!("Missing image part: {}", part.target),
+        );
+        return Ok(false);
+    };
     // Sniff the format before probing dimensions: the probe cannot read EMF/WMF/SVG/WDP,
     // and one undecodable picture must not abort the whole deck.
     let mime = if data.starts_with(b"\x89PNG\r\n\x1a\n") {
@@ -738,7 +789,11 @@ fn render_image(
         .collect();
     let (left, top, right, bottom) = (values[0], values[1], values[2], values[3]);
     if left + right >= 1.0 || top + bottom >= 1.0 {
-        bail!("Cropped image dimensions must be positive");
+        warnings.push(
+            Code::Omitted,
+            format!("Image crop leaves no visible area: {}", part.target),
+        );
+        return Ok(false);
     }
     let iw = w / (1.0 - left - right);
     let ih = h / (1.0 - top - bottom);

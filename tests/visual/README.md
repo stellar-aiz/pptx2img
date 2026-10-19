@@ -112,3 +112,15 @@ The comparator explicitly passes `--font-fallback` to measure approximate render
 font diagnostics remain in the manifest. The standalone CLI rejects family
 substitution by default, permits successful glyph fallback with warnings, and
 always rejects glyphs unavailable in every loaded font.
+
+## Independent unresolved-picture-reference fixture
+
+Generate a slide with four generated PNG pictures: a control, one whose relationship
+type is rewritten to `oleObject`, one whose `r:embed` names a missing relationship,
+and one whose crop leaves no visible area. pptx2img renders the first two and omits
+the other two with `omitted` diagnostics instead of aborting the deck.
+
+```sh
+.venv-visual/bin/python tests/visual/make_image_references.py /tmp/image-references.pptx
+target/debug/pptx2img /tmp/image-references.pptx --out /tmp/image-references --width 1600 --font-fallback
+```

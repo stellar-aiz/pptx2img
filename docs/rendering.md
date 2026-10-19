@@ -101,6 +101,14 @@ position and line-spacing differences still exceed existing image thresholds.
 Pictures that are not PNG/JPEG (for example EMF, WMF, SVG, or WDP), or whose
 dimensions cannot be read, are omitted with an `omitted` diagnostic naming the
 media part; the rest of the slide, layout, and master still renders.
+The same applies to a picture whose `r:embed` names no relationship
+(`Missing image relationship: <id>`), whose relationship target is absent from the
+package (`Missing image part: <part>`), or whose crop (`srcRect`) leaves no visible
+area (`Image crop leaves no visible area: <part>`). A part that a picture's `a:blip`
+or `asvg:svgBlip` references is loaded even when its relationship type is one the
+loader otherwise skips (for example `oleObject` or `hdphoto` written by third-party
+tools), so the picture is rendered or omitted on its own; such parts count toward the
+size limits below.
 
 Visual output depends on available fonts. Ordinary CI covers Windows/Linux/macOS;
 recorded visual comparison measurements are from macOS.
