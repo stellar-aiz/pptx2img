@@ -239,7 +239,9 @@ impl<'d> Renderer<'_, 'd> {
         if cell_count > 100_000 {
             bail!("Tables are limited to 100000 cells");
         }
-        // Pass 1: validate merges and resolve table styles for every drawn cell.
+        // Pass 1: validate merges and record each drawn cell's geometry. Styled cell
+        // documents are rebuilt per cell in later passes and dropped right away, so a
+        // large table never holds every styled cell at once.
         struct Placed<'n> {
             row: usize,
             col: usize,
@@ -250,7 +252,6 @@ impl<'d> Renderer<'_, 'd> {
         }
         let mut covered = vec![false; cell_count];
         let mut placed = Vec::new();
-        let mut styled_sources = Vec::new();
         for (row_index, row) in rows.iter().enumerate() {
             let cells: Vec<_> = row
                 .children()
@@ -305,15 +306,6 @@ impl<'d> Renderer<'_, 'd> {
                         }
                     }
                 }
-                styled_sources.push(style_doc.as_ref().map(|doc| {
-                    table_styles::cell(
-                        *cell,
-                        doc.root_element(),
-                        child(table, A, "tblPr"),
-                        (row_index, col, rows.len(), widths.len()),
-                        self.warnings,
-                    )
-                }));
                 placed.push(Placed {
                     row: row_index,
                     col,
@@ -324,15 +316,16 @@ impl<'d> Renderer<'_, 'd> {
                 });
             }
         }
-        let styled_docs = styled_sources
-            .iter()
-            .map(|s| s.as_deref().map(Document::parse).transpose())
-            .collect::<std::result::Result<Vec<_>, _>>()?;
-        let resolved = |i: usize| {
-            styled_docs[i]
-                .as_ref()
-                .map(Document::root_element)
-                .unwrap_or(placed[i].source)
+        let styled = |cell: &Placed<'_>, warnings: &mut Warnings| {
+            style_doc.as_ref().map(|doc| {
+                table_styles::cell(
+                    cell.source,
+                    doc.root_element(),
+                    child(table, A, "tblPr"),
+                    (cell.row, cell.col, rows.len(), widths.len()),
+                    warnings,
+                )
+            })
         };
         fn text_body<'a>(cell: Node<'a, 'a>) -> Option<text::TextBody<'a>> {
             child(cell, A, "txBody").map(|body| text::TextBody {
@@ -347,9 +340,15 @@ impl<'d> Renderer<'_, 'd> {
         let mut required = vec![0.0; placed.len()];
         let mut scratch = String::new();
         for (i, cell) in placed.iter().enumerate() {
-            if let Some(body) = text_body(resolved(i)) {
+            let mut scratch_warnings = Warnings::default();
+            let source = styled(cell, &mut scratch_warnings);
+            let doc = source.as_deref().map(Document::parse).transpose()?;
+            let node = doc
+                .as_ref()
+                .map(Document::root_element)
+                .unwrap_or(cell.source);
+            if let Some(body) = text_body(node) {
                 scratch.clear();
-                let mut scratch_warnings = Warnings::default();
                 required[i] = text::render(
                     body,
                     cell.width,
@@ -389,13 +388,18 @@ impl<'d> Renderer<'_, 'd> {
             w / widths.iter().sum::<f64>()
         ));
         // Pass 3: draw backgrounds, borders, and text at the final row heights.
-        for (i, placement) in placed.iter().enumerate() {
+        for placement in &placed {
             self.warnings.target.location = format!(
                 "{location}/row/{}/cell/{}",
                 placement.row + 1,
                 placement.col + 1
             );
-            let cell = resolved(i);
+            let source = styled(placement, self.warnings);
+            let doc = source.as_deref().map(Document::parse).transpose()?;
+            let cell = doc
+                .as_ref()
+                .map(Document::root_element)
+                .unwrap_or(placement.source);
             let cw = placement.width;
             let ch: f64 = heights[placement.row..placement.row + placement.rows]
                 .iter()
