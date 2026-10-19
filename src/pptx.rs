@@ -147,6 +147,7 @@ pub fn read(path: &Path, options: &RenderOptions<'_>) -> Result<Deck> {
     if archive.len() > 10_000 {
         bail!("Part count exceeds the limit");
     }
+    // stellar:debt(scope) Skipped entries are never decompressed, so their CRCs are not checked. upgrade: stream-verify skipped entries if archive integrity must be reported.
     let mut names = BTreeSet::new();
     for index in 0..archive.len() {
         let entry = archive.by_index_raw(index)?;
