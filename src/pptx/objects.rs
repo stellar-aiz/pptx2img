@@ -16,6 +16,21 @@ pub(super) struct Renderer<'a, 'd> {
     pub ancestors: &'a [Node<'d, 'd>],
     pub master_style: Option<Node<'d, 'd>>,
 }
+/// Whether the element's non-visual properties (`cNvPr`) mark it as hidden.
+fn is_hidden(node: Node<'_, '_>) -> bool {
+    node.children()
+        .find_map(|n| child(n, P, "cNvPr"))
+        .is_some_and(|n| theme::bool_attr(n, "hidden") == Some(true))
+}
+fn ole_object<'d>(frame: Node<'d, 'd>) -> Option<Node<'d, 'd>> {
+    const MC: &str = "http://schemas.openxmlformats.org/markup-compatibility/2006";
+    let data = child(frame, A, "graphic").and_then(|n| child(n, A, "graphicData"))?;
+    child(data, P, "oleObj").or_else(|| {
+        child(data, MC, "AlternateContent")
+            .and_then(|n| child(n, MC, "Fallback"))
+            .and_then(|n| child(n, P, "oleObj"))
+    })
+}
 impl<'d> Renderer<'_, 'd> {
     pub fn node(&mut self, node: Node<'d, 'd>, location: &str, depth: usize) -> Result<()> {
         if depth > 64 {
@@ -31,11 +46,14 @@ impl<'d> Renderer<'_, 'd> {
                 .and_then(|n| n.attribute("name"))
                 .map(str::to_owned),
         };
+        let is_frame = node.has_tag_name((P, "graphicFrame"));
         if node.tag_name().namespace() != Some(P) {
             self.warnings.push(
                 Code::Omitted,
                 format!("Omitted unsupported element: {}", node.tag_name().name()),
             );
+        } else if is_hidden(node) && !(is_frame && ole_object(node).is_some()) {
+            // Hidden elements are not drawn (as in Office); this is normal, so no diagnostic.
         } else {
             match node.tag_name().name() {
                 "nvGrpSpPr" | "grpSpPr" => {}
@@ -53,18 +71,7 @@ impl<'d> Renderer<'_, 'd> {
                 )?,
                 "grpSp" => self.group(node, location, depth)?,
                 "graphicFrame" => {
-                    let ole = child(node, A, "graphic")
-                        .and_then(|n| child(n, A, "graphicData"))
-                        .and_then(|data| {
-                            child(data, P, "oleObj").or_else(|| {
-                                const MC: &str =
-                                    "http://schemas.openxmlformats.org/markup-compatibility/2006";
-                                child(data, MC, "AlternateContent")
-                                    .and_then(|n| child(n, MC, "Fallback"))
-                                    .and_then(|n| child(n, P, "oleObj"))
-                            })
-                        });
-                    if let Some(ole) = ole {
+                    if let Some(ole) = ole_object(node) {
                         self.ole(node, ole)?;
                     } else {
                         self.table(node, location)?;
@@ -115,12 +122,8 @@ impl<'d> Renderer<'_, 'd> {
     fn ole(&mut self, frame: Node<'d, 'd>, ole: Node<'d, 'd>) -> Result<()> {
         let kind = ole.attribute("progId").unwrap_or("unknown type");
         let preview = child(ole, P, "pic");
-        let hidden = [frame, preview.unwrap_or(ole)].iter().any(|node| {
-            node.children()
-                .find_map(|n| child(n, P, "cNvPr"))
-                .and_then(|n| n.attribute("hidden"))
-                .is_some_and(|v| v == "1" || v == "true")
-        });
+        // OLE is hidden when either the frame or its preview picture is hidden.
+        let hidden = is_hidden(frame) || preview.is_some_and(is_hidden);
         if hidden {
             self.warnings.push(
                 Code::Omitted,
