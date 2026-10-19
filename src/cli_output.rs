@@ -1,5 +1,5 @@
 //! CLI の結果文書。文字列は JSON の引用規則（YAML 1.2 の部分集合）で保護する。
-use pptx2img::{FontFallbackError, StrictModeError};
+use pptx2img::{FontFallbackError, SlideReport, StrictModeError};
 use std::{
     collections::{BTreeMap, BTreeSet},
     path::Path,
@@ -19,11 +19,45 @@ struct Problem {
     characters: BTreeSet<char>,
 }
 
-pub fn completed(folder: &Path, slides: usize) -> String {
-    format!(
-        "status: completed\noutput:\n  created: true\n  folder: {}\n  slides: {slides}\n",
-        quoted(&folder.to_string_lossy())
-    )
+pub fn completed(folder: &Path, slides: &[SlideReport]) -> String {
+    let mut result = format!(
+        "status: completed\noutput:\n  created: true\n  folder: {}\n  slides: {}\n",
+        quoted(&folder.to_string_lossy()),
+        slides.len()
+    );
+    let mut problems = BTreeMap::<(String, String), Problem>::new();
+    for slide in slides {
+        for d in &slide.diagnostics {
+            if let Some(font) = &d.font
+                && font.reason == "glyph_fallback"
+            {
+                let problem = problems
+                    .entry((font.requested_family.clone(), font.actual_family.clone()))
+                    .or_default();
+                problem.slides.insert(slide.slide);
+                if let Some(ch) = d.missing_character {
+                    problem.characters.insert(ch);
+                }
+            }
+        }
+    }
+    if !problems.is_empty() {
+        result.push_str("warnings:\n");
+    }
+    for ((family, substitute), problem) in problems {
+        result.push_str(&format!(
+            "  - code: FONT_GLYPH_MISSING\n    family: {}\n    substitute_family: {}\n    slides: {}\n    characters:\n",
+            quoted(&family), quoted(&substitute), serde_json::to_string(&problem.slides).unwrap()
+        ));
+        for ch in problem.characters {
+            result.push_str(&format!(
+                "      - character: {}\n        codepoint: {}\n",
+                quoted(&ch.to_string()),
+                quoted(&format!("U+{:04X}", ch as u32))
+            ));
+        }
+    }
+    result
 }
 
 pub fn failed(error: &anyhow::Error, folder: Option<&Path>, created: bool) -> String {
@@ -85,7 +119,7 @@ pub fn failed(error: &anyhow::Error, folder: Option<&Path>, created: bool) -> St
             }
             let suggestion = match code {
                 "FONT_GLYPH_MISSING" => {
-                    "列挙した文字を収録した同書体のフォントを --font-file <path> で追加してください。入手できない場合は依頼者に提供を求めてください。"
+                    "列挙した文字を収録したフォントを --font-file <path> で追加してください。入手できない場合は依頼者に提供を求めてください。"
                 }
                 "FONT_STYLE_MISSING" => {
                     "必要な太さ・斜体を含む同書体のフォントを --font-file <path> で追加してください。"
@@ -133,8 +167,8 @@ mod tests {
     fn quotes_paths_and_multiline_errors_without_yaml_injection() {
         let path = Path::new("日本語: # 出力\nerrors: fake");
         assert_eq!(
-            completed(path, 2),
-            "status: completed\noutput:\n  created: true\n  folder: \"日本語: # 出力\\nerrors: fake\"\n  slides: 2\n"
+            completed(path, &[]),
+            "status: completed\noutput:\n  created: true\n  folder: \"日本語: # 出力\\nerrors: fake\"\n  slides: 0\n"
         );
         let result = failed(&anyhow::anyhow!("失敗\n- code: forged"), Some(path), false);
         assert!(result.contains("message: \"失敗\\n- code: forged\""));

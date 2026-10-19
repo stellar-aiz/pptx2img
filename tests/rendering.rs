@@ -394,18 +394,12 @@ fn missing_font_and_glyph_are_reported_separately() {
     let body = r#"<p:txBody><a:bodyPr/><a:p><a:r><a:rPr><a:latin typeface="存在しない書体"/><a:ea typeface="存在しない書体"/></a:rPr><a:t>A未</a:t></a:r></a:p></p:txBody>"#;
     let shape = placeholder(7, "title", &transform(0, 0, 100, 100), body);
     write_deck(&input, page("sld", "", "", &shape), vec![]);
-    check(run(&input, &out, false));
-    let manifest: serde_json::Value =
-        serde_json::from_slice(&fs::read(out.join("manifest.json")).unwrap()).unwrap();
-    let records = manifest["slides"][0]["diagnostics"].as_array().unwrap();
-    for code in ["font_substitution", "missing_glyph", "approximation"] {
-        assert!(
-            records
-                .iter()
-                .any(|d| d["code"] == code && d["object_id"] == "7")
-        );
-    }
-    assert!(image(&out).pixels().iter().any(|p| p.red() < 128));
+    let result = run(&input, &out, false);
+    assert!(!result.status.success());
+    assert!(!out.exists());
+    let stderr = String::from_utf8_lossy(&result.stderr);
+    assert!(stderr.contains("code: FONT_GLYPH_MISSING"), "{stderr}");
+    assert!(stderr.contains("codepoint: \"U+672A\""), "{stderr}");
 }
 
 #[test]

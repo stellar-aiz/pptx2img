@@ -1,9 +1,23 @@
 """代替順位検証用。字形・メトリクスを本プロジェクトで生成する。"""
 from pathlib import Path
+from zipfile import ZipFile
+from xml.etree import ElementTree
 from fontTools.fontBuilder import FontBuilder
 from fontTools.pens.ttGlyphPen import TTGlyphPen
 
+# 日本語サンプルの構造・色・画像の検証を OS のフォントから独立させる。
+# 輪郭は他のテスト書体と同じ矩形であり、日本語字形の忠実度を検証する用途ではない。
+sample_chars = set(' ')
+for filename in ['basic.pptx', 'theme.pptx']:
+    with ZipFile(Path(__file__).resolve().parents[2] / 'examples' / filename) as archive:
+        for name in archive.namelist():
+            if name.endswith('.xml'):
+                root = ElementTree.fromstring(archive.read(name))
+                for text in root.iter('{http://schemas.openxmlformats.org/drawingml/2006/main}t'):
+                    sample_chars.update(text.text or '')
+
 for family, chars, weight, italic, filename in [
+    ('Pptx Samples', ''.join(sorted(sample_chars)), 400, False, 'samples'),
     ('Pptx Latin', 'A ', 400, False, 'latin'),
     ('Pptx CJK', 'A あ', 400, False, 'cjk'),
     ('Pptx CJK', 'A あ', 700, False, 'cjk-bold'),
