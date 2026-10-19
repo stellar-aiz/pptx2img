@@ -2,7 +2,12 @@
 use anyhow::{Context, Result, bail};
 use base64::{Engine, engine::general_purpose::STANDARD};
 use roxmltree::{Document, Node};
-use std::{collections::HashMap, fs::File, io::Read, path::Path};
+use std::{
+    collections::{BTreeSet, HashMap},
+    fs::File,
+    io::Read,
+    path::Path,
+};
 
 mod colors;
 mod diagnostics;
@@ -142,24 +147,39 @@ pub fn read(path: &Path, options: &RenderOptions<'_>) -> Result<Deck> {
     if archive.len() > 10_000 {
         bail!("Part count exceeds the limit");
     }
+    let mut names = BTreeSet::new();
+    for index in 0..archive.len() {
+        let entry = archive.by_index_raw(index)?;
+        if !entry.is_dir() && !names.insert(entry.name().to_string()) {
+            bail!("Duplicate part name in ZIP archive");
+        }
+    }
+    // Load relationship parts first, then only the parts a renderer can reach through them.
+    // Caps apply to every loaded part; parts that are never read do not count.
     let mut parts = HashMap::new();
     let mut total = 0usize;
-    for index in 0..archive.len() {
-        let mut entry = archive.by_index(index)?;
-        if entry.is_dir() {
-            continue;
+    let mut sources = Vec::new();
+    for name in &names {
+        if let Some(source) = relationship_source(name) {
+            load_part(&mut archive, name, &mut parts, &mut total)?;
+            sources.push(source);
         }
-        let name = entry.name().to_string();
-        let mut data = Vec::new();
-        (&mut entry)
-            .take(32 * 1024 * 1024 + 1)
-            .read_to_end(&mut data)?;
-        total += data.len();
-        if data.len() > 32 * 1024 * 1024 || total > 256 * 1024 * 1024 {
-            bail!("Uncompressed PPTX exceeds the limit");
+    }
+    let mut reachable = BTreeSet::new();
+    for source in sources {
+        // Malformed relationship parts are ignored here; they still fail when a renderer reads them.
+        for part in relationships(&parts, &source)
+            .unwrap_or_default()
+            .into_values()
+        {
+            if !part.external && !is_unrendered(&part.kind) && names.contains(&part.target) {
+                reachable.insert(part.target);
+            }
         }
-        if parts.insert(name, data).is_some() {
-            bail!("Duplicate part name in ZIP archive");
+    }
+    for name in reachable {
+        if !parts.contains_key(&name) {
+            load_part(&mut archive, &name, &mut parts, &mut total)?;
         }
     }
     let roots = relationships(&parts, "")?;
@@ -202,6 +222,55 @@ pub fn read(path: &Path, options: &RenderOptions<'_>) -> Result<Deck> {
     })
 }
 
+const PART_LIMIT: usize = 32 * 1024 * 1024;
+const TOTAL_LIMIT: usize = 256 * 1024 * 1024;
+fn load_part(
+    archive: &mut zip::ZipArchive<File>,
+    name: &str,
+    parts: &mut Parts,
+    total: &mut usize,
+) -> Result<()> {
+    let entry = archive.by_name(name)?;
+    let mut data = Vec::new();
+    entry.take(PART_LIMIT as u64 + 1).read_to_end(&mut data)?;
+    *total += data.len();
+    if data.len() > PART_LIMIT || *total > TOTAL_LIMIT {
+        bail!("Uncompressed PPTX exceeds the limit");
+    }
+    parts.insert(name.into(), data);
+    Ok(())
+}
+/// Return the source part of a relationship part (`dir/_rels/file.rels` -> `dir/file`).
+fn relationship_source(name: &str) -> Option<String> {
+    let stem = name.strip_suffix(".rels")?;
+    let (dir, file) = match stem.rsplit_once("/_rels/") {
+        Some((dir, file)) => (Some(dir), file),
+        None => (None, stem.strip_prefix("_rels/")?),
+    };
+    if file.contains('/') {
+        return None;
+    }
+    Some(dir.map_or_else(|| file.into(), |dir| format!("{dir}/{file}")))
+}
+/// Relationship types whose targets no renderer path reads (playback, embeddings, metadata).
+fn is_unrendered(kind: &str) -> bool {
+    is_media(kind)
+        || [
+            "/oleObject",
+            "/package",
+            "/metadata/thumbnail",
+            "/font",
+            "/hdphoto",
+        ]
+        .iter()
+        .any(|suffix| kind.ends_with(suffix))
+}
+fn is_media(kind: &str) -> bool {
+    ["/video", "/audio", "/media"]
+        .iter()
+        .any(|suffix| kind.ends_with(suffix))
+}
+
 fn color(node: Node<'_, '_>, default: &str, theme: &Theme, warnings: &mut Warnings) -> String {
     colors::resolve(node, default, theme, None, warnings)
 }
@@ -241,6 +310,16 @@ fn render_slide(
         location: "slide".into(),
         ..Target::default()
     };
+    // Layouts and masters draw onto the slide, so their media counts too.
+    for path in &paths {
+        if relationships(parts, path)?
+            .values()
+            .any(|part| is_media(&part.kind))
+        {
+            warn(&mut warnings, "Audio and video playback is unsupported");
+            break;
+        }
+    }
     let theme = Theme::load(parts, name, &mut warnings)?;
     let background_node = roots
         .iter()
