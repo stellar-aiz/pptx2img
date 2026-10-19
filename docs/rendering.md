@@ -97,6 +97,10 @@ position and line-spacing differences still exceed existing image thresholds.
 - SVG/EMF/WMF images, external links, animations, Strict OOXML, legacy `.ppt`,
   and encrypted files.
 
+Pictures that are not PNG/JPEG (for example EMF, WMF, SVG, or WDP), or whose
+dimensions cannot be read, are omitted with an `omitted` diagnostic naming the
+media part; the rest of the slide, layout, and master still renders.
+
 Visual output depends on available fonts. Ordinary CI covers Windows/Linux/macOS;
 recorded visual comparison measurements are from macOS.
 
