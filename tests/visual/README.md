@@ -114,7 +114,7 @@ comparator therefore writes a replacement table (`Font/Substitution`, "Always") 
 generated LibreOffice profile. The default table, `tests/visual/font-substitution.json`,
 maps those families to Hiragino Sans, the face pptx2img resolves to on macOS, so the
 comparison measures layout rather than font choice. Override it with
-`--font-substitution-map map.json` (`{"families": {"Family": "Substitute"}}`).
+`--font-substitution-map map.json` or `PPTX2IMG_FONT_SUBSTITUTION_MAP` (`{"families": {"Family": "Substitute"}}`).
 
 | Report field | Meaning |
 |---|---|
@@ -132,6 +132,33 @@ metrics: pinned references still differ from pptx2img where layout differs.
 .venv-visual/bin/python tests/visual/compare.py --binary target/release/pptx2img \
   --fixture /tmp/font-substitution.pptx --width 1600 --out target/visual-tests/font-substitution
 ```
+
+### Per-OS tables in the visual CI job
+
+Each OS pins a table whose substitute is installed on that OS, so the pinned face never
+falls back inside LibreOffice:
+
+| OS | Table | Substitute | Where the face comes from |
+|---|---|---|---|
+| macOS | `font-substitution.json` (default) | Hiragino Sans | Part of macOS; its hashes are checked by `check_environment.py` |
+| Linux | `font-substitution.linux.json` | Noto Sans CJK JP | `NotoSansCJKjp-Regular.otf` and `-Bold.otf` from the `notofonts/noto-cjk` release `Sans2.004`, installed by the job with pinned SHA-256 values |
+| Windows | `font-substitution.windows.json` | Noto Sans CJK JP | The same two files, installed into the per-user font directory |
+
+The scheduled/manual workflow (`.github/workflows/visual.yml`) runs a matrix over these
+three OSes with the pinned LibreOffice 26.2.5.2 and sets `PPTX2IMG_FONT_SUBSTITUTION_MAP` to
+the OS table, which `compare.py` uses as its default when `--font-substitution-map` is absent
+(this is how the cargo-driven comparisons receive it). The job then runs
+`check_determinism.py`, which passes `--font-substitution-map` explicitly, compares
+twice, requires byte-identical reference PNGs, and appends the pinned table, the PDF fonts
+actually used, and the reference hashes to the job summary. It checks
+`examples/text-bullets.pptx` and a generated `make_font_substitution.py` deck, whose
+families are in the table. `report.json` of every run lists the pinned table under
+`environment.libreoffice_font_substitution`. Thresholds are unchanged: a failing
+comparison on an OS is recorded evidence, not something to relax.
+
+The renderer still resolves families through its own system font lookup on each OS; the
+table pins only the LibreOffice reference. Differences between the two faces are part of
+the recorded comparison.
 
 ## Independent table row-growth fixtures
 
