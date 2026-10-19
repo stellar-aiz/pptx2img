@@ -71,6 +71,27 @@ remain. Thresholds have not been relaxed.
 - [NormalAutoFit](https://learn.microsoft.com/en-us/dotnet/api/documentformat.openxml.drawing.normalautofit)
 - [Office spAutoFit interpretation](https://learn.microsoft.com/en-us/openspecs/office_standards/ms-oe376/19d31037-28bf-4693-85be-3a37bfe82d51)
 
+## Table row heights
+
+`a:tr/@h` is a minimum row height. Each cell's text is laid out first, at its merged
+width and with its cell margins (`marT`/`marB`, default 0.05in), and a row grows to
+the tallest cell it holds: `max(stored h, margins + content)`. Rows that fit keep
+their stored height, including `h="0"` rows, which grow to their text. A row-spanning
+cell adds any remaining shortfall to its last spanned row. Rows are stacked from
+the top of the frame; the graphicFrame height does not stretch or squash them, so a
+grown table can extend below its frame (LibreOffice 26.2.5.2 also ignores the frame
+height). Columns still scale to the frame width. Cells without text keep their stored
+height. Measurement uses the same approximate text layout as drawing, so grown
+heights inherit its line-height differences.
+
+Fixtures: `examples/table-row-growth.pptx` (generator
+`tests/visual/make_table_row_growth.py`) and `examples/table-zero-row-height.pptx`
+(generator `tests/visual/make_table_zero_row_height.py`). At width 1600, the
+zero-height fixture and the frame-height page pass the default thresholds; the
+wrapped-text page still exceeds them (MAE 0.0237, changed 6.7%) because LibreOffice
+uses taller Arial line spacing and draws default white cell borders from the
+unresolved table style. Thresholds have not been relaxed.
+
 ## Bullets and indentation
 
 `buChar` and `buAutoNum` are placed separately from text. Bullet position is

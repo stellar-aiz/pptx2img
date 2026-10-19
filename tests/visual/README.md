@@ -118,6 +118,20 @@ metrics: pinned references still differ from pptx2img where layout differs.
   --fixture /tmp/font-substitution.pptx --width 1600 --out target/visual-tests/font-substitution
 ```
 
+## Independent table row-growth fixtures
+
+`make_table_row_growth.py` writes a table whose stored row heights are shorter than
+its wrapped text (page 1) and a table whose frame is twice as tall as its rows
+(page 2). `make_table_zero_row_height.py` writes a table with an `h="0"` row. Rows
+grow to fit their text and are not stretched to the frame; see
+[rendering](../../docs/rendering.md#table-row-heights) for recorded metrics.
+
+```sh
+.venv-visual/bin/python tests/visual/make_table_row_growth.py examples/table-row-growth.pptx
+.venv-visual/bin/python tests/visual/compare.py --binary target/release/pptx2img \
+  --fixture examples/table-row-growth.pptx --width 1600 --out target/visual-tests/table-row-growth
+```
+
 ## Reproducibility
 
 Output retains input PPTX, commands, stdout/stderr, reference PDF, both PNG sets,

@@ -172,8 +172,12 @@ fn tint_and_shade_fill_shapes_and_table_style_bands() {
     assert_eq!(rgb(&pixels, 10, 20), (0xE9, 0xEB, 0xF5));
     assert_eq!(rgb(&pixels, 40, 20), (0x2F, 0x52, 0x8F));
     // Header row keeps the accent; the body row uses the 20% tint, not the saturated accent.
+    // Rows grow to fit their text, so locate the body row from the rendered geometry.
     assert_eq!(rgb(&pixels, 50, 60), (0x44, 0x72, 0xC4));
-    assert_eq!(rgb(&pixels, 50, 80), (0xE9, 0xEB, 0xF5));
+    let header_end = (60..pixels.height())
+        .find(|&y| rgb(&pixels, 50, y) != (0x44, 0x72, 0xC4))
+        .expect("the body row is below the header row");
+    assert_eq!(rgb(&pixels, 50, header_end + 2), (0xE9, 0xEB, 0xF5));
     let manifest = std::fs::read_to_string(out.join("manifest.json")).unwrap();
     assert!(
         !manifest.contains("Unsupported color transform"),
