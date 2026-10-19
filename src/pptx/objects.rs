@@ -175,7 +175,7 @@ impl<'d> Renderer<'_, 'd> {
         };
         let (w, h) = transform(t, self.svg)?;
         // Do not reapply the inner pic transform; graphicFrame defines the display area.
-        render_image(
+        let drawn = render_image(
             preview.unwrap(),
             self.parts,
             self.rels,
@@ -185,10 +185,15 @@ impl<'d> Renderer<'_, 'd> {
             self.warnings,
         )?;
         self.svg.push_str("</g>");
-        self.warnings.push(
-            Code::Approximation,
-            format!("Rendered embedded PNG/JPEG preview for OLE ({kind}) without executing OLE"),
-        );
+        // render_image records its own omission; claim a rendered preview only when drawn.
+        if drawn {
+            self.warnings.push(
+                Code::Approximation,
+                format!(
+                    "Rendered embedded PNG/JPEG preview for OLE ({kind}) without executing OLE"
+                ),
+            );
+        }
         Ok(())
     }
     fn table(&mut self, node: Node<'d, 'd>, location: &str) -> Result<()> {
