@@ -18,7 +18,7 @@ struct Args {
     /// 警告があれば画像を出力せず失敗する
     #[arg(long)]
     strict: bool,
-    /// 不足フォント・欠字・太さや斜体の不一致を許容して代替描画する
+    /// 不足フォント・太さや斜体の不一致を許容して代替描画する
     #[arg(long)]
     font_fallback: bool,
     /// 行幅が不足するとき句読点の余白を自動圧縮する（実験的・既定は無効）
@@ -105,7 +105,7 @@ fn main() {
     ) {
         Ok(report) => {
             print_warnings(&report.slides);
-            print!("{}", cli_output::completed(&out, report.slides.len()));
+            print!("{}", cli_output::completed(&out, &report.slides));
         }
         Err(error) => {
             eprint!(

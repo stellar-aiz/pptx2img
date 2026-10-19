@@ -298,7 +298,7 @@ fn font_fallback_is_explicit_and_reports_all_affected_slides() {
         assert!(text.contains("スライド 1, 2"), "{text}");
         for (suffix, flags, success) in [
             ("default", vec![], false),
-            ("fallback", vec!["--font-fallback"], true),
+            ("fallback", vec!["--font-fallback"], value != "あ"),
             ("strict", vec!["--font-fallback", "--strict"], false),
         ] {
             let out = dir.path().join(suffix);
@@ -404,5 +404,53 @@ fn invalid_arguments_are_yaml_but_help_and_version_remain_available() {
         assert!(result.status.success());
         assert!(!result.stdout.is_empty());
         assert!(result.stderr.is_empty());
+    }
+}
+
+#[test]
+fn glyph_fallback_completes_with_structured_warning_without_permission() {
+    let dir = tempfile::tempdir().unwrap();
+    let input = dir.path().join("glyphs.pptx");
+    fixture(
+        &input,
+        r#"<p:sp><p:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="952500" cy="952500"/></a:xfrm></p:spPr><p:txBody><a:bodyPr/><a:p><a:r><a:rPr><a:latin typeface="Pptx Latin"/><a:ea typeface="Pptx Latin"/></a:rPr><a:t>Aあ</a:t></a:r></a:p></p:txBody></p:sp>"#,
+    );
+    let fonts = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
+    for strict in [false, true] {
+        let out = dir.path().join(if strict { "strict" } else { "normal" });
+        let mut command = Command::new(env!("CARGO_BIN_EXE_pptx2img"));
+        command
+            .arg(&input)
+            .arg("--out")
+            .arg(&out)
+            .args(["--width", "100", "--no-system-fonts", "--font-file"])
+            .arg(fonts.join("latin.ttf"))
+            .arg("--font-file")
+            .arg(fonts.join("cjk.ttf"));
+        if strict {
+            command.arg("--strict");
+        }
+        let result = command.output().unwrap();
+        let stdout = String::from_utf8_lossy(&result.stdout);
+        let stderr = String::from_utf8_lossy(&result.stderr);
+        assert_eq!(result.status.success(), !strict, "{stdout}\n{stderr}");
+        assert_eq!(out.exists(), !strict);
+        if strict {
+            assert!(stderr.contains("STRICT_MODE_REJECTED"), "{stderr}");
+        } else {
+            for expected in [
+                "status: completed",
+                "warnings:\n",
+                "code: FONT_GLYPH_MISSING",
+                "family: \"Pptx Latin\"",
+                "substitute_family: \"Pptx CJK\"",
+                "character: \"あ\"",
+                "codepoint: \"U+3042\"",
+                "slides: [1,2]",
+            ] {
+                assert!(stdout.contains(expected), "{expected}: {stdout}");
+            }
+            assert!(out.join("slide-002.png").exists());
+        }
     }
 }

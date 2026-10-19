@@ -145,7 +145,7 @@ impl<'a> Resolver<'a> {
             if f.style != if italic { Style::Italic } else { Style::Normal }
                 || f.weight != if bold { Weight::BOLD } else { Weight::NORMAL }
             {
-                self.record(family, id, "style_approximation", warnings);
+                self.record_character(family, id, "style_approximation", Some(ch), warnings);
             }
         }
         id

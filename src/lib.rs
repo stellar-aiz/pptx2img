@@ -23,7 +23,7 @@ pub struct ConvertOptions {
     pub width: u32,
     /// 警告がある場合、ファイルを出力せず StrictModeError を返す。
     pub strict: bool,
-    /// フォント代替・欠字・書体スタイルの近似を許可する（既定は停止）。
+    /// 書体代替・書体スタイルの近似を許可する。文字単位の代替は既定で許可。
     pub font_fallback: bool,
     /// 実験的な句読点の自動圧縮。
     pub punctuation_compression: bool,
@@ -217,15 +217,20 @@ fn convert_inner(
     if u64::from(settings.width) * u64::from(height) > 16_777_216 {
         bail!("出力画像の画素数が上限を超えています");
     }
-    if !settings.font_fallback
-        && deck.slides.iter().any(|slide| {
-            slide.diagnostics.iter().any(|d| {
-                matches!(
-                    d.code,
-                    DiagnosticCode::FontSubstitution | DiagnosticCode::MissingGlyph
-                )
-            })
-        })
+    // 欠字を描画できない場合は常に停止する。文字単位の代替成功は通常の警告。
+    let blocks = |d: &Diagnostic| {
+        d.code == DiagnosticCode::MissingGlyph
+            || (!settings.font_fallback
+                && d.code == DiagnosticCode::FontSubstitution
+                && !d.font.as_ref().is_some_and(|font| {
+                    font.reason == "glyph_fallback"
+                        || (font.reason == "style_approximation" && d.missing_character.is_some())
+                }))
+    };
+    if deck
+        .slides
+        .iter()
+        .any(|slide| slide.diagnostics.iter().any(&blocks))
     {
         return Err(FontFallbackError {
             slides: deck
@@ -236,7 +241,12 @@ fn convert_inner(
                     slide: index + 1,
                     image: format!("slide-{:03}.png", index + 1),
                     warnings: slide.warnings.clone(),
-                    diagnostics: slide.diagnostics.clone(),
+                    diagnostics: slide
+                        .diagnostics
+                        .iter()
+                        .filter(|d| blocks(d))
+                        .cloned()
+                        .collect(),
                 })
                 .collect(),
         }
