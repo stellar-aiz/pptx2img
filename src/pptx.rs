@@ -619,21 +619,32 @@ fn render_image(
         return Ok(());
     }
     let data = parts.get(&part.target).context("Missing image part")?;
-    let dimensions = imagesize::blob_size(data).context("Cannot read image dimensions")?;
+    // Sniff the format before probing dimensions: the probe cannot read EMF/WMF/SVG/WDP,
+    // and one undecodable picture must not abort the whole deck.
+    let mime = if data.starts_with(b"\x89PNG\r\n\x1a\n") {
+        "image/png"
+    } else if data.starts_with(b"\xff\xd8\xff") {
+        "image/jpeg"
+    } else {
+        warnings.push(
+            Code::Omitted,
+            format!("Only PNG/JPEG images are supported: {}", part.target),
+        );
+        return Ok(());
+    };
+    let Ok(dimensions) = imagesize::blob_size(data) else {
+        warnings.push(
+            Code::Omitted,
+            format!("Cannot read image dimensions: {}", part.target),
+        );
+        return Ok(());
+    };
     if dimensions.width > 8192
         || dimensions.height > 8192
         || dimensions.width.saturating_mul(dimensions.height) > 16_777_216
     {
         bail!("Embedded image pixel count exceeds the limit");
     }
-    let mime = if data.starts_with(b"\x89PNG\r\n\x1a\n") {
-        "image/png"
-    } else if data.starts_with(b"\xff\xd8\xff") {
-        "image/jpeg"
-    } else {
-        warnings.push(Code::Omitted, "Only PNG/JPEG images are supported");
-        return Ok(());
-    };
     if node.descendants().any(|n| {
         n.has_tag_name((A, "tile")) || (n.has_tag_name((A, "fillRect")) && n.attributes().len() > 0)
     }) || blip.children().any(|n| n.is_element())

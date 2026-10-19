@@ -66,6 +66,18 @@ Expect global passing, local failure, omission diagnostics, and exit 1. Without
 `--regions`, only whole-page metrics apply and exit is 0, but omission diagnostics
 remain in the report.
 
+## Independent unsupported-image fixture
+
+Generate a deck whose slide and shared layout each place a minimal EMF picture
+(written byte by byte by the script). pptx2img omits both pictures with diagnostics
+and renders every slide; LibreOffice draws the EMF rectangles, so the difference is
+a known limitation, not a regression.
+
+```sh
+.venv-visual/bin/python tests/visual/make_unsupported_images.py /tmp/unsupported-images.pptx
+target/debug/pptx2img /tmp/unsupported-images.pptx --out /tmp/unsupported-images --width 1600 --font-fallback
+```
+
 ## Reproducibility
 
 Output retains input PPTX, commands, stdout/stderr, reference PDF, both PNG sets,
