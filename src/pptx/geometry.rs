@@ -41,27 +41,24 @@ pub(super) fn preset(
     warnings: &mut Warnings,
 ) -> Option<Geometry> {
     let kind = node.attribute("prst")?;
-    if let Some(definition) = guides::find(kind) {
-        // Connectors stay visible as lines when one extent is zero.
-        if (w == 0.0 || h == 0.0) && !kind.contains("Connector") {
-            return Some(Geometry {
-                svg: String::new(),
-                text: (0.0, 0.0, w, h),
-            });
-        }
-        return Some(guides::render(node, definition, w, h, style, warnings));
-    }
-    if !matches!(
-        kind,
-        "homePlate" | "upArrow" | "rightArrow" | "rightBrace" | "wedgeRoundRectCallout"
-    ) {
+    let definition = guides::find(kind);
+    if definition.is_none()
+        && !matches!(
+            kind,
+            "homePlate" | "upArrow" | "rightArrow" | "rightBrace" | "wedgeRoundRectCallout"
+        )
+    {
         return None;
     }
-    if w == 0.0 || h == 0.0 {
+    // Connectors stay visible as lines when one extent is zero.
+    if (w == 0.0 || h == 0.0) && !kind.contains("Connector") {
         return Some(Geometry {
             svg: String::new(),
             text: (0.0, 0.0, w, h),
         });
+    }
+    if let Some(definition) = definition {
+        return Some(guides::render(node, definition, w, h, style, warnings));
     }
     let ss = w.min(h);
     let (path, text) = match kind {

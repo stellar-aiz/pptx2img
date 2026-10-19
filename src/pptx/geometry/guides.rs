@@ -25,10 +25,6 @@ pub(super) fn render(
     style: &str,
     warnings: &mut Warnings,
 ) -> Geometry {
-    let fallback = Geometry {
-        svg: String::new(),
-        text: (0.0, 0.0, w, h),
-    };
     let mut guides = Guides::new(w, h);
     let defaults: Vec<(&str, f64)> = definition
         .lines()
@@ -68,13 +64,18 @@ pub(super) fn render(
         }
     }
     let text = text.unwrap_or((0.0, 0.0, w, h));
-    let finite = |values: &[f64]| values.iter().all(|v| v.is_finite());
-    if !finite(&[text.0, text.1, text.2, text.3]) || paths.iter().any(|p| !p.finite) {
+    let text_finite = [text.0, text.1, text.2, text.3]
+        .iter()
+        .all(|v| v.is_finite());
+    if !text_finite || paths.iter().any(|p| !p.finite) {
         warn(
             warnings,
             "Preset shape guides produced non-finite values; outline omitted",
         );
-        return fallback;
+        return Geometry {
+            svg: String::new(),
+            text: (0.0, 0.0, w, h),
+        };
     }
     // Paint every path inside one group so per-path fill/stroke overrides inherit the
     // shape style; only open paths without fill keep line-end markers.
