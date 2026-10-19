@@ -34,6 +34,7 @@ jobs:
       # pass --font-substitution-map (cargo-driven comparisons).
       PPTX2IMG_FONT_SUBSTITUTION_MAP: ${{ github.workspace }}/${{ matrix.substitution_map }}
       NOTO_SANS_CJK_TAG: Sans2.004
+      PYTHONUTF8: '1'
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -43,7 +44,7 @@ jobs:
         run: |
           rustup toolchain install 1.97.0 --profile minimal
           rustup override set 1.97.0
-          python -m pip install -r tests/visual/requirements.txt
+          python -m pip install -r tests/visual/requirements.txt python-pptx==1.0.2
       - name: Download pinned LibreOffice (macOS)
         if: runner.os == 'macOS'
         run: |
@@ -67,12 +68,17 @@ jobs:
           echo "SOFFICE=$(find "$RUNNER_TEMP/lo" -name soffice -path '*/program/*' | head -n 1)" >> "$GITHUB_ENV"
       - name: Download pinned LibreOffice (Windows)
         if: runner.os == 'Windows'
+        shell: pwsh
         run: |
-          curl --fail --location --retry 3 -o "$RUNNER_TEMP/libreoffice.msi" https://downloadarchive.documentfoundation.org/libreoffice/old/26.2.5.2/win/x86_64/LibreOffice_26.2.5.2_Win_x86-64.msi
-          echo "f15ba07bfcb0186986cf3171063506f5d207c11f8cc051ba0d135209e9e915f9  $RUNNER_TEMP/libreoffice.msi" | sha256sum --check
+          $msi = Join-Path $env:RUNNER_TEMP 'libreoffice.msi'
+          Invoke-WebRequest -Uri https://downloadarchive.documentfoundation.org/libreoffice/old/26.2.5.2/win/x86_64/LibreOffice_26.2.5.2_Win_x86-64.msi -OutFile $msi
+          if ((Get-FileHash $msi -Algorithm SHA256).Hash.ToLower() -ne 'f15ba07bfcb0186986cf3171063506f5d207c11f8cc051ba0d135209e9e915f9') { throw 'LibreOffice installer differs from the pinned release' }
           # Administrative extraction keeps the runner's installed programs untouched.
-          powershell -NoProfile -Command "Start-Process msiexec.exe -Wait -ArgumentList '/a','$env:RUNNER_TEMP\libreoffice.msi','/qn','TARGETDIR=$env:RUNNER_TEMP\lo'"
-          echo "SOFFICE=$(find "$RUNNER_TEMP/lo" -name soffice.exe -path '*/program/*' | head -n 1)" >> "$GITHUB_ENV"
+          $target = Join-Path $env:RUNNER_TEMP 'lo'
+          Start-Process msiexec.exe -Wait -ArgumentList '/a', $msi, '/qn', "TARGETDIR=$target"
+          $soffice = Get-ChildItem -Path $target -Recurse -Filter soffice.exe | Where-Object { $_.DirectoryName -like '*\program' } | Select-Object -First 1
+          if (-not $soffice) { throw 'soffice.exe not found after extraction' }
+          "SOFFICE=$($soffice.FullName)" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
       - name: Install pinned Noto Sans CJK JP (Linux)
         if: runner.os == 'Linux'
         run: |
@@ -100,16 +106,26 @@ jobs:
         if: runner.os == 'macOS'
         run: python tests/visual/check_environment.py
       - name: Build release binary
+        if: ${{ !cancelled() }}
         run: cargo build --release --locked
       - name: Rendering comparison with unchanged thresholds
+        if: ${{ !cancelled() }}
         run: cargo test --locked --test libreoffice -- --ignored --nocapture --test-threads=1
       - name: Reference determinism and pinned table
-        if: always()
+        if: ${{ !cancelled() }}
         run: |
-          python tests/visual/check_determinism.py --binary "target/release/pptx2img${{ matrix.exe }}" \
-            --fixture examples/text-bullets.pptx --font-substitution-map "${{ matrix.substitution_map }}" \
-            --soffice "$SOFFICE" --out target/visual-tests/determinism | tee determinism-summary.md
+          mkdir -p target/visual-tests/fixtures
+          python tests/visual/make_font_substitution.py target/visual-tests/fixtures/font-substitution.pptx
+          : > determinism-summary.md
+          status=0
+          for fixture in examples/text-bullets.pptx target/visual-tests/fixtures/font-substitution.pptx; do
+            python tests/visual/check_determinism.py --binary "target/release/pptx2img${{ matrix.exe }}" \
+              --fixture "$fixture" --font-substitution-map "${{ matrix.substitution_map }}" \
+              --soffice "$SOFFICE" --out "target/visual-tests/determinism/$(basename "$fixture" .pptx)" >> determinism-summary.md || status=1
+          done
+          cat determinism-summary.md
           { echo "## ${{ matrix.name }}"; cat determinism-summary.md; } >> "$GITHUB_STEP_SUMMARY"
+          exit $status
       - name: Save images, differences, and environment details even on failure
         if: always()
         uses: actions/upload-artifact@v4
