@@ -349,13 +349,9 @@ fn paint(
     warnings: &mut Warnings,
 ) -> String {
     match child(node, A, "gradFill") {
-        Some(gradient)
-            if child(node, A, "noFill").is_none() && child(node, A, "solidFill").is_none() =>
-        {
-            gradients::define(gradient, theme, size, rotated, svg, warnings)
-                .unwrap_or_else(|| default.into())
-        }
-        _ => fill(node, default, theme, warnings),
+        Some(gradient) => gradients::define(gradient, theme, size, rotated, svg, warnings)
+            .unwrap_or_else(|| default.into()),
+        None => fill(node, default, theme, warnings),
     }
 }
 fn render_slide(

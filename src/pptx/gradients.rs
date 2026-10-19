@@ -12,15 +12,12 @@ pub(super) fn define(
     warnings: &mut Warnings,
 ) -> Option<String> {
     let (w, h) = size;
-    let mut stops: Vec<(f64, String)> = child(node, A, "gsLst")
+    let mut stops: Vec<(f64, (String, f64))> = child(node, A, "gsLst")
         .into_iter()
         .flat_map(|list| list.children().filter(|n| n.has_tag_name((A, "gs"))))
         .map(|stop| {
             let offset = (number(stop, "pos", 0.0) / 100000.0).clamp(0.0, 1.0);
-            (
-                offset,
-                colors::resolve(stop, "#000000", theme, None, warnings),
-            )
+            (offset, colors::with_opacity(stop, theme, warnings))
         })
         .collect();
     if stops.is_empty() {
@@ -33,10 +30,7 @@ pub(super) fn define(
     stops.sort_by(|a, b| a.0.total_cmp(&b.0));
     let stops = stops
         .iter()
-        .map(|(offset, color)| {
-            // SVG stop colors carry opacity separately.
-            let (rgb, alpha) = color.split_at(7.min(color.len()));
-            let opacity = u8::from_str_radix(alpha, 16).map_or(1.0, |a| a as f64 / 255.0);
+        .map(|(offset, (rgb, opacity))| {
             format!("<stop offset=\"{offset}\" stop-color=\"{rgb}\" stop-opacity=\"{opacity}\"/>")
         })
         .collect::<String>();
