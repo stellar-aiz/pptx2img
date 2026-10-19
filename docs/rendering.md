@@ -116,6 +116,26 @@ unless `--include-hidden` is passed, and the manifest records them (`hidden`,
 `skipped_hidden_slides`). This matches LibreOffice's PDF export, which also skips them,
 so the comparator pairs pages one to one. See [usage](usage.md#hidden-slides).
 
+## Flipped shapes and groups
+
+`flipH`/`flipV` on a shape or on any ancestor group mirror the geometry (outline,
+fill, preset text rectangle, pictures) but never the text. Each flip along the
+chain toggles a mirror; when the net transform is a mirror, the text is mirrored
+once more around the centre of its final text rectangle. As a result `flipH`
+text reads normally inside the mirrored text rectangle (for example the body of a
+flipped arrow), `flipV` text is turned 180 degrees, and `flipH`+`flipV` (or a
+flipped child inside a group flipped the same way) is a plain 180-degree or
+0-degree rotation. This matches LibreOffice on the fixture below; PowerPoint was
+not compared directly. Table text inside a flipped group is not covered yet.
+
+Fixture: `examples/flipped-text.pptx` with per-cell regions
+`examples/flipped-text.json`; generator: `tests/visual/make_flipped_text.py`.
+At `--width 1600` on macOS the page passes (MAE 0.0089, changed 0.0237). The
+flipH, flipV, and unflipped cells pass locally; the other cells keep a
+small vertical text offset and outline anti-aliasing difference that the unflipped
+cell also shows (MAE 0.0198-0.0254, changed 0.047-0.059), so they still exceed
+the unchanged local thresholds.
+
 ## Known limitations
 
 - Complete layout/master property and text-style inheritance; `themeOverride` and

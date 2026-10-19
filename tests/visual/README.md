@@ -147,6 +147,19 @@ grow to fit their text and are not stretched to the frame; see
   --fixture examples/table-row-growth.pptx --width 1600 --out target/visual-tests/table-row-growth
 ```
 
+## Independent flipped-text fixture
+
+Generate rectangles, an arrow, and groups with `flipH`/`flipV` that all carry a
+left-aligned label, plus per-cell regions. Geometry is mirrored; text is never
+mirrored (`flipV` turns it 180 degrees, as in LibreOffice).
+
+```sh
+.venv-visual/bin/python tests/visual/make_flipped_text.py examples/flipped-text.pptx
+.venv-visual/bin/python tests/visual/compare.py \
+  --binary target/release/pptx2img --fixture examples/flipped-text.pptx \
+  --regions examples/flipped-text.json --width 1600 --out target/visual-tests/flipped-text
+```
+
 ## Reproducibility
 
 Output retains input PPTX, commands, stdout/stderr, reference PDF, both PNG sets,

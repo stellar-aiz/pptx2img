@@ -4,6 +4,8 @@ use super::*;
 pub(super) struct Shape<'a> {
     pub chain: Vec<Node<'a, 'a>>,
     pub master_style: Option<Node<'a, 'a>>,
+    /// Whether ancestor groups mirror the coordinate system (an odd number of flips).
+    pub mirrored: bool,
 }
 pub(super) struct Renderer<'a, 'd> {
     pub parts: &'a Parts,
@@ -15,6 +17,8 @@ pub(super) struct Renderer<'a, 'd> {
     pub part: &'a str,
     pub ancestors: &'a [Node<'d, 'd>],
     pub master_style: Option<Node<'d, 'd>>,
+    /// Whether ancestor groups mirror the coordinate system (an odd number of flips).
+    pub mirrored: bool,
 }
 /// Whether the element's non-visual properties (`cNvPr`) mark it as hidden.
 fn is_hidden(node: Node<'_, '_>) -> bool {
@@ -61,6 +65,7 @@ impl<'d> Renderer<'_, 'd> {
                     Shape {
                         chain: layout::inherited(node, self.ancestors),
                         master_style: self.master_style,
+                        mirrored: self.mirrored,
                     },
                     self.parts,
                     self.rels,
@@ -89,7 +94,7 @@ impl<'d> Renderer<'_, 'd> {
     fn group(&mut self, node: Node<'d, 'd>, location: &str, depth: usize) -> Result<()> {
         let props = child(node, P, "grpSpPr").context("Missing group properties")?;
         let t = child(props, A, "xfrm").context("Missing group transform")?;
-        let (w, h) = transform(t, self.svg)?;
+        let (w, h, mirrored) = transform(t, self.svg)?;
         let off = child(t, A, "chOff").context("Missing group child origin")?;
         let ext = child(t, A, "chExt").context("Missing group child extent")?;
         let cw = number(ext, "cx", 0.0) / EMU;
@@ -112,9 +117,12 @@ impl<'d> Renderer<'_, 'd> {
             -number(off, "x", 0.0) / EMU,
             -number(off, "y", 0.0) / EMU
         ));
+        // An error aborts the whole slide, so the flag needs no restoring on that path.
+        self.mirrored ^= mirrored;
         for (i, n) in node.children().filter(|n| n.is_element()).enumerate() {
             self.node(n, &format!("{location}/{i}"), depth + 1)?;
         }
+        self.mirrored ^= mirrored;
         self.svg.push_str("</g></g>");
         Ok(())
     }
@@ -177,7 +185,7 @@ impl<'d> Renderer<'_, 'd> {
             );
             return Ok(());
         };
-        let (w, h) = transform(t, self.svg)?;
+        let (w, h, _) = transform(t, self.svg)?;
         // Do not reapply the inner pic transform; graphicFrame defines the display area.
         let drawn = render_image(
             preview.unwrap(),
@@ -214,7 +222,7 @@ impl<'d> Renderer<'_, 'd> {
         let t = child(node, P, "xfrm").context("Missing table transform")?;
         // The frame height only sets the rotation centre: rows keep their stored minimum
         // heights and grow to fit their content, so the table may end above or below it.
-        let (w, _) = transform(t, self.svg)?;
+        let (w, _, _) = transform(t, self.svg)?;
         let grid = child(table, A, "tblGrid").context("Missing table column widths")?;
         let widths: Vec<_> = grid
             .children()
@@ -466,7 +474,8 @@ impl<'d> Renderer<'_, 'd> {
         Ok(())
     }
 }
-fn transform(t: Node<'_, '_>, svg: &mut String) -> Result<(f64, f64)> {
+/// Open the transform group and return the extent and whether the transform mirrors.
+fn transform(t: Node<'_, '_>, svg: &mut String) -> Result<(f64, f64, bool)> {
     let off = child(t, A, "off").context("Missing transform origin")?;
     let ext = child(t, A, "ext").context("Missing transform extent")?;
     let (x, y, w, h) = (
@@ -496,5 +505,5 @@ fn transform(t: Node<'_, '_>, svg: &mut String) -> Result<(f64, f64)> {
         -w / 2.0,
         -h / 2.0
     ));
-    Ok((w, h))
+    Ok((w, h, fx != fy))
 }
