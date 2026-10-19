@@ -80,7 +80,7 @@ fn adjustment_changes_home_plate_outline() {
 }
 #[test]
 fn unknown_preset_and_adjustment_remain_diagnosed() {
-    let (unknown, _) = deck(&shape("star5", "", ""));
+    let (unknown, _) = deck(&shape("heart", "", ""));
     assert!(
         unknown.slides[0]
             .diagnostics
@@ -98,4 +98,78 @@ fn unknown_preset_and_adjustment_remain_diagnosed() {
             .iter()
             .any(|w| w.contains("adjustment formulas"))
     );
+}
+
+const GUIDE_PRESETS: [&str; 15] = [
+    "chevron",
+    "triangle",
+    "downArrow",
+    "leftArrow",
+    "leftRightArrow",
+    "upDownArrow",
+    "diamond",
+    "trapezoid",
+    "pie",
+    "star5",
+    "cloud",
+    "round2SameRect",
+    "wedgeEllipseCallout",
+    "flowChartAlternateProcess",
+    "flowChartMultidocument",
+];
+fn count(pixels: &resvg::tiny_skia::Pixmap, color: (u8, u8, u8)) -> usize {
+    pixels
+        .pixels()
+        .iter()
+        .filter(|p| (p.red(), p.green(), p.blue()) == color)
+        .count()
+}
+#[test]
+fn guide_presets_render_fill_and_outline_without_omission() {
+    for kind in GUIDE_PRESETS {
+        for attrs in ["", r#"rot="1200000" flipH="1""#] {
+            let (result, pixels) = deck(&shape(kind, "", attrs));
+            assert!(count(&pixels, (36, 90, 81)) > 50, "{kind} {attrs}");
+            assert!(count(&pixels, (195, 123, 73)) > 20, "{kind} {attrs}");
+            let diagnostics = &result.slides[0].diagnostics;
+            assert!(
+                !diagnostics
+                    .iter()
+                    .any(|d| d.message.contains("Unsupported preset shape")),
+                "{kind}: {diagnostics:?}"
+            );
+            assert!(result.slides[0].warnings.is_empty(), "{kind}");
+        }
+    }
+}
+#[test]
+fn pie_from_zero_to_half_turn_is_the_lower_half_disc() {
+    let (_, pixels) = deck(&shape(
+        "pie",
+        r#"<a:gd name="adj1" fmla="val 0"/><a:gd name="adj2" fmla="val 10800000"/>"#,
+        "",
+    ));
+    // Box 20..80 x 20..60: the lower half is filled, the upper half is background.
+    assert_eq!(rgb(&pixels, 50, 50), (36, 90, 81));
+    assert_eq!(rgb(&pixels, 30, 45), (36, 90, 81));
+    assert_eq!(rgb(&pixels, 50, 30), (255, 255, 255));
+    assert_eq!(rgb(&pixels, 30, 35), (255, 255, 255));
+}
+#[test]
+fn connector_presets_draw_open_lines_even_when_flat() {
+    for kind in [
+        "bentConnector3",
+        "bentConnector4",
+        "curvedConnector2",
+        "curvedConnector3",
+    ] {
+        let (result, pixels) = deck(&shape(kind, "", ""));
+        // Open paths are stroked, never filled with the shape fill.
+        assert_eq!(count(&pixels, (36, 90, 81)), 0, "{kind}");
+        assert!(count(&pixels, (195, 123, 73)) > 20, "{kind}");
+        assert!(result.slides[0].warnings.is_empty(), "{kind}");
+        let flat = shape(kind, "", "").replace(&format!(r#"cy="{}""#, 40 * 9525), r#"cy="0""#);
+        let (_, pixels) = deck(&flat);
+        assert!(count(&pixels, (195, 123, 73)) > 20, "{kind} flat");
+    }
 }

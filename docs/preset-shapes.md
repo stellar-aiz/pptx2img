@@ -1,7 +1,8 @@
 # Preset geometry and comparison evidence
 
-Supported presets here are homePlate, upArrow, rightArrow, rightBrace, and
-wedgeRoundRectCallout. Build outlines and text rectangles in local coordinates,
+Hand-written presets are homePlate, upArrow, rightArrow, rightBrace, and
+wedgeRoundRectCallout; further presets are
+[evaluated from shape guides](#presets-evaluated-from-shape-guides). Build outlines and text rectangles in local coordinates,
 then apply existing rotation, flipping, and group transforms.
 
 Formulas and paths in DrawingMLGeometries from the
@@ -24,6 +25,62 @@ OFF, the defaults page had MAE 0.000521/changed pixels 0.313%; the adjustments,
 rotation, and flip page had 0.001012/0.473%. Thresholds remained MAE 0.02, changed
 pixels 5%, and channel tolerance 16. Text-layout and theme-background diagnostics
 remain; this does not establish complete Office compatibility.
+
+## Presets evaluated from shape guides
+
+A second group of presets is evaluated from transcribed DrawingMLGeometries
+definitions instead of hand-written outlines: chevron, triangle, downArrow,
+leftArrow, leftRightArrow, upDownArrow, diamond, trapezoid, pie, star5, cloud,
+round2SameRect, wedgeEllipseCallout, flowChartAlternateProcess,
+flowChartMultidocument, and the connectors bentConnector3, bentConnector4,
+curvedConnector2, and curvedConnector3.
+
+Each definition lists the preset's adjustment defaults, guides, text rectangle,
+and paths from the ECMA-376 Part 1 DrawingMLGeometries part. An independent
+evaluator implements the guide operators of ST_GeomGuideFormula (`val`, `*/`,
+`+-`, `+/`, `?:`, `abs`, `at2`, `cat2`, `cos`, `max`, `min`, `mod`, `pin`, `sat2`,
+`sin`, `sqrt`, `tan`), the built-in guides (`w`, `h`, `l`, `t`, `r`, `b`, `hc`,
+`vc`, `ss`, `ls`, `wd*`, `hd*`, `ssd*`, `cd*`), and the path commands `moveTo`,
+`lnTo`, `arcTo`, `cubicBezTo`, `quadBezTo`, and `close`, including per-path
+`w`/`h` coordinate spaces and `fill="none"`/`stroke="false"`.
+
+- `arcTo` angles are visual angles on the ellipse (clockwise, y down). They are
+  converted to parametric angles, and arcs are emitted in quarter-turn segments.
+- The published pie text rectangle reads `l=il t=ir r=it b=ib`; the guide names
+  describe the inscribed square, so `il it ir ib` is used. This is a deliberate
+  deviation from the literal file.
+- Paths without fill (connectors, the cloud's inner arcs, the multidocument's
+  outlines) are stroked only. Only those open paths keep line-end markers; closed
+  outlines never draw arrowheads.
+- Connectors still draw when their width or height is zero. Other presets with a
+  zero extent draw nothing, as before.
+- Path fill modes (`darken`, `lighten`, …) are not used by these presets and are
+  not implemented. Guides that evaluate to non-finite values omit the outline
+  with a warning.
+
+Fixture pages 3–6 of `tests/visual/make_preset_shapes.py`: page 3 has the 15 new
+presets at their defaults, page 4 the same presets with adjustments, 15° rotation,
+and alternating horizontal/vertical flips, page 5 the four connectors as `p:cxnSp`
+with tail arrows (defaults, then adjusted), and page 6 the same connector
+geometries as ordinary `p:sp` shapes.
+
+Comparison with LibreOffice 26.2.5.2 at 1600px on 2026-10-19 (thresholds unchanged:
+MAE 0.02, changed pixels 5%, channel tolerance 16):
+
+| Page | Before (`e103c5d`) | After |
+|---|---|---|
+| 3 new presets, defaults | MAE 0.284966, changed 40.911% (fail: omitted) | MAE 0.002176, changed 1.115% |
+| 4 adjusted, rotated, flipped | MAE 0.286900, changed 41.088% (fail: omitted) | MAE 0.002082, changed 1.016% |
+| 5 connectors (`p:cxnSp`) | MAE 0.012443, changed 1.986% (omitted) | MAE 0.021766, changed 3.450% (**fail**) |
+| 6 connector geometry (`p:sp`) | MAE 0.012206, changed 1.897% (omitted) | MAE 0.000529, changed 0.358% |
+
+Page 5 is a known difference, kept as reproduction material rather than hidden:
+LibreOffice reroutes `p:cxnSp` bent and curved connectors with its own connector
+router (for example, it starts bentConnector3 vertically) instead of drawing the
+saved preset path, even without connection sites. Page 6 draws the same geometries
+as ordinary shapes, where LibreOffice follows the preset path and the pages match.
+This renderer always draws the saved preset path. Before this change, page 5/6
+"passed" only because the omitted thin lines are a small share of the page.
 
 ## Lines and connectors
 
