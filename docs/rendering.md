@@ -126,7 +126,12 @@ text reads normally inside the mirrored text rectangle (for example the body of 
 flipped arrow), `flipV` text is turned 180 degrees, and `flipH`+`flipV` (or a
 flipped child inside a group flipped the same way) is a plain 180-degree or
 0-degree rotation. This matches LibreOffice on the fixture below; PowerPoint was
-not compared directly. Table text inside a flipped group is not covered yet.
+not compared directly. Table cell text follows the same rule: a table inside a flipped
+group (or with a flipped frame) has its grid mirrored while each cell's text is mirrored
+once more around the centre of the cell, so it stays readable (`flipV` turns it 180
+degrees). LibreOffice does not mirror such a table at all (it keeps the grid upright and
+offsets it), so this case has no matching reference; it is covered by `tests/flips.rs`,
+which compares against the unflipped table.
 
 Fixture: `examples/flipped-text.pptx` with per-cell regions
 `examples/flipped-text.json`; generator: `tests/visual/make_flipped_text.py`.
@@ -134,7 +139,9 @@ At `--width 1600` on macOS the page passes (MAE 0.0089, changed 0.0237). The
 flipH, flipV, and unflipped cells pass locally; the other cells keep a
 small vertical text offset and outline anti-aliasing difference that the unflipped
 cell also shows (MAE 0.0198-0.0254, changed 0.047-0.059), so they still exceed
-the unchanged local thresholds.
+the unchanged local thresholds. Slide 2 holds the table cells; its group-flipped tables
+exceed the thresholds against LibreOffice for the reason above (the unflipped table cell
+stays close, MAE 0.0408, changed 0.0655).
 
 ## Known limitations
 

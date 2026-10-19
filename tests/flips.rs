@@ -53,6 +53,22 @@ fn group(flip: &str, children: &str) -> String {
         xfrm(flip, BOX, true)
     )
 }
+/// A one-cell table frame at `BOX` whose cell holds `BODY` (without the shape-only bodyPr).
+fn table() -> String {
+    let (x, y, w, h) = BOX;
+    let text = BODY
+        .replace("<p:txBody>", "<a:txBody>")
+        .replace("</p:txBody>", "</a:txBody>");
+    format!(
+        r#"<p:graphicFrame><p:nvGraphicFramePr><p:cNvPr id="8" name="t"/></p:nvGraphicFramePr><p:xfrm><a:off x="{}" y="{}"/><a:ext cx="{}" cy="{}"/></p:xfrm><a:graphic><a:graphicData><a:tbl><a:tblPr/><a:tblGrid><a:gridCol w="{}"/></a:tblGrid><a:tr h="{}"><a:tc>{text}<a:tcPr marL="0" marR="0" marT="0" marB="0" anchor="t"/></a:tc></a:tr></a:tbl></a:graphicData></a:graphic></p:graphicFrame>"#,
+        x * 9525,
+        y * 9525,
+        w * 9525,
+        h * 9525,
+        w * 9525,
+        h * 9525
+    )
+}
 fn render(shapes: &str) -> resvg::tiny_skia::Pixmap {
     let d = tempfile::tempdir().unwrap();
     let input = d.path().join("flips.pptx");
@@ -221,4 +237,35 @@ fn group_flip_does_not_leak_to_later_siblings() {
     let empty = group(&flips(true, false), "");
     let after = glyphs(&render(&format!("{empty}{}", text_shape("", "rect", ""))));
     assert_same(&after, &plain, "sibling after a flipped group");
+}
+
+#[test]
+fn flipped_groups_keep_table_cell_text_unmirrored() {
+    let plain = glyphs(&render(&table()));
+    assert_differs(&mirror_x(&plain), &plain, "mirror of plain cell text");
+    assert_differs(&rotate_180(&plain), &plain, "rotation of plain cell text");
+    for (deck, expected, what) in [
+        (
+            group(&flips(true, false), &table()),
+            plain.clone(),
+            "table in a flipH group",
+        ),
+        (
+            group(&flips(false, true), &table()),
+            rotate_180(&plain),
+            "table in a flipV group",
+        ),
+        (
+            group(&flips(true, true), &table()),
+            rotate_180(&plain),
+            "table in a flipH+flipV group",
+        ),
+        (
+            group(&flips(false, true), &group(&flips(true, false), &table())),
+            rotate_180(&plain),
+            "table in a flipH group nested in a flipV group",
+        ),
+    ] {
+        assert_same(&glyphs(&render(&deck)), &expected, what);
+    }
 }

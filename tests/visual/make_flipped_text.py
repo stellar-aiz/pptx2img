@@ -9,6 +9,10 @@ top-anchored label so mirrored or rotated glyphs are easy to spot:
 
 Next to the deck, `<out>.json` lists one comparison region per cell for compare.py
 `--regions`, so a mirrored label is caught even when the whole page passes.
+
+Slide 2 repeats the label in a one-cell table (a graphicFrame, which has its own
+text path) placed directly and inside groups flipped horizontally, vertically,
+and both.
 """
 import json
 from pathlib import Path
@@ -77,6 +81,31 @@ def flipped_group(slide, x, y, label, horizontal, vertical, child_flip=False):
     flip(group._element.grpSpPr.xfrm, horizontal, vertical)
 
 
+def table_group(slide, x, y, label, horizontal, vertical, grouped=True):
+    """A one-cell table, wrapped in a group carrying the flips when `grouped`."""
+    frame = slide.shapes.add_table(1, 1, x, y, W, H)
+    tbl = frame._element.graphic.graphicData.tbl
+    tbl.tblPr.attrib.clear()
+    for style in tbl.tblPr:
+        tbl.tblPr.remove(style)
+    cell = frame.table.cell(0, 0)
+    cell.fill.solid()
+    cell.fill.fore_color.rgb = RGBColor(0xFF, 0xE6, 0x99)
+    cell.vertical_anchor = MSO_ANCHOR.TOP
+    paragraph = cell.text_frame.paragraphs[0]
+    paragraph.alignment = PP_ALIGN.LEFT
+    run = paragraph.add_run()
+    run.text = label
+    run.font.name = "Arial"
+    run.font.size = Pt(20)
+    run.font.color.rgb = RGBColor(0, 0, 0)
+    if not grouped:
+        return
+    group = slide.shapes.add_group_shape(shapes=[frame])
+    marker(group.shapes, x, y + H - Inches(0.3))
+    flip(group._element.grpSpPr.xfrm, horizontal, vertical)
+
+
 def main(out: Path):
     prs = Presentation()
     prs.slide_width, prs.slide_height = Inches(10), Inches(5.625)
@@ -97,14 +126,28 @@ def main(out: Path):
     flipped_group(slide, COLUMNS[1], ROWS[1], "Rk 6 grpH", True, False)
     flipped_group(slide, COLUMNS[2], ROWS[1], "Rk 7 grpV", False, True)
     flipped_group(slide, COLUMNS[3], ROWS[1], "Rk 8 grpH+H", True, False, child_flip=True)
+    table_slide = prs.slides.add_slide(prs.slide_layouts[6])
+    for column, (label, horizontal, vertical, grouped) in zip(
+        COLUMNS,
+        [
+            ("Rk 1 table", False, False, False),
+            ("Rk 2 grpH", True, False, True),
+            ("Rk 3 grpV", False, True, True),
+            ("Rk 4 grpHV", True, True, True),
+        ],
+    ):
+        table_group(table_slide, column, ROWS[0], label, horizontal, vertical, grouped)
     prs.save(out)
     names = ["none", "flipH", "flipV", "flipHV", "arrow-flipH", "group-flipH", "group-flipV", "group-flipH-child-flipH"]
     cells = [(column, row) for row in ROWS for column in COLUMNS]
+    table_names = ["table", "table-group-flipH", "table-group-flipV", "table-group-flipHV"]
+    regions = [(1, name, x, y) for name, (x, y) in zip(names, cells)]
+    regions += [(2, name, x, ROWS[0]) for name, x in zip(table_names, COLUMNS)]
     out.with_suffix(".json").write_text(json.dumps({"regions": [
-        {"slide": 1, "name": name, "rect": [
+        {"slide": slide_number, "name": name, "rect": [
             round(x / prs.slide_width, 4), round(y / prs.slide_height, 4),
             round(W / prs.slide_width, 4), round(H / prs.slide_height, 4)]}
-        for name, (x, y) in zip(names, cells)
+        for slide_number, name, x, y in regions
     ]}, indent=2) + "\n")
 
 
