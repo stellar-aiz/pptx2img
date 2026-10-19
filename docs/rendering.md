@@ -82,7 +82,9 @@ the top of the frame; the graphicFrame height does not stretch or squash them, s
 grown table can extend below its frame (LibreOffice 26.2.5.2 also ignores the frame
 height). Columns still scale to the frame width. Cells without text keep their stored
 height. Measurement uses the same approximate text layout as drawing, so grown
-heights inherit its line-height differences.
+heights inherit its line-height differences. A zero-height row is ordinary input and
+emits no diagnostic: it is not given a share of the frame height, and the earlier
+"Table rows with zero height" approximation warning no longer exists.
 
 Fixtures: `examples/table-row-growth.pptx` (generator
 `tests/visual/make_table_row_growth.py`) and `examples/table-zero-row-height.pptx`
@@ -109,12 +111,27 @@ Fixture: `examples/text-bullets.pptx`; generator: `tests/visual/make_text_bullet
 Numbers, levels, and wrapping were checked against LibreOffice, but vertical
 position and line-spacing differences still exceed existing image thresholds.
 
+A paragraph with no visible text (no runs, or only whitespace runs) draws no bullet
+marker, because Office shows none; the empty line keeps its height and the paragraph
+still advances the automatic-numbering counter, so numbering of later items is
+unchanged. This is normal input and emits no diagnostic. Fixture:
+`examples/empty-bullets.pptx` (generator `tests/visual/make_empty_bullets.py`).
+
 ## Hidden slides
 
 `p:sld/@show` is read for every slide. Hidden slides (`0` or `false`) are not rendered
 unless `--include-hidden` is passed, and the manifest records them (`hidden`,
 `skipped_hidden_slides`). This matches LibreOffice's PDF export, which also skips them,
 so the comparator pairs pages one to one. See [usage](usage.md#hidden-slides).
+
+## Hidden elements
+
+Shapes, pictures, connectors, groups, and non-OLE graphic frames marked hidden
+(`p:cNvPr/@hidden`) are not drawn, on slides, layouts, and masters. A hidden group hides
+all of its children, and a hidden child inside a visible group hides only itself. This
+is silent: hiding is normal in real decks, so no diagnostic is emitted. A hidden OLE
+object is the exception and keeps its `omitted` diagnostic; see
+[OLE previews](ole-preview.md). Generator: `tests/visual/make_hidden.py`.
 
 ## Flipped shapes and groups
 
@@ -173,6 +190,14 @@ reported as `unsupported` because document fonts are not resolved for it. A pict
 whose `a:blip` has no `r:embed` of either kind is omitted with `Missing image
 reference`; `Externally linked images are not loaded` is reserved for `r:link` and
 `TargetMode="External"` relationships.
+
+Audio and video are never played or rendered. A slide, layout, or master that has a
+relationship of type `video`, `audio`, or `media` gets one `unsupported` diagnostic
+per slide, `Audio and video playback is unsupported`. Media parts are not loaded, so
+they do not count toward the size limits below, and a media payload larger than the
+32 MiB per-part limit does not fail the deck; the poster frame, being an ordinary
+picture, renders. Generator: `tests/visual/make_embedded_media.py` (writes a deck of
+about 40 MiB uncompressed, so write it outside the repository).
 
 Pictures that are not PNG/JPEG (for example EMF, WMF, SVG, or WDP), or whose
 dimensions cannot be read, are omitted with an `omitted` diagnostic naming the
