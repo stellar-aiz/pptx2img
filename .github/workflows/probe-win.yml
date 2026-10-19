@@ -1,0 +1,27 @@
+name: probe
+on:
+  push:
+    branches: [chore/fleet-freeform-66]
+jobs:
+  p:
+    runs-on: windows-2025
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - shell: pwsh
+        run: |
+          $msi = Join-Path $env:RUNNER_TEMP 'lo.msi'
+          Invoke-WebRequest -Uri https://downloadarchive.documentfoundation.org/libreoffice/old/26.2.5.2/win/x86_64/LibreOffice_26.2.5.2_Win_x86-64.msi -OutFile $msi
+          Start-Process msiexec.exe -Wait -ArgumentList '/i', $msi, '/qn', '/norestart'
+          $d = "$env:ProgramFiles\LibreOffice\program"
+          Get-ChildItem $d -Filter soffice* | Select-Object Name
+          foreach ($exe in 'soffice.exe','soffice.com') {
+            $p = Start-Process -FilePath "$d\$exe" -ArgumentList '--version' -PassThru -RedirectStandardOutput "$env:RUNNER_TEMP\o-$exe.txt" -NoNewWindow
+            $done = $p.WaitForExit(90000)
+            "$exe exited=$done"
+            Get-Content "$env:RUNNER_TEMP\o-$exe.txt" -ErrorAction SilentlyContinue
+            if (-not $done) { Stop-Process -Id $p.Id -Force }
+          }
+          $p = Start-Process -FilePath "$d\soffice.exe" -ArgumentList '--headless','--convert-to','pdf','--outdir',"$env:RUNNER_TEMP\out","$PWD\examples\text-bullets.pptx" -PassThru -NoNewWindow
+          "convert exited=$($p.WaitForExit(150000))"
+          Get-ChildItem "$env:RUNNER_TEMP\out" -ErrorAction SilentlyContinue
