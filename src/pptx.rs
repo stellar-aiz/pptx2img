@@ -462,6 +462,7 @@ fn render_slide(
                 .iter()
                 .find(|n| n.has_tag_name((P, "sldMaster")))
                 .and_then(|n| child(*n, P, "txStyles")),
+            mirrored: false,
         };
         for (position, node) in tree.children().filter(|n| n.is_element()).enumerate() {
             if index > 0 && layout::placeholder(node).is_some() {
@@ -547,6 +548,8 @@ fn render_shape(
         bail!("Shape dimensions are negative");
     }
     let mut text_svg = String::new();
+    // Horizontal centre (in shape coordinates) of the final text rectangle.
+    let mut text_center = w / 2.0;
     if let Some(body) = child(node, P, "txBody") {
         // Measure within the shape's text area. Height changes may also change its width,
         // so measure again at the final size. Do not search for a new saved fontScale.
@@ -559,6 +562,7 @@ fn render_shape(
                 .map(|g| g.text)
                 .unwrap_or((0.0, 0.0, w, h));
             text_svg.clear();
+            text_center = rect.0 + rect.2 / 2.0;
             text_svg.push_str(&format!(
                 "<g transform=\"translate({} {})\">",
                 rect.0, rect.1
@@ -619,6 +623,15 @@ fn render_shape(
     } else {
         1
     };
+    // Flips mirror the geometry, never the glyphs. When the net transform (this shape and
+    // its ancestor groups) is a mirror, mirror the text once more around its rectangle's
+    // centre: flipH reads normally and flipV turns the text 180 degrees, as LibreOffice does.
+    if (fx != fy) != shape.mirrored && !text_svg.is_empty() {
+        text_svg = format!(
+            "<g transform=\"translate({} 0) scale(-1 1)\">{text_svg}</g>",
+            2.0 * text_center
+        );
+    }
     svg.push_str(&format!(
         "<g transform=\"translate({} {}) rotate({rotation}) scale({fx} {fy}) translate({} {})\">",
         x + w / 2.0,
