@@ -718,3 +718,99 @@ fn preset_autofit_bounds_degenerate_areas_and_keeps_final_diagnostics_once() {
         }
     }
 }
+
+fn table_deck(heights: &[i32], widths: &[i32], text_row: usize) -> String {
+    let grid: String = widths
+        .iter()
+        .map(|w| format!(r#"<a:gridCol w="{}"/>"#, w * 9525))
+        .collect();
+    let rows: String = heights
+        .iter()
+        .enumerate()
+        .map(|(i, h)| {
+            let text = if i == text_row {
+                r#"<a:txBody><a:bodyPr/><a:p><a:r><a:rPr sz="1200"><a:latin typeface="Pptx2img Metrics Test"/></a:rPr><a:t>AA</a:t></a:r></a:p></a:txBody>"#
+            } else {
+                ""
+            };
+            let cells: String = widths
+                .iter()
+                .map(|_| {
+                    format!(
+                        r#"<a:tc>{text}<a:tcPr><a:solidFill><a:srgbClr val="00FF00"/></a:solidFill></a:tcPr></a:tc>"#
+                    )
+                })
+                .collect();
+            format!(r#"<a:tr h="{}">{cells}</a:tr>"#, h * 9525)
+        })
+        .collect();
+    format!(
+        r#"<p:graphicFrame><p:xfrm><a:off x="0" y="0"/><a:ext cx="{}" cy="{}"/></p:xfrm><a:graphic><a:graphicData><a:tbl><a:tblGrid>{grid}</a:tblGrid>{rows}</a:tbl></a:graphicData></a:graphic></p:graphicFrame>"#,
+        widths.iter().sum::<i32>() * 9525,
+        60 * 9525
+    )
+}
+
+#[test]
+fn zero_height_table_row_is_rendered_with_its_text_and_warns() {
+    let dir = tempfile::tempdir().unwrap();
+    let input = dir.path().join("a.pptx");
+    let out = dir.path().join("out");
+    write_deck(
+        &input,
+        page("sld", "", "", &table_deck(&[20, 0, 20], &[100], 1)),
+        vec![],
+    );
+    check(run(&input, &out, false));
+    let img = image(&out);
+    // The zero-height row takes the 20px left over by the other rows.
+    assert_eq!(rgb(&img, 90, 30), (0, 255, 0));
+    let dark = (0..100)
+        .flat_map(|x| (22..38).map(move |y| (x, y)))
+        .filter(|&(x, y)| img.pixel(x, y).unwrap().green() < 128)
+        .count();
+    assert!(dark > 10, "no text pixels in the zero-height row");
+    let manifest = fs::read_to_string(out.join("manifest.json")).unwrap();
+    assert!(manifest.contains("Table rows with zero height"));
+    // Strict mode treats the approximation as a failure.
+    assert!(
+        !run(&input, &dir.path().join("strict"), true)
+            .status
+            .success()
+    );
+}
+
+#[test]
+fn all_zero_height_table_rows_share_the_frame_height() {
+    let dir = tempfile::tempdir().unwrap();
+    let input = dir.path().join("a.pptx");
+    let out = dir.path().join("out");
+    write_deck(
+        &input,
+        page("sld", "", "", &table_deck(&[0, 0], &[100], 1)),
+        vec![],
+    );
+    check(run(&input, &out, false));
+    assert_eq!(rgb(&image(&out), 90, 50), (0, 255, 0));
+}
+
+#[test]
+fn negative_row_height_and_zero_column_width_are_still_rejected() {
+    for (heights, widths) in [(vec![-20, 20], vec![100]), (vec![20, 20], vec![50, 0])] {
+        let dir = tempfile::tempdir().unwrap();
+        let input = dir.path().join("a.pptx");
+        let out = dir.path().join("out");
+        write_deck(
+            &input,
+            page("sld", "", "", &table_deck(&heights, &widths, 99)),
+            vec![],
+        );
+        let result = run(&input, &out, false);
+        assert!(!result.status.success());
+        assert!(!out.exists());
+        assert!(
+            String::from_utf8_lossy(&result.stderr)
+                .contains("Invalid table row or column dimensions")
+        );
+    }
+}

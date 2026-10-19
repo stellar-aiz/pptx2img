@@ -214,12 +214,35 @@ impl<'d> Renderer<'_, 'd> {
             .children()
             .filter(|n| n.has_tag_name((A, "tr")))
             .collect();
-        let heights: Vec<_> = rows.iter().map(|n| number(*n, "h", 0.0) / EMU).collect();
+        let mut heights: Vec<_> = rows.iter().map(|n| number(*n, "h", 0.0) / EMU).collect();
+        // `a:tr/@h` is a minimum height, so zero is valid; negative values are not.
         if widths.is_empty()
             || heights.is_empty()
-            || widths.iter().chain(&heights).any(|v| *v <= 0.0)
+            || widths.iter().any(|v| *v <= 0.0)
+            || heights.iter().any(|v| *v < 0.0)
         {
             bail!("Invalid table row or column dimensions");
+        }
+        let zero_rows = heights.iter().filter(|v| **v == 0.0).count();
+        if zero_rows > 0 {
+            // Content-based growth is not implemented: share the frame height left over
+            // by the explicit rows among the zero-height rows instead.
+            let remaining = h - heights.iter().sum::<f64>();
+            let share = if remaining > 0.0 {
+                remaining / zero_rows as f64
+            } else {
+                h / heights.len() as f64
+            };
+            if share <= 0.0 {
+                bail!("Invalid table row or column dimensions");
+            }
+            for v in heights.iter_mut().filter(|v| **v == 0.0) {
+                *v = share;
+            }
+            self.warnings.push(
+                Code::Approximation,
+                "Table rows with zero height use a share of the frame height instead of fitting their content",
+            );
         }
         let style_source = table_styles::load(self.parts, table, self.warnings)?;
         let style_doc = style_source.as_deref().map(Document::parse).transpose()?;
