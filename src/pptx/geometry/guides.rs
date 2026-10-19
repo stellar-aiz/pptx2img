@@ -63,6 +63,21 @@ pub(super) fn render(
             }
         }
     }
+    // Only paths without fill keep line-end markers.
+    let svg = paint(&paths, style, |path| !path.fill);
+    finish(svg, &paths, text, (w, h), "Preset shape", warnings)
+}
+
+/// The geometry, or an empty outline with the whole-shape text area (and a warning)
+/// when a guide made a path or the text rectangle non-finite.
+fn finish(
+    svg: String,
+    paths: &[Path],
+    text: Option<(f64, f64, f64, f64)>,
+    (w, h): (f64, f64),
+    kind: &str,
+    warnings: &mut Warnings,
+) -> Geometry {
     let text = text.unwrap_or((0.0, 0.0, w, h));
     let text_finite = [text.0, text.1, text.2, text.3]
         .iter()
@@ -70,21 +85,26 @@ pub(super) fn render(
     if !text_finite || paths.iter().any(|p| !p.finite) {
         warn(
             warnings,
-            "Preset shape guides produced non-finite values; outline omitted",
+            format!("{kind} guides produced non-finite values; outline omitted"),
         );
         return Geometry {
             svg: String::new(),
             text: (0.0, 0.0, w, h),
         };
     }
-    // Paint every path inside one group so per-path fill/stroke overrides inherit the
-    // shape style; only open paths without fill keep line-end markers.
+    Geometry { svg, text }
+}
+
+/// Paint every path inside one group so per-path fill/stroke overrides inherit the
+/// shape style. `markers` decides which paths keep line-end markers.
+fn paint(paths: &[Path], style: &str, markers: impl Fn(&Path) -> bool) -> String {
     let mut svg = format!("<g {style}>");
     for path in paths {
         let mut attrs = String::new();
         if !path.fill {
             attrs.push_str(" fill=\"none\"");
-        } else {
+        }
+        if !markers(path) {
             attrs.push_str(" marker-start=\"none\" marker-end=\"none\"");
         }
         if !path.stroke {
@@ -93,7 +113,108 @@ pub(super) fn render(
         svg.push_str(&format!("<path d=\"{}\"{attrs}/>", path.data.trim()));
     }
     svg.push_str("</g>");
-    Geometry { svg, text }
+    svg
+}
+
+/// Custom geometry (`a:custGeom`, §20.1.9.8): guides from `a:avLst` and `a:gdLst`, the
+/// text rectangle from `a:rect`, and `a:pathLst` drawn with the preset path evaluator.
+/// Guides and `a:rect` are evaluated in EMU, the shape coordinate space; each path is
+/// scaled from its own `w`/`h` space (EMU when omitted) to the `w`×`h` pixel box.
+pub(super) fn custom(
+    node: Node<'_, '_>,
+    w: f64,
+    h: f64,
+    style: &str,
+    warnings: &mut Warnings,
+) -> Geometry {
+    let mut guides = Guides::new(w * EMU, h * EMU);
+    let lists = ["avLst", "gdLst"].map(|name| child(node, A, name));
+    for guide in lists
+        .iter()
+        .flatten()
+        .flat_map(|list| list.children())
+        .filter(|n| n.has_tag_name((A, "gd")))
+    {
+        let tokens: Vec<&str> = guide
+            .attribute("fmla")
+            .unwrap_or("")
+            .split_whitespace()
+            .collect();
+        let value = guides.formula(&tokens);
+        guides
+            .values
+            .insert(guide.attribute("name").unwrap_or("").into(), value);
+    }
+    let text = child(node, A, "rect").map(|rect| {
+        let [l, t, r, b] =
+            ["l", "t", "r", "b"].map(|k| guides.get(rect.attribute(k).unwrap_or("")) / EMU);
+        (l, t, r - l, b - t)
+    });
+    let mut paths = Vec::new();
+    for source in child(node, A, "pathLst")
+        .into_iter()
+        .flat_map(|list| list.children())
+        .filter(|n| n.has_tag_name((A, "path")))
+    {
+        let size = |key: &str, extent: f64| {
+            let value = number(source, key, 0.0);
+            if value > 0.0 {
+                extent / value
+            } else {
+                1.0 / EMU
+            }
+        };
+        let fill = source.attribute("fill").unwrap_or("norm");
+        if fill != "norm" && fill != "none" {
+            warnings.push(
+                Code::Approximation,
+                format!("Custom geometry path fill mode {fill} is drawn as a normal fill"),
+            );
+        }
+        let mut path = Path::scaled(
+            fill != "none",
+            !matches!(source.attribute("stroke"), Some("0" | "false")),
+            (size("w", w), size("h", h)),
+        );
+        for segment in source.children().filter(|n| n.is_element()) {
+            let command = match segment.tag_name().name() {
+                "moveTo" => "M",
+                "lnTo" => "L",
+                "cubicBezTo" => "C",
+                "quadBezTo" => "Q",
+                "arcTo" => "A",
+                "close" => "Z",
+                other => {
+                    warn(
+                        warnings,
+                        format!("Unsupported custom geometry path command: {other}"),
+                    );
+                    continue;
+                }
+            };
+            // SVG path data must start with a move; DrawingML starts at the origin.
+            if path.data.is_empty() && command != "M" {
+                path.command("M", &[0.0, 0.0]);
+            }
+            let values: Vec<f64> = if command == "A" {
+                ["wR", "hR", "stAng", "swAng"]
+                    .iter()
+                    .map(|k| guides.get(segment.attribute(*k).unwrap_or("")))
+                    .collect()
+            } else {
+                segment
+                    .children()
+                    .filter(|n| n.has_tag_name((A, "pt")))
+                    .flat_map(|pt| ["x", "y"].map(|k| guides.get(pt.attribute(k).unwrap_or(""))))
+                    .collect()
+            };
+            path.command(command, &values);
+        }
+        paths.push(path);
+    }
+    // Line-end markers belong on open paths only.
+    let svg = paint(&paths, style, |path| !path.data.contains('Z'));
+    finish(svg, &paths, text, (w, h), "Custom geometry", warnings)
 }
 
 struct Guides {
@@ -217,11 +338,18 @@ impl Path {
                 .filter(|v| *v > 0.0)
                 .map_or(1.0, |v| extent / v)
         };
+        Self::scaled(
+            !attrs.contains(&"nofill"),
+            !attrs.contains(&"nostroke"),
+            (size("w=", w), size("h=", h)),
+        )
+    }
+    fn scaled(fill: bool, stroke: bool, scale: (f64, f64)) -> Self {
         Self {
             data: String::new(),
-            fill: !attrs.contains(&"nofill"),
-            stroke: !attrs.contains(&"nostroke"),
-            scale: (size("w=", w), size("h=", h)),
+            fill,
+            stroke,
+            scale,
             current: (0.0, 0.0),
             finite: true,
         }
@@ -840,6 +968,67 @@ mod tests {
         [(a.0, b.0), (a.1, b.1), (a.2, b.2), (a.3, b.3)]
             .iter()
             .all(|(x, y)| (x - y).abs() < 1e-6)
+    }
+    fn custom_geometry(inner: &str, w: f64, h: f64) -> (Geometry, Vec<String>) {
+        let source = format!(r#"<a:custGeom xmlns:a="{A}">{inner}</a:custGeom>"#);
+        let doc = Document::parse(&source).unwrap();
+        let mut warnings = Warnings::default();
+        let geometry = custom(doc.root_element(), w, h, "", &mut warnings);
+        (geometry, warnings.into_parts().0)
+    }
+    #[test]
+    fn custom_guides_feed_the_path_and_text_rectangle() {
+        // 60x40 px shape = 571500x381000 EMU. Guides chain through each other and the
+        // built-in w/h/hc; the path space is the shape space (no w/h on the path).
+        let (geometry, warnings) = custom_geometry(
+            r#"<a:avLst/><a:gdLst><a:gd name="inset" fmla="*/ w 1 4"/><a:gd name="right" fmla="+- w 0 inset"/><a:gd name="mid" fmla="val vc"/><a:gd name="top" fmla="*/ mid 1 2"/></a:gdLst><a:rect l="inset" t="top" r="right" b="b"/><a:pathLst><a:path><a:moveTo><a:pt x="inset" y="t"/></a:moveTo><a:lnTo><a:pt x="right" y="t"/></a:lnTo><a:lnTo><a:pt x="hc" y="mid"/></a:lnTo><a:close/></a:path></a:pathLst>"#,
+            60.0,
+            40.0,
+        );
+        assert!(warnings.is_empty(), "{warnings:?}");
+        assert!(
+            geometry.svg.contains("<path d=\"M15 0 L45 0 L30 20 Z\""),
+            "{}",
+            geometry.svg
+        );
+        assert!(
+            close(geometry.text, (15.0, 10.0, 30.0, 30.0)),
+            "{:?}",
+            geometry.text
+        );
+    }
+    #[test]
+    fn custom_paths_scale_from_their_own_space_and_keep_flags() {
+        let (geometry, warnings) = custom_geometry(
+            r#"<a:pathLst><a:path w="100" h="100" stroke="0"><a:moveTo><a:pt x="0" y="0"/></a:moveTo><a:cubicBezTo><a:pt x="50" y="0"/><a:pt x="100" y="50"/><a:pt x="100" y="100"/></a:cubicBezTo><a:quadBezTo><a:pt x="0" y="100"/><a:pt x="0" y="0"/></a:quadBezTo><a:close/></a:path><a:path w="100" h="100" fill="none"><a:moveTo><a:pt x="100" y="50"/></a:moveTo><a:arcTo wR="50" hR="50" stAng="0" swAng="10800000"/></a:path><a:path w="10" h="10" fill="darken" extrusionOk="0"><a:lnTo><a:pt x="10" y="10"/></a:lnTo></a:path></a:pathLst>"#,
+            60.0,
+            40.0,
+        );
+        let svg = &geometry.svg;
+        assert!(
+            svg.contains(r#"<path d="M0 0 C30 0 60 20 60 40 Q0 40 0 0 Z" marker-start="none" marker-end="none" stroke="none"/>"#),
+            "{svg}"
+        );
+        // Open, unfilled arc: half an ellipse from the right edge clockwise to the left.
+        assert!(
+            svg.contains(r#"<path d="M60 20 A30 20 0 0 1 30 40 A30 20 0 0 1 0 20" fill="none"/>"#),
+            "{svg}"
+        );
+        // A path that starts without a move begins at the origin.
+        assert!(svg.contains(r#"<path d="M0 0 L60 40"/>"#), "{svg}");
+        assert_eq!(geometry.text, (0.0, 0.0, 60.0, 40.0));
+        assert_eq!(warnings.len(), 1, "{warnings:?}");
+        assert!(warnings[0].contains("darken"), "{warnings:?}");
+    }
+    #[test]
+    fn custom_geometry_with_unknown_guides_is_omitted() {
+        let (geometry, warnings) = custom_geometry(
+            r#"<a:pathLst><a:path><a:moveTo><a:pt x="missing" y="0"/></a:moveTo></a:path></a:pathLst>"#,
+            60.0,
+            40.0,
+        );
+        assert!(geometry.svg.is_empty());
+        assert!(warnings[0].contains("non-finite"), "{warnings:?}");
     }
     #[test]
     fn formulas_follow_the_guide_operators() {

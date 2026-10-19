@@ -33,6 +33,17 @@ fn adjustments(node: Node<'_, '_>, defaults: &[(&str, f64)], warnings: &mut Warn
     values
 }
 
+/// Freeform outline and text rectangle of an `a:custGeom` element.
+pub(super) fn custom(
+    node: Node<'_, '_>,
+    w: f64,
+    h: f64,
+    style: &str,
+    warnings: &mut Warnings,
+) -> Geometry {
+    guides::custom(node, w, h, style, warnings)
+}
+
 pub(super) fn preset(
     node: Node<'_, '_>,
     w: f64,
