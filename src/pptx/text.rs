@@ -688,7 +688,11 @@ pub(super) fn render<'a>(
                 }
             }
         }
-        let marker = counters.label(&paragraph_props, level, warnings);
+        // The counter is advanced for every paragraph so numbering stays as before;
+        // the marker is drawn only when the paragraph has visible text.
+        let marker = counters
+            .label(&paragraph_props, level, warnings)
+            .filter(|_| all.iter().any(|g| !g.ch.is_whitespace()));
         let marker_glyphs = marker
             .as_deref()
             .map(|text| {
@@ -1643,6 +1647,39 @@ mod tests {
                 assert_eq!(x(*span), margin as f64 / EMU);
             }
         }
+    }
+    #[test]
+    fn empty_or_whitespace_paragraphs_draw_no_bullet_marker() {
+        let bullet = r#"<a:pPr marL="190500" indent="-190500"><a:buFont typeface="Pptx2img Metrics Test"/><a:buChar char="A"/></a:pPr>"#;
+        let tail = r#"<a:p><a:r><a:t>B</a:t></a:r></a:p>"#;
+        let marker_count = |svg: &str| {
+            let root = format!("<svg>{svg}</svg>");
+            let doc = Document::parse(&root).unwrap();
+            let n = doc
+                .descendants()
+                .filter(|n| n.has_tag_name("tspan") && n.text() == Some("A"))
+                .count();
+            let y = doc
+                .descendants()
+                .filter(|n| n.has_tag_name("text"))
+                .filter_map(|n| n.attribute("y").and_then(|v| v.parse::<f64>().ok()))
+                .next_back();
+            (n, y)
+        };
+        let base = format!("<a:p>{bullet}<a:endParaRPr/></a:p>{tail}");
+        let (svg, _) = inherited_fixture(&base, "900");
+        let (markers, y_empty) = marker_count(&svg);
+        assert_eq!(markers, 0);
+        let spaced = format!(r#"<a:p>{bullet}<a:r><a:t> </a:t></a:r></a:p>{tail}"#);
+        let (svg, _) = inherited_fixture(&spaced, "900");
+        assert_eq!(marker_count(&svg).0, 0);
+        let filled = format!(r#"<a:p>{bullet}<a:r><a:t>B</a:t></a:r></a:p>{tail}"#);
+        let (svg, _) = inherited_fixture(&filled, "900");
+        let (markers, y_filled) = marker_count(&svg);
+        assert_eq!(markers, 1);
+        // The empty paragraph keeps its line height.
+        assert!(y_empty.is_some());
+        assert_eq!(y_empty, y_filled);
     }
     #[test]
     fn non_bullet_indent_only_moves_first_line_and_keeps_hard_breaks() {
