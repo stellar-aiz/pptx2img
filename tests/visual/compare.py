@@ -97,6 +97,12 @@ def diagnostic_summary(diagnostics: list[dict] | None) -> dict:
     return {"available": True, "by_code": counts, "has_omissions": counts.get("omitted", 0) > 0}
 
 
+def visible_slides(manifest: dict) -> list[dict]:
+    """Slides that have a LibreOffice PDF page. PDF export skips hidden slides, so drop hidden entries
+    (schema 3 `hidden`) before pairing by page order. Manifests without the field are used as-is."""
+    return [slide for slide in manifest["slides"] if not slide.get("hidden", False)]
+
+
 def execute(command: list[str], directory: Path, name: str, env: dict) -> str:
     (directory / f"{name}.command.json").write_text(json.dumps(command, ensure_ascii=False, indent=2), encoding="utf-8")
     # Preserve partial logs on timeouts and failures.
@@ -247,8 +253,13 @@ def run(args: argparse.Namespace) -> bool:
             command.append("--punctuation-compression")
         execute(command, out, "pptx2img", env)
         manifest = json.loads((out / "actual/manifest.json").read_text(encoding="utf-8"))
+        pages = visible_slides(manifest)
+        report["hidden_slides"] = {
+            "rendered_and_excluded": [slide["slide"] for slide in manifest["slides"] if slide not in pages],
+            "skipped_by_renderer": manifest.get("skipped_hidden_slides"),
+        }
         report["renderer_fonts"] = manifest.get("fonts")
-        if any(region["slide"] > len(manifest["slides"]) for region in regions):
+        if any(region["slide"] > len(pages) for region in regions):
             raise ValueError("Region page number exceeds the slide count")
         reference_dir = out / "reference"
         reference_dir.mkdir()
@@ -265,9 +276,11 @@ def run(args: argparse.Namespace) -> bool:
         (out / "diff").mkdir()
         with pdfium.PdfDocument(pdf_path) as document:
             report["reference_pdf_fonts"] = pdf_fonts(document)
-            if len(document) != len(manifest["slides"]) or len(document) == 0:
-                raise ValueError(f"Page counts differ: PPTX={len(manifest['slides'])}, PDF={len(document)}")
-            for index, slide in enumerate(manifest["slides"]):
+            if len(document) != len(pages) or len(document) == 0:
+                raise ValueError(
+                    f"Page counts differ: PPTX={len(pages)}, PDF={len(document)}. A renderer older than "
+                    "manifest schema 3 draws hidden slides that LibreOffice skips; rebuild pptx2img")
+            for index, slide in enumerate(pages):
                 name = f"slide-{index + 1:03}.png"
                 with Image.open(out / "actual" / slide["image"]) as loaded:
                     actual = loaded.convert("RGB")
@@ -294,7 +307,7 @@ def run(args: argparse.Namespace) -> bool:
                     [region for region in regions if region["slide"] == index + 1],
                     args.pixel_tolerance, args.max_mae, args.max_changed_ratio)
                 diagnostics = slide.get("diagnostics")
-                metrics.update({"slide": index + 1, "passed": passes(metrics, args.max_mae, args.max_changed_ratio),
+                metrics.update({"slide": index + 1, "deck_slide": slide.get("slide", index + 1), "passed": passes(metrics, args.max_mae, args.max_changed_ratio),
                     "renderer_warnings": slide["warnings"], "renderer_diagnostics": diagnostics,
                     "diagnostic_summary": diagnostic_summary(diagnostics),
                     "regions": local, "regions_passed": all(item["passed"] for item in local) if local else None})

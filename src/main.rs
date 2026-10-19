@@ -30,6 +30,9 @@ struct Args {
     /// Compress punctuation spacing to fit lines (experimental; disabled by default)
     #[arg(long)]
     punctuation_compression: bool,
+    /// Also render slides hidden in the deck (skipped by default)
+    #[arg(long)]
+    include_hidden: bool,
     /// Additional font file (repeatable)
     #[arg(long)]
     font_file: Vec<PathBuf>,
@@ -107,6 +110,7 @@ fn main() {
             font_file: args.font_file,
             no_system_fonts: args.no_system_fonts,
             font_mapping: args.font_map.into_iter().collect(),
+            include_hidden: args.include_hidden,
         },
     ) {
         Ok(report) => {

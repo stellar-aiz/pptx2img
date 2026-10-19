@@ -20,6 +20,18 @@ the manifest is written only after successful completion.
 
 Output width must be 64–4096 pixels. See `pptx2img --help` for all arguments.
 
+## Hidden slides
+
+Slides marked hidden in PowerPoint (`p:sld/@show="0"`) are skipped by default, like
+PowerPoint's PDF export and slide show; the images show what the audience sees.
+Pass `--include-hidden` to render them too (`ConvertOptions.include_hidden` in the
+library). Image names and `slides[].slide` use the one-based position in the deck,
+counting hidden slides, so skipped slides leave gaps: a deck whose slide 2 is hidden
+produces `slide-001.png` and `slide-003.png`. A deck whose slides are all hidden fails
+unless `--include-hidden` is given. A skipped slide is parsed once to read its `show`
+attribute and is not rendered, so its content produces no warnings. Skipped slides
+count toward the 200-slide limit.
+
 ## Font discovery and fallback
 
 System fonts are loaded by default. This is not an exhaustive search of the
@@ -113,7 +125,10 @@ quoted and escaped, including newlines and punctuation in paths and font names.
 
 ## Manifest diagnostics
 
-The manifest uses `schema_version: 2`. `slides[].warnings` contains deduplicated
+The manifest uses `schema_version: 3`. Version 3 adds `include_hidden`,
+`skipped_hidden_slides` (deck positions of hidden slides that were not rendered), and
+`slides[].hidden`; consumers that pair images with another export should use
+`slides[].slide` rather than the array index. `slides[].warnings` contains deduplicated
 messages; `slides[].diagnostics` retains separate records for different targets,
 even when their warning text is the same. The slide number is on the parent entry.
 
