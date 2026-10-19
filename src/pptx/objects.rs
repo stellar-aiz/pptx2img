@@ -222,7 +222,9 @@ impl<'d> Renderer<'_, 'd> {
         let t = child(node, P, "xfrm").context("Missing table transform")?;
         // The frame height only sets the rotation centre: rows keep their stored minimum
         // heights and grow to fit their content, so the table may end above or below it.
-        let (w, _, _) = transform(t, self.svg)?;
+        let (w, _, frame_mirrored) = transform(t, self.svg)?;
+        // Cell text is un-mirrored like shape text when the net transform is a mirror.
+        let mirrored = frame_mirrored != self.mirrored;
         let grid = child(table, A, "tblGrid").context("Missing table column widths")?;
         let widths: Vec<_> = grid
             .children()
@@ -458,15 +460,18 @@ impl<'d> Renderer<'_, 'd> {
                 }
             }
             if let Some(body) = text_body(cell) {
+                let mut text_svg = String::new();
                 text::render(
                     body,
                     cw,
                     ch,
                     self.theme,
                     self.options,
-                    self.svg,
+                    &mut text_svg,
                     self.warnings,
                 );
+                self.svg
+                    .push_str(&unmirror_text(text_svg, mirrored, cw / 2.0));
             }
             self.svg.push_str("</g>");
         }

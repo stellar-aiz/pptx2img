@@ -151,7 +151,9 @@ grow to fit their text and are not stretched to the frame; see
 
 Generate rectangles, an arrow, and groups with `flipH`/`flipV` that all carry a
 left-aligned label, plus per-cell regions. Geometry is mirrored; text is never
-mirrored (`flipV` turns it 180 degrees, as in LibreOffice).
+mirrored (`flipV` turns it 180 degrees, as in LibreOffice). Slide 2 adds one-cell tables
+placed directly and inside flipped groups; LibreOffice does not mirror those tables, so
+their regions differ from the reference by design (see `docs/rendering.md`).
 
 ```sh
 .venv-visual/bin/python tests/visual/make_flipped_text.py examples/flipped-text.pptx

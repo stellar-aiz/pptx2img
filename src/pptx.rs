@@ -340,6 +340,21 @@ fn is_media(kind: &str) -> bool {
         .any(|suffix| kind.ends_with(suffix))
 }
 
+/// Cancel a net mirror for text. Flips mirror the geometry, never the glyphs: when the net
+/// transform (the element and its ancestor groups) is a mirror, mirror the text once more
+/// around the vertical line `center` (the centre of its final text rectangle, in the
+/// element's own coordinates). flipH then reads normally and flipV turns the text 180
+/// degrees, as LibreOffice does.
+fn unmirror_text(text_svg: String, mirrored: bool, center: f64) -> String {
+    if mirrored && !text_svg.is_empty() {
+        format!(
+            "<g transform=\"translate({} 0) scale(-1 1)\">{text_svg}</g>",
+            2.0 * center
+        )
+    } else {
+        text_svg
+    }
+}
 fn color(node: Node<'_, '_>, default: &str, theme: &Theme, warnings: &mut Warnings) -> String {
     colors::resolve(node, default, theme, None, warnings)
 }
@@ -623,15 +638,8 @@ fn render_shape(
     } else {
         1
     };
-    // Flips mirror the geometry, never the glyphs. When the net transform (this shape and
-    // its ancestor groups) is a mirror, mirror the text once more around its rectangle's
-    // centre: flipH reads normally and flipV turns the text 180 degrees, as LibreOffice does.
-    if (fx != fy) != shape.mirrored && !text_svg.is_empty() {
-        text_svg = format!(
-            "<g transform=\"translate({} 0) scale(-1 1)\">{text_svg}</g>",
-            2.0 * text_center
-        );
-    }
+    // Flips mirror the geometry, never the glyphs.
+    text_svg = unmirror_text(text_svg, (fx != fy) != shape.mirrored, text_center);
     svg.push_str(&format!(
         "<g transform=\"translate({} {}) rotate({rotation}) scale({fx} {fy}) translate({} {})\">",
         x + w / 2.0,
