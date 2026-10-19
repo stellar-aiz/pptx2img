@@ -14,6 +14,7 @@ mod diagnostics;
 mod effects;
 mod fonts;
 mod geometry;
+mod gradients;
 pub(crate) use fonts::Resolver as FontResolver;
 mod layout;
 mod lines;
@@ -337,6 +338,22 @@ fn fill(node: Node<'_, '_>, default: &str, theme: &Theme, warnings: &mut Warning
     }
     default.into()
 }
+/// Like `fill`, but also paints `gradFill` by adding a gradient definition to `svg`.
+fn paint(
+    node: Node<'_, '_>,
+    default: &str,
+    theme: &Theme,
+    size: (f64, f64),
+    rotated: bool,
+    svg: &mut String,
+    warnings: &mut Warnings,
+) -> String {
+    match child(node, A, "gradFill") {
+        Some(gradient) => gradients::define(gradient, theme, size, rotated, svg, warnings)
+            .unwrap_or_else(|| default.into()),
+        None => fill(node, default, theme, warnings),
+    }
+}
 fn render_slide(
     parts: &Parts,
     name: &str,
@@ -370,15 +387,26 @@ fn render_slide(
     let background_node = roots
         .iter()
         .find_map(|r| child(*r, P, "cSld").and_then(|n| child(n, P, "bg")));
+    let mut background_defs = String::new();
     let background = background_node
         .and_then(|n| child(n, P, "bgPr"))
-        .map(|n| fill(n, "#ffffff", &theme, &mut warnings))
+        .map(|n| {
+            paint(
+                n,
+                "#ffffff",
+                &theme,
+                (width, height),
+                false,
+                &mut background_defs,
+                &mut warnings,
+            )
+        })
         .unwrap_or_else(|| "#ffffff".into());
     if background_node.and_then(|n| child(n, P, "bgRef")).is_some() {
         warn(&mut warnings, "Theme backgrounds are unsupported");
     }
     let mut svg = format!(
-        "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"{width}\" height=\"{height}\" viewBox=\"0 0 {width} {height}\"><rect width=\"100%\" height=\"100%\" fill=\"{background}\"/>"
+        "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"{width}\" height=\"{height}\" viewBox=\"0 0 {width} {height}\">{background_defs}<rect width=\"100%\" height=\"100%\" fill=\"{background}\"/>"
     );
     // Paint lower layers first and the slide last. Do not paint template sample text.
     for index in (0..roots.len()).rev() {
@@ -572,7 +600,7 @@ fn render_shape(
     {
         if !matches!(
             attr.tag_name().name(),
-            "xfrm" | "prstGeom" | "solidFill" | "noFill" | "ln" | "effectLst"
+            "xfrm" | "prstGeom" | "solidFill" | "noFill" | "gradFill" | "ln" | "effectLst"
         ) {
             warn(
                 warnings,
@@ -608,7 +636,15 @@ fn render_shape(
     } else {
         let explicit_fill = props_chain.iter().copied().find(|n| layout::has_fill(*n));
         let fill = if let Some(explicit) = explicit_fill {
-            fill(explicit, "none", theme, warnings)
+            paint(
+                explicit,
+                "none",
+                theme,
+                (w, h),
+                rotation != 0.0,
+                svg,
+                warnings,
+            )
         } else if let Some(reference) = style_node.and_then(|n| child(n, A, "fillRef")) {
             theme.fill_reference(reference, warnings)
         } else {

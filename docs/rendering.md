@@ -13,7 +13,9 @@ Strict mode gates known warnings, not all incompatibilities.
   evaluated from DrawingML shape guides.
 - Solid backgrounds, fills, and lines using RGB, system `lastClr`, and theme
   colors; selected [color transforms and theme fills](colors.md), including
-  translucent (`alpha`) fills, lines, and text, and `tint`/`shade`/`satMod`.
+  translucent (`alpha`) fills, lines, and text, and `tint`/`shade`/`satMod`;
+  linear and radial [gradient fills](colors.md#gradient-fills) on shapes and
+  backgrounds.
 - Slide -> layout -> master -> theme relationships, color mappings, and major/
   minor Latin and Japanese theme fonts, including the Jpan supplemental font.
 - Explicit font, size, color, bold/italic, and left/center/right paragraph alignment.
@@ -94,7 +96,8 @@ position and line-spacing differences still exceed existing image thresholds.
   complex shaping/ligatures/kerning, and dynamic autofit ratio calculation.
 - Identical baselines and fallback behavior across all fonts and Office renderers.
 - Charts, SmartArt, group-fill inheritance, freeform shapes, and many presets.
-- Full table theme-style coverage, gradients, inner shadows/glow, theme effects,
+- Full table theme-style coverage, theme/line/table-cell/text gradients,
+  inner shadows/glow, theme effects,
   and image tiling/effects/fill rectangles. Selected color alpha and outer shadows
   are supported; see the feature-specific notes for their limits.
 - EMF/WMF images, SVG data referenced directly from `a:blip/@r:embed`, text inside

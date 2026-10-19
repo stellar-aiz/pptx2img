@@ -18,6 +18,15 @@ pub(super) fn shadow_color(
     theme: &Theme,
     warnings: &mut Warnings,
 ) -> (String, f64) {
+    with_opacity(node, theme, warnings)
+}
+/// Resolve `#RRGGBB` and opacity separately (black when unresolvable), for SVG
+/// attributes that take opacity on their own, such as shadows and gradient stops.
+pub(super) fn with_opacity(
+    node: Node<'_, '_>,
+    theme: &Theme,
+    warnings: &mut Warnings,
+) -> (String, f64) {
     resolve_inner(node, theme, None, warnings).unwrap_or_else(|| ("#000000".into(), 1.0))
 }
 /// Append an 8-bit alpha channel only when the color is not fully opaque.

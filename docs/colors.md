@@ -58,3 +58,44 @@ RGB (25,163,252) to (210,237,254), closer to reference (209,237,254).
 The gray panel fill was reproduced; at that stage, surrounding shadow differences
 came from unsupported effectLst. See [later shadow support](shadows.md).
 Text and bullet differences are separate issues. Source images were not published.
+
+## Gradient fills
+
+Explicit `gradFill` on shapes (including presets and connectors' fill areas) and
+slide backgrounds renders as an SVG gradient in the fill box, in local shape
+coordinates so it follows rotation and flips. Stops come from `gsLst`, are sorted
+by `pos`, and use the color transforms above; stop alpha becomes `stop-opacity`.
+Before the first and after the last stop the end colors repeat.
+
+- `lin ang`: a linear gradient through the box center along the angle (clockwise,
+  y down) whose ends touch the box corners. Without `lin` or `path`, angle 0.
+- `lin scaled="1"`: the angle applies to a unit square that is stretched over the
+  box (the gradient is scaled with the shape). LibreOffice 26.2.5.2 ignores
+  `scaled`, so non-square scaled gradients differ from it; they produce an
+  `approximation` diagnostic because PowerPoint behavior was not verified.
+- `path`: a circular radial gradient with stop position 0 at the center of
+  `fillToRect` and position 1 at the farthest box corner. Only `circle` with a
+  centered focus matches LibreOffice; other focus positions and `rect`/`shape`
+  paths produce `approximation` diagnostics.
+- `rotWithShape="0"` on rotated shapes and non-zero `tileRect` produce
+  `approximation` diagnostics; the gradient still rotates with the shape and is
+  not tiled.
+
+Not covered: gradients from theme fill references (`fillRef` to a `gradFill` style,
+still warned), gradient lines, gradient table cells, and gradient text.
+
+Fixture: `python tests/visual/make_gradients.py /tmp/gradients.pptx`. Page 1 has
+linear 0°/90°/45° (unscaled and scaled), three stops, a translucent stop over
+stripes, and centered/corner radial gradients; page 2 has a gradient background,
+a full-width gradient band, a rotated chevron, and a radial oval.
+
+Comparison at 1600px with LibreOffice 26.2.5.2 (2026-10-19, unchanged thresholds):
+
+| Page | Before (`e103c5d`) | After |
+|---|---|---|
+| 1 | MAE 0.191180, changed 48.150% (fail) | MAE 0.010892, changed 4.784% |
+| 2 | MAE 0.184885, changed 76.458% (fail) | MAE 0.005589, changed 2.223% |
+
+Most of page 1's remaining difference is in the two known-different shapes (scaled
+45° on a wide box, and the corner-focus radial gradient), which are kept in the
+fixture as reproduction material.
