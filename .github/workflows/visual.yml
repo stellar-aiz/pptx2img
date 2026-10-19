@@ -73,10 +73,9 @@ jobs:
           $msi = Join-Path $env:RUNNER_TEMP 'libreoffice.msi'
           Invoke-WebRequest -Uri https://downloadarchive.documentfoundation.org/libreoffice/old/26.2.5.2/win/x86_64/LibreOffice_26.2.5.2_Win_x86-64.msi -OutFile $msi
           if ((Get-FileHash $msi -Algorithm SHA256).Hash.ToLower() -ne 'f15ba07bfcb0186986cf3171063506f5d207c11f8cc051ba0d135209e9e915f9') { throw 'LibreOffice installer differs from the pinned release' }
-          # Administrative extraction keeps the runner's installed programs untouched.
-          $target = Join-Path $env:RUNNER_TEMP 'lo'
-          Start-Process msiexec.exe -Wait -ArgumentList '/a', $msi, '/qn', "TARGETDIR=$target"
-          $soffice = Get-ChildItem -Path $target -Recurse -Filter soffice.exe | Where-Object { $_.DirectoryName -like '*\program' } | Select-Object -First 1
+          # The runner is an ephemeral VM; a regular install registers the profile LibreOffice needs to start.
+          Start-Process msiexec.exe -Wait -ArgumentList '/i', $msi, '/qn', '/norestart'
+          $soffice = Get-ChildItem -Path "$env:ProgramFiles\LibreOffice\program" -Filter soffice.exe | Select-Object -First 1
           if (-not $soffice) { throw 'soffice.exe not found after extraction' }
           "SOFFICE=$($soffice.FullName)" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
       - name: Install pinned Noto Sans CJK JP (Linux)
