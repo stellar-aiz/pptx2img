@@ -46,7 +46,14 @@ fn run(input: &Path, output: &Path, strict: bool) -> std::process::Output {
         .arg(input)
         .arg("--out")
         .arg(output)
-        .args(["--width", "100", "--font-fallback"]);
+        .args([
+            "--width",
+            "100",
+            "--font-fallback",
+            "--no-system-fonts",
+            "--font-file",
+        ])
+        .arg(Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/samples.ttf"));
     if strict {
         command.arg("--strict");
     }
@@ -193,6 +200,8 @@ fn library_matches_cli_pixels_and_manifest() {
     assert!(run(&input, &cli_out, false).status.success());
     let settings = ConvertOptions {
         width: 100,
+        no_system_fonts: true,
+        font_file: vec![Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/samples.ttf")],
         ..Default::default()
     };
     let report = convert(&input, &lib_out, &settings).unwrap();
