@@ -232,7 +232,8 @@ pub fn read(path: &Path, options: &RenderOptions<'_>, include_hidden: bool) -> R
         .filter(|n| n.has_tag_name((P, "sldId")))
         .enumerate()
     {
-        if slides.len() >= 200 {
+        // Count every slide entry, hidden or not: skipped slides are still parsed.
+        if position >= 200 {
             bail!("This release supports up to 200 slides");
         }
         let rid = id
@@ -242,18 +243,13 @@ pub fn read(path: &Path, options: &RenderOptions<'_>, include_hidden: bool) -> R
         if part.external || !part.kind.ends_with("/slide") {
             bail!("Invalid slide relationship");
         }
-        // `show` is an xsd:boolean attribute on p:sld that defaults to true.
-        let hidden = xml(&parts, &part.target)?
-            .root_element()
-            .attribute("show")
-            .is_some_and(|value| matches!(value.trim(), "0" | "false"));
-        if hidden && !include_hidden {
+        let Some(mut slide) =
+            render_slide(&parts, &part.target, width, height, options, include_hidden)?
+        else {
             skipped_hidden.push(position + 1);
             continue;
-        }
-        let mut slide = render_slide(&parts, &part.target, width, height, options)?;
+        };
         slide.number = position + 1;
-        slide.hidden = hidden;
         slides.push(slide);
     }
     if slides.is_empty() {
@@ -386,13 +382,22 @@ fn render_slide(
     width: f64,
     height: f64,
     options: &RenderOptions<'_>,
-) -> Result<Slide> {
+    include_hidden: bool,
+) -> Result<Option<Slide>> {
     let paths = layout::chain(parts, name)?;
     let docs = paths
         .iter()
         .map(|p| xml(parts, p))
         .collect::<Result<Vec<_>>>()?;
     let roots: Vec<_> = docs.iter().map(Document::root_element).collect();
+    // `show` is an xsd:boolean attribute on p:sld that defaults to true. The slide is the first
+    // part of the chain and is parsed once, so a skipped slide costs no further rendering work.
+    let hidden = roots[0]
+        .attribute("show")
+        .is_some_and(|value| matches!(value.trim(), "0" | "false"));
+    if hidden && !include_hidden {
+        return Ok(None);
+    }
     let mut warnings = Warnings::default();
     warnings.target = Target {
         part: name.into(),
@@ -480,13 +485,13 @@ fn render_slide(
     }
     svg.push_str("</svg>");
     let (warnings, diagnostics) = warnings.into_parts();
-    Ok(Slide {
+    Ok(Some(Slide {
         number: 0,
-        hidden: false,
+        hidden,
         svg,
         warnings,
         diagnostics,
-    })
+    }))
 }
 fn render_shape(
     shape: objects::Shape<'_>,

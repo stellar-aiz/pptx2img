@@ -28,8 +28,9 @@ Pass `--include-hidden` to render them too (`ConvertOptions.include_hidden` in t
 library). Image names and `slides[].slide` use the one-based position in the deck,
 counting hidden slides, so skipped slides leave gaps: a deck whose slide 2 is hidden
 produces `slide-001.png` and `slide-003.png`. A deck whose slides are all hidden fails
-unless `--include-hidden` is given. Hidden slides are not parsed for rendering, so
-their content produces no warnings or errors when skipped.
+unless `--include-hidden` is given. A skipped slide is parsed once to read its `show`
+attribute and is not rendered, so its content produces no warnings. Skipped slides
+count toward the 200-slide limit.
 
 ## Font discovery and fallback
 

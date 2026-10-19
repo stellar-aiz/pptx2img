@@ -149,3 +149,22 @@ fn all_hidden_deck_fails_with_a_pointer_to_the_flag() {
     assert!(output.status.success());
     assert_eq!(manifest["slides"].as_array().unwrap().len(), 2);
 }
+
+#[test]
+fn skipped_hidden_slides_count_toward_the_slide_limit() {
+    let mut shows = vec!["0"; 201];
+    shows[0] = "";
+    for extra in [&[][..], &["--include-hidden"][..]] {
+        let (output, _, _dir) = convert(&shows, extra);
+        assert!(!output.status.success());
+        assert!(String::from_utf8_lossy(&output.stderr).contains("200 slides"));
+    }
+    // Exactly 200 entries stay within the limit.
+    let (output, manifest, _dir) = convert(&shows[..200], &[]);
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(numbers(&manifest, "skipped_hidden_slides").len(), 199);
+}
