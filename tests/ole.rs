@@ -29,6 +29,9 @@ fn render(mode: &str) -> (Pixmap, serde_json::Value) {
         shapes = shapes.replace("<p:oleObj progId", "<mc:AlternateContent xmlns:mc=\"http://schemas.openxmlformats.org/markup-compatibility/2006\"><mc:Choice Requires=\"v\" xmlns:v=\"urn:schemas-microsoft-com:vml\"><p:oleObj progId=\"Choice.Document\"/></mc:Choice><mc:Fallback><p:oleObj progId")
             .replace("</p:oleObj>", "</p:oleObj></mc:Fallback></mc:AlternateContent>");
     }
+    if mode == "no-embed" {
+        shapes = shapes.replace(r#"<a:blip r:embed="preview"/>"#, "<a:blip/>");
+    }
     if mode == "hidden" {
         shapes = shapes.replace(
             "<p:pic>",
@@ -88,6 +91,7 @@ fn unavailable_previews_have_concrete_diagnostics() {
         ("missing", "Missing preview image"),
         ("unsupported", "only PNG/JPEG"),
         ("external", "External preview"),
+        ("no-embed", "Missing preview image reference"),
         ("missing-part", "Missing preview image part"),
         ("hidden", "is hidden"),
     ] {

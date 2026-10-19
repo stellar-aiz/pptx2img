@@ -21,6 +21,7 @@ mod objects;
 mod raster;
 mod table_styles;
 mod text;
+mod vector;
 pub use diagnostics::{Code as DiagnosticCode, Diagnostic, FontResolution};
 use diagnostics::{Code, Target, Warnings};
 mod theme;
@@ -720,6 +721,102 @@ fn fill_line(node: Node<'_, '_>, theme: &Theme, warnings: &mut Warnings) -> Stri
     }
     fill(node, "none", theme, warnings)
 }
+/// An image part ready to embed: its `href` and diagnostics to record if it is drawn.
+struct Picture {
+    href: String,
+    notes: Vec<(Code, String)>,
+}
+/// Data of the internal part that relationship `id` names, or why it cannot be used.
+fn embedded<'p>(
+    id: &str,
+    parts: &'p Parts,
+    rels: &'p Relationships,
+) -> Result<(&'p str, &'p [u8]), String> {
+    let part = rels
+        .get(id)
+        .ok_or_else(|| format!("Missing image relationship: {id}"))?;
+    if part.external {
+        return Err("Externally linked images are not loaded".into());
+    }
+    let data = parts
+        .get(&part.target)
+        .ok_or_else(|| format!("Missing image part: {}", part.target))?;
+    Ok((&part.target, data))
+}
+fn raster_picture<'p>(
+    id: &str,
+    parts: &'p Parts,
+    rels: &'p Relationships,
+) -> Result<Picture, String> {
+    let (target, data) = embedded(id, parts, rels)?;
+    // Sniff the format before probing dimensions: the probe cannot read EMF/WMF/SVG/WDP,
+    // and one undecodable picture must not abort the whole deck.
+    let mime = if data.starts_with(b"\x89PNG\r\n\x1a\n") {
+        "image/png"
+    } else if data.starts_with(b"\xff\xd8\xff") {
+        "image/jpeg"
+    } else {
+        return Err(format!("Only PNG/JPEG images are supported: {target}"));
+    };
+    let dimensions = imagesize::blob_size(data)
+        .map_err(|_| format!("Cannot read image dimensions: {target}"))?;
+    let (width, height) = (dimensions.width, dimensions.height);
+    match raster::prepare(target, data, mime, width, height) {
+        Ok(raster::Prepared::Embed) => Ok(Picture {
+            href: format!("data:{mime};base64,{}", STANDARD.encode(data)),
+            notes: vec![],
+        }),
+        Ok(raster::Prepared::Downscaled {
+            href,
+            width: tw,
+            height: th,
+        }) => Ok(Picture {
+            href: href.to_string(),
+            notes: vec![(
+                Code::Approximation,
+                format!(
+                    "Downscaled oversized image from {width}x{height} to {tw}x{th} px: {target}"
+                ),
+            )],
+        }),
+        Err(reason) => Err(format!("{reason}: {target}")),
+    }
+}
+/// An SVG picture; vector data bypasses the PNG/JPEG pixel policy and uses its own gate.
+// stellar:debt(perf) a layout or master SVG is checked and encoded again on every slide. upgrade: cache by part like raster downscales.
+fn svg_picture<'p>(id: &str, parts: &'p Parts, rels: &'p Relationships) -> Result<Picture, String> {
+    let (target, data) = embedded(id, parts, rels)?;
+    let has_text = vector::check(data).map_err(|reason| format!("{reason}: {target}"))?;
+    let mut notes = vec![];
+    if has_text {
+        notes.push((
+            Code::Unsupported,
+            format!("Text inside SVG pictures may not render: {target}"),
+        ));
+    }
+    Ok(Picture {
+        href: format!("data:image/svg+xml;base64,{}", STANDARD.encode(data)),
+        notes,
+    })
+}
+/// An `a:extLst` whose extensions hold only `asvg:svgBlip`.
+fn is_svg_extension(list: Node<'_, '_>) -> bool {
+    list.has_tag_name((A, "extLst"))
+        && list.children().filter(|n| n.is_element()).all(|ext| {
+            ext.has_tag_name((A, "ext"))
+                && ext
+                    .children()
+                    .filter(|n| n.is_element())
+                    .all(|n| n.has_tag_name((ASVG, "svgBlip")))
+        })
+}
+/// `asvg:svgBlip` children of `a:blip/a:extLst/a:ext` (Office 2016 SVG pictures).
+fn svg_blips<'a, 'i>(blip: Node<'a, 'i>) -> impl Iterator<Item = Node<'a, 'i>> {
+    child(blip, A, "extLst")
+        .into_iter()
+        .flat_map(|list| list.children().filter(|n| n.has_tag_name((A, "ext"))))
+        .filter_map(|ext| child(ext, ASVG, "svgBlip"))
+}
 fn render_image(
     node: Node<'_, '_>,
     parts: &Parts,
@@ -733,55 +830,24 @@ fn render_image(
         warnings.push(Code::Omitted, "Missing image reference");
         return Ok(false);
     };
-    let Some(id) = blip.attribute((R, "embed")) else {
-        warnings.push(Code::Omitted, "Externally linked images are not loaded");
-        return Ok(false);
-    };
-    let Some(part) = rels.get(id) else {
-        warnings.push(Code::Omitted, format!("Missing image relationship: {id}"));
-        return Ok(false);
-    };
-    if part.external {
-        warnings.push(Code::Omitted, "Externally linked images are not loaded");
-        return Ok(false);
-    }
-    let Some(data) = parts.get(&part.target) else {
+    let svg_blip = svg_blips(blip).next();
+    let raster_id = blip.attribute((R, "embed"));
+    let svg_id = svg_blip.and_then(|n| n.attribute((R, "embed")));
+    let Some(first) = raster_id.or(svg_id) else {
+        let linked = [Some(blip), svg_blip]
+            .into_iter()
+            .flatten()
+            .any(|n| n.attribute((R, "link")).is_some());
         warnings.push(
             Code::Omitted,
-            format!("Missing image part: {}", part.target),
+            if linked {
+                "Externally linked images are not loaded"
+            } else {
+                "Missing image reference"
+            },
         );
         return Ok(false);
     };
-    // Sniff the format before probing dimensions: the probe cannot read EMF/WMF/SVG/WDP,
-    // and one undecodable picture must not abort the whole deck.
-    let mime = if data.starts_with(b"\x89PNG\r\n\x1a\n") {
-        "image/png"
-    } else if data.starts_with(b"\xff\xd8\xff") {
-        "image/jpeg"
-    } else {
-        warnings.push(
-            Code::Omitted,
-            format!("Only PNG/JPEG images are supported: {}", part.target),
-        );
-        return Ok(false);
-    };
-    let Ok(dimensions) = imagesize::blob_size(data) else {
-        warnings.push(
-            Code::Omitted,
-            format!("Cannot read image dimensions: {}", part.target),
-        );
-        return Ok(false);
-    };
-    let (width, height) = (dimensions.width, dimensions.height);
-    if node.descendants().any(|n| {
-        n.has_tag_name((A, "tile")) || (n.has_tag_name((A, "fillRect")) && n.attributes().len() > 0)
-    }) || blip.children().any(|n| n.is_element())
-    {
-        warn(
-            warnings,
-            "Image tiling, effects, and fill rectangles are unsupported",
-        );
-    }
     let crop = node.descendants().find(|n| n.has_tag_name((A, "srcRect")));
     let values: Vec<_> = ["l", "t", "r", "b"]
         .iter()
@@ -789,37 +855,57 @@ fn render_image(
         .collect();
     let (left, top, right, bottom) = (values[0], values[1], values[2], values[3]);
     if left + right >= 1.0 || top + bottom >= 1.0 {
+        let name = rels.get(first).map_or(first, |part| part.target.as_str());
         warnings.push(
             Code::Omitted,
-            format!("Image crop leaves no visible area: {}", part.target),
+            format!("Image crop leaves no visible area: {name}"),
         );
         return Ok(false);
     }
+    // Exactly one outcome per picture: draw the first usable candidate, or omit once.
+    // The raster reference comes first: it is what Office writes as the compatible fallback,
+    // and keeps already-rendered pictures unchanged. The SVG is used when it is absent or fails.
+    type Load = for<'p> fn(&str, &'p Parts, &'p Relationships) -> Result<Picture, String>;
+    let candidates: [(Option<&str>, Load); 2] =
+        [(raster_id, raster_picture), (svg_id, svg_picture)];
+    let mut reasons = Vec::new();
+    let mut picture = None;
+    for (id, load) in candidates {
+        let Some(id) = id else { continue };
+        match load(id, parts, rels) {
+            Ok(loaded) => {
+                picture = Some(loaded);
+                break;
+            }
+            Err(reason) => reasons.push(reason),
+        }
+    }
+    let Some(picture) = picture else {
+        warnings.push(Code::Omitted, reasons.join("; "));
+        return Ok(false);
+    };
+    // The SVG extension is handled; any other blip child is an effect this renderer ignores.
+    let effects = blip
+        .children()
+        .any(|n| n.is_element() && !is_svg_extension(n));
+    if effects
+        || node.descendants().any(|n| {
+            n.has_tag_name((A, "tile"))
+                || (n.has_tag_name((A, "fillRect")) && n.attributes().len() > 0)
+        })
+    {
+        warn(
+            warnings,
+            "Image tiling, effects, and fill rectangles are unsupported",
+        );
+    }
+    for (code, message) in picture.notes {
+        warnings.push(code, message);
+    }
     let iw = w / (1.0 - left - right);
     let ih = h / (1.0 - top - bottom);
-    let href = match raster::prepare(&part.target, data, mime, width, height) {
-        Ok(raster::Prepared::Embed) => format!("data:{mime};base64,{}", STANDARD.encode(data)),
-        Ok(raster::Prepared::Downscaled {
-            href,
-            width: tw,
-            height: th,
-        }) => {
-            warnings.push(
-                Code::Approximation,
-                format!(
-                    "Downscaled oversized image from {width}x{height} to {tw}x{th} px: {}",
-                    part.target
-                ),
-            );
-            href.to_string()
-        }
-        Err(reason) => {
-            warnings.push(Code::Omitted, format!("{reason}: {}", part.target));
-            return Ok(false);
-        }
-    };
     // Clip to the nested SVG viewport; rotate and flip in the outer shape coordinates.
-    svg.push_str(&format!("<svg width=\"{w}\" height=\"{h}\" overflow=\"hidden\"><image x=\"{}\" y=\"{}\" width=\"{iw}\" height=\"{ih}\" preserveAspectRatio=\"none\" href=\"{href}\"/></svg>", -left*iw, -top*ih));
+    svg.push_str(&format!("<svg width=\"{w}\" height=\"{h}\" overflow=\"hidden\"><image x=\"{}\" y=\"{}\" width=\"{iw}\" height=\"{ih}\" preserveAspectRatio=\"none\" href=\"{}\"/></svg>", -left*iw, -top*ih, picture.href));
     Ok(true)
 }
 #[cfg(test)]

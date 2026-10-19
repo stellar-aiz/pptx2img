@@ -95,8 +95,24 @@ position and line-spacing differences still exceed existing image thresholds.
 - Full table theme-style coverage, gradients, inner shadows/glow, theme effects,
   and image tiling/effects/fill rectangles. Selected color alpha and outer shadows
   are supported; see the feature-specific notes for their limits.
-- SVG/EMF/WMF images, external links, animations, Strict OOXML, legacy `.ppt`,
-  and encrypted files.
+- EMF/WMF images, SVG data referenced directly from `a:blip/@r:embed`, text inside
+  SVG pictures, external links, animations, Strict OOXML, legacy `.ppt`, and
+  encrypted files.
+
+SVG pictures stored the Office 2016 way (`a:blip/a:extLst/a:ext/asvg:svgBlip/@r:embed`,
+as inserted icons are) are rendered as vector data, stretched to the picture frame and
+cropped like other pictures. When `a:blip/@r:embed` also names a PNG/JPEG fallback,
+the fallback is drawn first, so pictures that already rendered are unchanged; the SVG
+is used when there is no fallback or the fallback cannot be drawn. If neither can be
+drawn, the picture is omitted once with both reasons. An SVG picture is rendered only
+when it is at most 4 MiB, has at most 100,000 XML nodes, parses as SVG, and references
+nothing outside itself: any `href` other than a local `#id`, any `url(...)` other than
+`url(#id)`, and CSS `@import` are rejected, including `data:` images, which would
+otherwise bypass the PNG/JPEG size policy below. `<text>` inside an SVG picture is
+reported as `unsupported` because document fonts are not resolved for it. A picture
+whose `a:blip` has no `r:embed` of either kind is omitted with `Missing image
+reference`; `Externally linked images are not loaded` is reserved for `r:link` and
+`TargetMode="External"` relationships.
 
 Pictures that are not PNG/JPEG (for example EMF, WMF, SVG, or WDP), or whose
 dimensions cannot be read, are omitted with an `omitted` diagnostic naming the
