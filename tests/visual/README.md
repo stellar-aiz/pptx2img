@@ -160,6 +160,21 @@ mirrored (`flipV` turns it 180 degrees, as in LibreOffice).
   --regions examples/flipped-text.json --width 1600 --out target/visual-tests/flipped-text
 ```
 
+## Generators documented elsewhere
+
+Every `make_*.py` generator is described either in this file or in the feature page
+that owns its behaviour.
+
+| Generator | Described in |
+|---|---|
+| `make_arrow_sizes.py`, `make_connector_routing.py`, `make_lines.py`, `make_preset_shapes.py`, `make_theme_lines.py` | [preset shapes](../../docs/preset-shapes.md) |
+| `make_auto_punctuation.py`, `make_boundary_widths.py`, `make_character_spacing.py`, `make_composite_shapes.py`, `make_punctuation_positions.py` | [rendering notes](../../docs/rendering-notes.md) |
+| `make_colors.py`, `make_gradients.py` | [colors](../../docs/colors.md) |
+| `make_ole.py` | [OLE previews](../../docs/ole-preview.md) |
+| `make_shadows.py` | [shadows](../../docs/shadows.md) |
+| `make_table_styles.py` | [table styles](../../docs/table-styles.md) |
+| `make_text_autofit.py`, `make_text_bullets.py` | [rendering](../../docs/rendering.md) |
+
 ## Reproducibility
 
 Output retains input PPTX, commands, stdout/stderr, reference PDF, both PNG sets,
@@ -207,4 +222,52 @@ smoother in the reference).
 .venv-visual/bin/python tests/visual/make_svg_pictures.py /tmp/svg-pictures.pptx
 .venv-visual/bin/python tests/visual/compare.py --binary target/release/pptx2img \
   --fixture /tmp/svg-pictures.pptx --width 1600 --out target/visual-tests/svg-pictures
+```
+
+## Independent hidden-element fixture
+
+`make_hidden.py` writes one slide with a visible rectangle, a hidden rectangle, a
+hidden group, a visible group with one hidden child, and a hidden shape on the slide
+layout. Only the visible rectangles are drawn, with no diagnostic for the hidden ones.
+
+```sh
+.venv-visual/bin/python tests/visual/make_hidden.py /tmp/hidden.pptx
+.venv-visual/bin/python tests/visual/compare.py --binary target/release/pptx2img \
+  --fixture /tmp/hidden.pptx --width 1600 --out target/visual-tests/hidden
+```
+
+## Independent empty-bullet fixture
+
+`make_empty_bullets.py` writes a bulleted list that contains empty and whitespace-only
+paragraphs. They draw no bullet marker.
+
+```sh
+.venv-visual/bin/python tests/visual/make_empty_bullets.py examples/empty-bullets.pptx
+.venv-visual/bin/python tests/visual/compare.py --binary target/release/pptx2img \
+  --fixture examples/empty-bullets.pptx --width 1600 --out target/visual-tests/empty-bullets
+```
+
+## Independent embedded-media fixture
+
+`make_embedded_media.py [size_mib]` writes a slide with an embedded video (generated
+zero bytes, 40 MiB by default, above the 32 MiB part limit) and a PNG poster frame.
+The deck is written outside the repository. pptx2img renders the poster and reports
+`Audio and video playback is unsupported`.
+
+```sh
+.venv-visual/bin/python tests/visual/make_embedded_media.py /tmp/embedded-media.pptx
+target/release/pptx2img /tmp/embedded-media.pptx --out /tmp/embedded-media --width 1600 --font-fallback
+```
+
+## Independent text-inheritance fixture
+
+`make_text_inheritance.py` writes two slides with the same wrapped text box: one
+inherits its size and font from the presentation default text style, the other sets
+them explicitly. The master `otherStyle` deliberately differs (24 pt versus 18 pt), so
+a wrongly applied `otherStyle` shows up as a size difference between the slides.
+
+```sh
+.venv-visual/bin/python tests/visual/make_text_inheritance.py examples/text-inheritance.pptx
+.venv-visual/bin/python tests/visual/compare.py --binary target/release/pptx2img \
+  --fixture examples/text-inheritance.pptx --width 1600 --out target/visual-tests/text-inheritance
 ```

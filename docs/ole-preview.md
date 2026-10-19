@@ -11,6 +11,16 @@ diagnostic. Missing previews, parts/relationships, unsupported formats, and exte
 references produce omission diagnostics with type and reason. WMF/EMF rendering
 and interpretation of OLE binaries are outside scope.
 
+## Hidden OLE keeps its diagnostic
+
+Hidden non-OLE elements (`sp`, `pic`, `cxnSp`, `grpSp`, other `graphicFrame`s) are
+skipped silently (see [rendering](rendering.md#hidden-elements)). A hidden OLE frame,
+or a frame whose preview picture is hidden, is the deliberate exception: it is not
+drawn and emits `omitted` with `OLE (<progId>) is hidden; OLE is never executed`.
+Decision recorded in Issue #37: the diagnostic states that OLE content was never
+executed, which is useful information, and it keeps the earlier behaviour and
+`tests/ole.rs` unchanged.
+
 ## Local source investigation
 
 The source SHA-256 is recorded in Issue #12. Its assets, text, and images are not
