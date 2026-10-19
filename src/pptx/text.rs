@@ -456,6 +456,9 @@ impl<'a> From<Node<'a, 'a>> for TextBody<'a> {
 pub(super) struct TextExtent {
     pub height: f64,
     pub offset_y: f64,
+    /// Height the text needs including the top and bottom insets, independent of the
+    /// given box height and anchor. Tables use it to grow rows to fit their content.
+    pub required_height: f64,
 }
 #[derive(Clone, Copy, Debug)]
 struct AutoFit {
@@ -892,6 +895,7 @@ pub(super) fn render<'a>(
                 Some("b") => 1.0,
                 _ => 0.0,
             },
+        required_height: top + content_height + bottom,
     };
     let h = expanded_height;
     if content_height > h - top - bottom + 0.01 {

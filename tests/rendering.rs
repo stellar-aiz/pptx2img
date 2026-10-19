@@ -719,7 +719,12 @@ fn preset_autofit_bounds_degenerate_areas_and_keeps_final_diagnostics_once() {
     }
 }
 
-fn table_deck(heights: &[i32], widths: &[i32], text_row: usize) -> String {
+const ROW_COLORS: [&str; 3] = ["FFD0D0", "D0FFD0", "D0D0FF"];
+const ROW_RGB: [(u8, u8, u8); 3] = [(255, 208, 208), (208, 255, 208), (208, 208, 255)];
+
+/// A table at the slide origin. Row `i` is filled with `ROW_COLORS[i % 3]`; `texts[i]`
+/// (if any) is placed in every cell of that row. `frame_h` is the graphicFrame height.
+fn table_frame(heights: &[i32], widths: &[i32], frame_h: i32, texts: &[Option<&str>]) -> String {
     let grid: String = widths
         .iter()
         .map(|w| format!(r#"<a:gridCol w="{}"/>"#, w * 9525))
@@ -728,70 +733,168 @@ fn table_deck(heights: &[i32], widths: &[i32], text_row: usize) -> String {
         .iter()
         .enumerate()
         .map(|(i, h)| {
-            let text = if i == text_row {
-                r#"<a:txBody><a:bodyPr/><a:p><a:r><a:rPr sz="1200"><a:latin typeface="Pptx2img Metrics Test"/></a:rPr><a:t>AA</a:t></a:r></a:p></a:txBody>"#
-            } else {
-                ""
-            };
+            let text = texts.get(i).copied().flatten().map(|t| {
+                format!(
+                    r#"<a:txBody><a:bodyPr/><a:p><a:r><a:rPr sz="1200"><a:latin typeface="Pptx2img Metrics Test"/></a:rPr><a:t>{t}</a:t></a:r></a:p></a:txBody>"#
+                )
+            });
             let cells: String = widths
                 .iter()
                 .map(|_| {
                     format!(
-                        r#"<a:tc>{text}<a:tcPr><a:solidFill><a:srgbClr val="00FF00"/></a:solidFill></a:tcPr></a:tc>"#
+                        r#"<a:tc>{}<a:tcPr><a:solidFill><a:srgbClr val="{}"/></a:solidFill></a:tcPr></a:tc>"#,
+                        text.as_deref().unwrap_or(""),
+                        ROW_COLORS[i % 3]
                     )
                 })
                 .collect();
             format!(r#"<a:tr h="{}">{cells}</a:tr>"#, h * 9525)
         })
         .collect();
+    wrap_table(widths, frame_h, &grid, &rows)
+}
+fn wrap_table(widths: &[i32], frame_h: i32, grid: &str, rows: &str) -> String {
     format!(
         r#"<p:graphicFrame><p:xfrm><a:off x="0" y="0"/><a:ext cx="{}" cy="{}"/></p:xfrm><a:graphic><a:graphicData><a:tbl><a:tblGrid>{grid}</a:tblGrid>{rows}</a:tbl></a:graphicData></a:graphic></p:graphicFrame>"#,
         widths.iter().sum::<i32>() * 9525,
-        60 * 9525
+        frame_h * 9525
     )
 }
-
-#[test]
-fn zero_height_table_row_is_rendered_with_its_text_and_warns() {
+fn render_table(table: &str) -> (Pixmap, String) {
     let dir = tempfile::tempdir().unwrap();
     let input = dir.path().join("a.pptx");
     let out = dir.path().join("out");
-    write_deck(
-        &input,
-        page("sld", "", "", &table_deck(&[20, 0, 20], &[100], 1)),
-        vec![],
-    );
+    write_deck(&input, page("sld", "", "", table), vec![]);
     check(run(&input, &out, false));
-    let img = image(&out);
-    // The zero-height row takes the 20px left over by the other rows.
-    assert_eq!(rgb(&img, 90, 30), (0, 255, 0));
-    let dark = (0..100)
-        .flat_map(|x| (22..38).map(move |y| (x, y)))
-        .filter(|&(x, y)| img.pixel(x, y).unwrap().green() < 128)
-        .count();
-    assert!(dark > 10, "no text pixels in the zero-height row");
-    let manifest = fs::read_to_string(out.join("manifest.json")).unwrap();
-    assert!(manifest.contains("Table rows with zero height"));
-    // Strict mode treats the approximation as a failure.
-    assert!(
-        !run(&input, &dir.path().join("strict"), true)
-            .status
-            .success()
-    );
+    (
+        image(&out),
+        fs::read_to_string(out.join("manifest.json")).unwrap(),
+    )
+}
+/// The `[top, bottom)` pixel span of each row color along column `x`, in row order.
+fn row_spans(img: &Pixmap, x: u32, rows: usize) -> Vec<(u32, u32)> {
+    (0..rows)
+        .map(|i| {
+            let ys: Vec<_> = (0..img.height())
+                .filter(|&y| rgb(img, x, y) == ROW_RGB[i % 3])
+                .collect();
+            assert!(!ys.is_empty(), "row {i} is not drawn at x={x}");
+            (ys[0], ys[ys.len() - 1] + 1)
+        })
+        .collect()
+}
+/// Pixel positions agree within one anti-aliased edge pixel.
+fn near(a: u32, b: u32) -> bool {
+    a.abs_diff(b) <= 1
+}
+/// The lowest pixel row containing dark text pixels within the columns `xs`.
+fn text_bottom(img: &Pixmap, xs: std::ops::Range<u32>) -> u32 {
+    xs.flat_map(|x| (0..img.height()).map(move |y| (x, y)))
+        .filter(|&(x, y)| {
+            let (r, g, b) = rgb(img, x, y);
+            r < 100 && g < 100 && b < 100
+        })
+        .map(|(_, y)| y)
+        .max()
+        .expect("no text pixels")
 }
 
 #[test]
-fn all_zero_height_table_rows_share_the_frame_height() {
-    let dir = tempfile::tempdir().unwrap();
-    let input = dir.path().join("a.pptx");
-    let out = dir.path().join("out");
-    write_deck(
-        &input,
-        page("sld", "", "", &table_deck(&[0, 0], &[100], 1)),
-        vec![],
+fn zero_height_table_row_grows_to_fit_its_text() {
+    let (img, manifest) = render_table(&table_frame(
+        &[20, 0, 20],
+        &[100],
+        60,
+        &[None, Some("AA"), None],
+    ));
+    let spans = row_spans(&img, 95, 3);
+    assert_eq!(spans[0], (0, 20));
+    assert_eq!(spans[1].0, 20);
+    // The zero-height row grows to hold its text; the next row starts below the text.
+    let bottom = text_bottom(&img, 0..100);
+    assert!(bottom > 20 && bottom < spans[1].1, "{spans:?} {bottom}");
+    assert!(near(spans[2].0, spans[1].1), "{spans:?}");
+    assert!(near(spans[2].1 - spans[2].0, 20), "{spans:?}");
+    // The #45 fallback (a share of the frame height) and its diagnostic are gone.
+    assert!(!manifest.contains("Table rows with zero height"));
+}
+
+#[test]
+fn wrapped_cell_text_grows_its_row_and_pushes_later_rows_down() {
+    let text = "AA AA AA AA AA AA";
+    let (img, manifest) = render_table(&table_frame(&[20, 20], &[60], 40, &[Some(text), None]));
+    let spans = row_spans(&img, 57, 2);
+    assert_eq!(spans[0].0, 0);
+    // Several wrapped lines need far more than the stored 20 px.
+    assert!(spans[0].1 > 40, "{spans:?}");
+    // No text pixels from row 1 reach row 2's background region.
+    let bottom = text_bottom(&img, 0..60);
+    assert!(bottom < spans[1].0, "{spans:?} {bottom}");
+    // A row whose content fits keeps its stored height.
+    assert!(near(spans[1].0, spans[0].1), "{spans:?}");
+    assert!(near(spans[1].1 - spans[1].0, 20), "{spans:?}");
+    assert!(!manifest.contains("Text exceeds the text box height"));
+}
+
+#[test]
+fn rows_that_fit_keep_stored_heights_whatever_the_frame_height() {
+    for frame_h in [30, 60, 120] {
+        let (img, _) = render_table(&table_frame(
+            &[30, 30],
+            &[100],
+            frame_h,
+            &[Some("AA"), None],
+        ));
+        assert_eq!(row_spans(&img, 95, 2), vec![(0, 30), (30, 60)], "{frame_h}");
+        // The table is not stretched to a taller frame.
+        assert_eq!(rgb(&img, 95, 70), (255, 255, 255), "{frame_h}");
+    }
+}
+
+#[test]
+fn all_zero_height_table_rows_grow_to_their_text() {
+    let (img, _) = render_table(&table_frame(&[0, 0], &[100], 60, &[Some("AA"), Some("AA")]));
+    let spans = row_spans(&img, 95, 2);
+    assert_eq!(spans[0].0, 0);
+    assert!(near(spans[1].0, spans[0].1), "{spans:?}");
+    // Both rows hold one line of the same text, so they grow to the same height.
+    assert!(
+        near(spans[0].1 - spans[0].0, spans[1].1 - spans[1].0),
+        "{spans:?}"
     );
-    check(run(&input, &out, false));
-    assert_eq!(rgb(&image(&out), 90, 50), (0, 255, 0));
+    assert!(spans[0].1 > 16, "{spans:?}");
+}
+
+#[test]
+fn row_spanning_cell_adds_its_shortfall_to_the_last_spanned_row() {
+    let cell = |attrs: &str, text: &str, color: &str| {
+        let body = if text.is_empty() {
+            String::new()
+        } else {
+            format!(
+                r#"<a:txBody><a:bodyPr/><a:p><a:r><a:rPr sz="1200"><a:latin typeface="Pptx2img Metrics Test"/></a:rPr><a:t>{text}</a:t></a:r></a:p></a:txBody>"#
+            )
+        };
+        format!(
+            r#"<a:tc {attrs}>{body}<a:tcPr><a:solidFill><a:srgbClr val="{color}"/></a:solidFill></a:tcPr></a:tc>"#
+        )
+    };
+    let rows = format!(
+        r#"<a:tr h="{h}">{}{}</a:tr><a:tr h="{h}">{}{}</a:tr>"#,
+        cell(r#"rowSpan="2""#, "AA AA AA AA AA AA", "FFFFFF"),
+        cell("", "", ROW_COLORS[0]),
+        cell(r#"vMerge="1""#, "", "FFFFFF"),
+        cell("", "", ROW_COLORS[1]),
+        h = 10 * 9525
+    );
+    let grid = format!(r#"<a:gridCol w="{0}"/><a:gridCol w="{0}"/>"#, 50 * 9525);
+    let (img, _) = render_table(&wrap_table(&[50, 50], 20, &grid, &rows));
+    let spans = row_spans(&img, 95, 2);
+    // The first row keeps its stored height; the second absorbs the shortfall.
+    assert_eq!(spans[0], (0, 10));
+    assert_eq!(spans[1].0, 10);
+    let bottom = text_bottom(&img, 0..50);
+    assert!(bottom > 20 && bottom < spans[1].1, "{spans:?} {bottom}");
 }
 
 #[test]
@@ -802,7 +905,7 @@ fn negative_row_height_and_zero_column_width_are_still_rejected() {
         let out = dir.path().join("out");
         write_deck(
             &input,
-            page("sld", "", "", &table_deck(&heights, &widths, 99)),
+            page("sld", "", "", &table_frame(&heights, &widths, 60, &[])),
             vec![],
         );
         let result = run(&input, &out, false);
