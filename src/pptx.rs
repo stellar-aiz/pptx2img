@@ -568,12 +568,12 @@ fn render_shape(
     if let Some(body) = child(node, P, "txBody") {
         // Measure within the shape's text area. Height changes may also change its width,
         // so measure again at the final size. Do not search for a new saved fontScale.
-        let geometry_node = props_chain.iter().find_map(|n| child(*n, A, "prstGeom"));
+        let geometry_node = props_chain.iter().find_map(|n| geometry_of(*n));
         for attempt in 0..16 {
             let mut measured_warnings = Warnings::default();
             measured_warnings.target = warnings.target.clone();
             let rect = geometry_node
-                .and_then(|n| geometry::preset(n, w, h, "", &mut measured_warnings))
+                .and_then(|n| outline(n, w, h, "", &mut measured_warnings))
                 .map(|g| g.text)
                 .unwrap_or((0.0, 0.0, w, h));
             text_svg.clear();
@@ -654,7 +654,14 @@ fn render_shape(
     {
         if !matches!(
             attr.tag_name().name(),
-            "xfrm" | "prstGeom" | "solidFill" | "noFill" | "gradFill" | "ln" | "effectLst"
+            "xfrm"
+                | "prstGeom"
+                | "custGeom"
+                | "solidFill"
+                | "noFill"
+                | "gradFill"
+                | "ln"
+                | "effectLst"
         ) {
             warn(
                 warnings,
@@ -730,8 +737,8 @@ fn render_shape(
             "{decorations} fill=\"{fill}\" stroke=\"{stroke}\" stroke-width=\"{line_width}\""
         );
 
-        if let Some(geometry) = props_chain.iter().find_map(|n| child(*n, A, "prstGeom")) {
-            if let Some(preset) = geometry::preset(geometry, w, h, &style, warnings) {
+        if let Some(geometry) = props_chain.iter().find_map(|n| geometry_of(*n)) {
+            if let Some(preset) = outline(geometry, w, h, &style, warnings) {
                 svg.push_str(&preset.svg);
             } else {
                 if geometry.attribute("prst") != Some("roundRect")
@@ -789,6 +796,26 @@ fn render_shape(
     }
     svg.push_str("</g>");
     Ok(())
+}
+/// The first geometry element (`a:prstGeom` or `a:custGeom`) of shape properties.
+fn geometry_of<'a, 'i>(props: Node<'a, 'i>) -> Option<Node<'a, 'i>> {
+    props
+        .children()
+        .find(|n| n.has_tag_name((A, "prstGeom")) || n.has_tag_name((A, "custGeom")))
+}
+/// Evaluated outline of a geometry element, or `None` for presets drawn below.
+fn outline(
+    node: Node<'_, '_>,
+    w: f64,
+    h: f64,
+    style: &str,
+    warnings: &mut Warnings,
+) -> Option<geometry::Geometry> {
+    if node.has_tag_name((A, "custGeom")) {
+        Some(geometry::custom(node, w, h, style, warnings))
+    } else {
+        geometry::preset(node, w, h, style, warnings)
+    }
 }
 fn fill_line(node: Node<'_, '_>, theme: &Theme, warnings: &mut Warnings) -> String {
     for n in node.children().filter(|n| n.is_element()) {

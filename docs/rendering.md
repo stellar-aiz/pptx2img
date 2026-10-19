@@ -10,7 +10,8 @@ Strict mode gates known warnings, not all incompatibilities.
 - Explicit positions, sizes, rotation, and flips for basic shapes and selected
   [presets and connectors](preset-shapes.md), including chevrons, triangles,
   arrows, pie, star5, cloud, callouts, flowchart shapes, and bent/curved connectors
-  evaluated from DrawingML shape guides.
+  evaluated from DrawingML shape guides, and [freeform shapes](#freeform-shapes)
+  (`a:custGeom`).
 - Solid backgrounds, fills, and lines using RGB, system `lastClr`, and theme
   colors; selected [color transforms and theme fills](colors.md), including
   translucent (`alpha`) fills, lines, and text, and `tint`/`shade`/`satMod`;
@@ -160,6 +161,38 @@ the unchanged local thresholds. Slide 2 holds the table cells; its group-flipped
 exceed the thresholds against LibreOffice for the reason above (the unflipped table cell
 stays close, MAE 0.0408, changed 0.0655).
 
+## Freeform shapes
+
+Custom geometry (`a:custGeom`) is drawn with the same guide evaluator as the presets.
+Guides in `a:avLst` and `a:gdLst` are evaluated in document order in the shape
+coordinate space (EMU), so formulas may use the built-in guides (`w`, `h`, `ss`,
+`hc`, `vc`, `wd2`, `cd4`, ...) and earlier guides. Each `a:path` in `a:pathLst` is
+scaled from its own `w`/`h` coordinate space to the shape extent; when `w` or `h` is
+omitted or zero, the path uses shape coordinates (EMU) on that axis. Supported path
+commands are `moveTo`, `lnTo`, `cubicBezTo`, `quadBezTo`, `arcTo` (ellipse arc
+from the current point with `wR`/`hR`/`stAng`/`swAng`), and `close`; a path that does
+not start with `moveTo` starts at the origin. `fill="none"` leaves a path unfilled
+and `stroke="0"` leaves it unstroked; the shape fill and outline apply to the other
+paths. An open path with fill is filled as if closed. Line-end arrowheads are kept
+on open paths only. `extrusionOk`, `a:ahLst`, and `a:cxnLst` do not affect the
+image. The text area is `a:rect` (evaluated through the same guides) or the whole
+shape when it is absent.
+
+Approximations are reported: the `lighten`, `lightenLess`, `darken`, and
+`darkenLess` path fill modes are drawn as a normal fill (`approximation`), and an
+unknown path command is skipped (`unsupported`). If a guide cannot be resolved (an
+unknown name or operator) and a path or the text area becomes non-finite, the
+outline is omitted with an `unsupported` diagnostic and the text uses the whole shape.
+
+Fixture: `examples/custom-geometry.pptx` with per-cell regions
+`examples/custom-geometry.json`; generator: `tests/visual/make_custom_geometry.py`.
+It covers a python-pptx freeform builder polygon, a cubic Bezier edge, `arcTo`
+corners, an open `fill="none"` quadratic curve, a `gdLst` bracket whose path has no
+`w`/`h`, and a `stroke="0"` fill path under a `fill="none"` outline path. At
+`--width 1600` on macOS the page passes against LibreOffice (MAE 0.0011, changed
+0.0074; every cell MAE <= 0.0023, changed <= 0.017). Before this support the same
+page measured MAE 0.1644, changed 0.4060. PowerPoint was not compared directly.
+
 ## Known limitations
 
 - Complete layout/master property and text-style inheritance; `themeOverride` and
@@ -167,7 +200,8 @@ stays close, MAE 0.0408, changed 0.0655).
 - Full Japanese line-breaking rules, punctuation compression, all hanging symbols,
   complex shaping/ligatures/kerning, and dynamic autofit ratio calculation.
 - Identical baselines and fallback behavior across all fonts and Office renderers.
-- Charts, SmartArt, group-fill inheritance, freeform shapes, and many presets.
+- Charts, SmartArt, group-fill inheritance, freeform path fill modes other than
+  normal and none, and many presets.
 - Full table theme-style coverage, theme/line/table-cell/text gradients,
   inner shadows/glow, theme effects,
   and image tiling/effects/fill rectangles. Selected color alpha and outer shadows

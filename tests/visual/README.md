@@ -189,6 +189,21 @@ their regions differ from the reference by design (see `docs/rendering.md`).
   --regions examples/flipped-text.json --width 1600 --out target/visual-tests/flipped-text
 ```
 
+## Independent custom-geometry fixture
+
+Generate six `a:custGeom` freeforms without text: a python-pptx freeform builder
+polygon, a cubic Bezier edge, `arcTo` corners, an open `fill="none"` curve, a `gdLst`
+bracket in shape coordinates, and a `stroke="0"` fill path under an outline path,
+plus per-cell regions. See [rendering](../../docs/rendering.md#freeform-shapes) for
+recorded metrics.
+
+```sh
+.venv-visual/bin/python tests/visual/make_custom_geometry.py examples/custom-geometry.pptx
+.venv-visual/bin/python tests/visual/compare.py \
+  --binary target/release/pptx2img --fixture examples/custom-geometry.pptx \
+  --regions examples/custom-geometry.json --width 1600 --out target/visual-tests/custom-geometry
+```
+
 ## Generators documented elsewhere
 
 Every `make_*.py` generator is described either in this file or in the feature page
