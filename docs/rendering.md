@@ -135,6 +135,15 @@ is silent: hiding is normal in real decks, so no diagnostic is emitted. A hidden
 object is the exception and keeps its `omitted` diagnostic; see
 [OLE previews](ole-preview.md). Generator: `tests/visual/make_hidden.py`.
 
+## Shape property extensions
+
+An `a:extLst` in shape properties is inspected element by element. The Office 2010
+extensions `a14:hiddenFill`, `a14:hiddenLine`, `a14:hiddenEffects`,
+`a14:hiddenScene3d`, and `a14:hiddenSp3d` only remember the fill, line, effects, or 3-D
+settings a shape had before they were switched off (for example by `a:noFill`), so they
+are ignored by design and emit no diagnostic. Any other extension element is reported
+once per shape as `Unsupported shape property extension: <prefix:name>`.
+
 ## Flipped shapes and groups
 
 `flipH`/`flipV` on a shape or on any ancestor group mirror the geometry (outline,
