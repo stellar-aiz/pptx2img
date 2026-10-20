@@ -73,9 +73,7 @@ impl Drop for CacheScope {
 pub(super) fn prepare(part: &str, data: &[u8], mime: &str, width: usize, height: usize) -> Outcome {
     match fit(width, height) {
         Fit::Embed => Ok(Prepared::Embed),
-        Fit::Omit => Err(format!(
-            "Image exceeds the downscale ceiling of {CEILING_PIXELS} pixels or {CEILING_SIDE} px per side ({width}x{height} px)"
-        )),
+        Fit::Omit => Err(ceiling(width, height)),
         Fit::Downscale => {
             if let Some(outcome) = CACHE.with(|c| c.borrow().get(part).cloned()) {
                 return outcome;
@@ -95,6 +93,63 @@ pub(super) fn prepare(part: &str, data: &[u8], mime: &str, width: usize, height:
     }
 }
 
+/// The `approximation` message for a picture downscaled from `from` to `to` px.
+pub(super) fn downscaled(from: (usize, usize), to: (usize, usize)) -> String {
+    format!(
+        "Downscaled oversized image from {}x{} to {}x{} px",
+        from.0, from.1, to.0, to.1
+    )
+}
+fn ceiling(width: usize, height: usize) -> String {
+    format!(
+        "Image exceeds the downscale ceiling of {CEILING_PIXELS} pixels or {CEILING_SIDE} px per side ({width}x{height} px)"
+    )
+}
+
+/// A PNG, and its size when it was downscaled.
+pub(super) type Encoded = (Vec<u8>, Option<(usize, usize)>);
+/// Encode decoded RGBA rows (top-down, `width * 4` bytes each, filled by `row`) as a PNG
+/// under the same size policy as PNG/JPEG pictures. Returns the PNG and, when the
+/// picture was downscaled, its new size. The policy is checked before `row` is called,
+/// so a bitmap above the ceiling is never decoded.
+pub(super) fn encode_rows(
+    width: usize,
+    height: usize,
+    mut row: impl FnMut(usize, &mut [u8]) -> Result<()>,
+) -> Result<Encoded, String> {
+    let fail =
+        |error: anyhow::Error| format!("Cannot encode bitmap ({width}x{height} px, {error})");
+    let embed = match fit(width, height) {
+        Fit::Omit => return Err(ceiling(width, height)),
+        Fit::Embed => true,
+        Fit::Downscale => false,
+    };
+    let mut buffer = vec![0u8; width * 4];
+    if embed {
+        let mut encoded = Vec::new();
+        (|| {
+            let mut writer = rgba_writer(&mut encoded, width, height)?;
+            let mut stream = writer.stream_writer()?;
+            for y in 0..height {
+                row(y, &mut buffer)?;
+                std::io::Write::write_all(&mut stream, &buffer)?;
+            }
+            stream.finish()?;
+            Ok(())
+        })()
+        .map_err(fail)?;
+        return Ok((encoded, None));
+    }
+    let mut shrink = Shrink::new(width, height);
+    for y in 0..height {
+        row(y, &mut buffer).map_err(fail)?;
+        shrink.push(y, &buffer, 4);
+    }
+    let shrink = shrink.finish(height).map_err(fail)?;
+    let (tw, th) = (shrink.tw, shrink.th);
+    Ok((encode(shrink).map_err(fail)?, Some((tw, th))))
+}
+
 /// Decode a PNG/JPEG and return a PNG whose longest side is at most `TARGET_SIDE`.
 /// `probed` is the size the ceiling was checked against; the decoder must agree with it
 /// before any pixel buffer is allocated, so a header parsed differently cannot bypass the cap.
@@ -104,14 +159,26 @@ fn downscale(data: &[u8], png: bool, probed: (usize, usize)) -> Result<(Vec<u8>,
     } else {
         downscale_jpeg(data, probed)?
     };
+    let (tw, th) = (shrink.tw, shrink.th);
+    Ok((encode(shrink)?, tw, th))
+}
+fn encode(shrink: Shrink) -> Result<Vec<u8>> {
     let mut encoded = Vec::new();
-    let mut encoder = png::Encoder::new(&mut encoded, shrink.tw as u32, shrink.th as u32);
-    encoder.set_color(png::ColorType::Rgba);
-    encoder.set_depth(png::BitDepth::Eight);
-    let mut writer = encoder.write_header()?;
+    let mut writer = rgba_writer(&mut encoded, shrink.tw, shrink.th)?;
     writer.write_image_data(&shrink.out)?;
     writer.finish()?;
-    Ok((encoded, shrink.tw, shrink.th))
+    Ok(encoded)
+}
+/// A PNG writer for 8-bit RGBA pixels of `width` x `height`.
+fn rgba_writer(
+    out: &mut Vec<u8>,
+    width: usize,
+    height: usize,
+) -> Result<png::Writer<&mut Vec<u8>>> {
+    let mut encoder = png::Encoder::new(out, width as u32, height as u32);
+    encoder.set_color(png::ColorType::Rgba);
+    encoder.set_depth(png::BitDepth::Eight);
+    Ok(encoder.write_header()?)
 }
 
 fn agree(decoded: (usize, usize), probed: (usize, usize)) -> Result<()> {

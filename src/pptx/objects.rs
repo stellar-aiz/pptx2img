@@ -178,21 +178,28 @@ impl<'d> Renderer<'_, 'd> {
                 .parts
                 .get(&rel.target)
                 .ok_or("Missing preview image part")?;
+            if metafile::is_metafile(data) {
+                // Decoded by `render_image`, which reports its own omission.
+                return Ok("EMF/WMF");
+            }
             if !data.starts_with(b"\x89PNG\r\n\x1a\n") && !data.starts_with(b"\xff\xd8\xff") {
-                return Err("Unsupported preview format; only PNG/JPEG are supported");
+                return Err("Unsupported preview format; only PNG/JPEG/EMF/WMF are supported");
             }
             if imagesize::blob_size(data).is_err() {
                 return Err("Invalid preview image");
             }
-            Ok(())
+            Ok("PNG/JPEG")
         })();
-        if let Err(reason) = reason {
-            self.warnings.push(
-                Code::Omitted,
-                format!("Omitted OLE ({kind}): {reason}. OLE is never executed"),
-            );
-            return Ok(());
-        }
+        let format = match reason {
+            Ok(format) => format,
+            Err(reason) => {
+                self.warnings.push(
+                    Code::Omitted,
+                    format!("Omitted OLE ({kind}): {reason}. OLE is never executed"),
+                );
+                return Ok(());
+            }
+        };
         let Some(t) = child(frame, P, "xfrm") else {
             self.warnings.push(
                 Code::Omitted,
@@ -217,7 +224,7 @@ impl<'d> Renderer<'_, 'd> {
             self.warnings.push(
                 Code::Approximation,
                 format!(
-                    "Rendered embedded PNG/JPEG preview for OLE ({kind}) without executing OLE"
+                    "Rendered embedded {format} preview for OLE ({kind}) without executing OLE"
                 ),
             );
         }

@@ -32,7 +32,8 @@ Strict mode gates known warnings, not all incompatibilities.
 - Explicit character spacing `spc`, including negative values, positive values,
   inherited defaults, and explicit zero; optional automatic punctuation compression.
 - Property-by-property inheritance from runs, paragraph defaults, and list levels.
-- Embedded PNG/JPEG placement and `srcRect` cropping.
+- Embedded PNG/JPEG placement and `srcRect` cropping, and EMF and placeable WMF
+  pictures translated to SVG ([subset and limits](#emf-and-wmf-pictures)).
 - Basic placeholder inheritance and shared master/layout shapes and solid backgrounds.
 - Nested group transforms, explicit table cell formatting, rectangular merged
   cells, selected [table styles](table-styles.md), [outer shadows](shadows.md), and
@@ -332,10 +333,10 @@ directly.
 
 ## EMF and WMF pictures survey
 
-pptx2img does not render EMF or WMF yet: such a picture is omitted with
-`Only PNG/JPEG images are supported: <part>` (see [Known limitations](#known-limitations)).
-This section records the step 1 survey of issue #78 (2026-10-20), made before any
-implementation. It does not change rendering.
+At the time of this survey pptx2img did not render EMF or WMF: such a picture was
+omitted with `Only PNG/JPEG images are supported: <part>`. This section records the
+step 1 survey of issue #78 (2026-10-20), made before any implementation; step 2 is
+described in [EMF and WMF pictures](#emf-and-wmf-pictures).
 
 Fixtures: `tests/visual/make_metafile_pictures.py OUT_DIR [--pptx]` writes nine
 metafiles with the standard library only, from MS-EMF and MS-WMF, plus a deck with one
@@ -401,6 +402,90 @@ fixtures are conformant; that would be a development-time tool, not a dependency
 CLI. Text records stay `unsupported` in step 1 and step 2 either way, and OLE previews
 stored as WMF/EMF go through the same decoder.
 
+## EMF and WMF pictures
+
+Step 2 of issue #78 implements the subset independently from MS-EMF and MS-WMF, with
+no new dependency. A picture part (or OLE preview) is read as a metafile when it starts
+with `EMR_HEADER` and the `" EMF"` signature at byte 40, or with the placeable WMF key
+`0x9AC6CDD7`. The records are translated to an SVG document that goes through the same
+gate as SVG pictures (node limit, no external references, a render check), and the
+picture is then cropped, stretched, and placed like any other picture. A metafile that
+cannot be drawn is omitted once, naming the part, and the rest of the slide renders.
+
+Coordinates are mapped when each record is played: the world transform, then the
+window/viewport mapping of the map mode, onto the reference device. The EMF picture is
+the header frame (`rclFrame`, 0.01 mm) converted with the reference device size
+(`szlDevice` / `szlMillimeters`; `szlMicrometers` is not used); when the frame is empty
+the bounds (`rclBounds`) are used. All three EMF header sizes (88, 100, 108 bytes) are
+read. A placeable WMF is its bounding box, onto which the window maps; viewport records
+are ignored there. Non-placeable WMF is not detected and stays
+`Only PNG/JPEG images are supported`.
+
+| Record group | Translated |
+|---|---|
+| Shapes | `Rectangle`, `RoundRect`, `Ellipse`, `Polygon`, `Polyline`, `PolyPolygon`, `PolyPolyline`, `PolyBezier`, `PolyBezierTo`, `PolylineTo`, `MoveToEx`, `LineTo` (32- and 16-bit point forms); WMF `META_RECTANGLE`, `META_ROUNDRECT`, `META_ELLIPSE`, `META_POLYGON`, `META_POLYLINE`, `META_POLYPOLYGON`, `META_MOVETO`, `META_LINETO`, `META_PATBLT` |
+| Objects | `CreatePen`, `ExtCreatePen` (dash styles, user styles, caps, joins), `CreateBrushIndirect`, stock objects, `SelectObject`, `DeleteObject`; WMF object table with lowest-free-slot indices; `SetPolyFillMode` |
+| Paths | `BeginPath`, `EndPath`, `CloseFigure`, `AbortPath`, `FillPath`, `StrokePath`, `StrokeAndFillPath`, `SelectClipPath` |
+| Coordinates | `SetMapMode` (all eight modes), window and viewport origin/extent, their scale records, `SetWorldTransform`, `ModifyWorldTransform`, `SaveDC`, `RestoreDC` |
+| Clipping | `IntersectClipRect` (chained SVG clip paths), `ExcludeClipRect` (SVG mask), `ExtSelectClipRgn` with rectangle regions; region modes copy, and, and diff |
+| Bitmaps | `StretchDIBits`, `BitBlt`, `StretchBlt`, `AlphaBlend`; WMF `META_STRETCHDIB`, `META_DIBSTRETCHBLT`, `META_DIBBITBLT`. 1/4/8/16/24/32-bit DIBs, uncompressed or bit fields, stretched or mirrored onto the destination; pixels are picked as GDI's default stretch modes do, and smoothed after `SetStretchBltMode(HALFTONE)` or a downscale |
+
+Diagnostics, each suffixed with the part name and recorded once per message:
+
+- `unsupported` `Text in metafile pictures is not rendered (<record>)` for
+  `EMR_EXTTEXTOUTW`, `EMR_EXTTEXTOUTA`, `EMR_POLYTEXTOUTW/A`, `EMR_SMALLTEXTOUT`,
+  `META_TEXTOUT`, and `META_EXTTEXTOUT`; the text is not drawn (the first step of the
+  decision on issue #78).
+- `unsupported` `Unsupported metafile record ignored (<record>)` once per record type
+  outside the subset (for example `EMR_ARC`, `EMR_POLYDRAW`, `EMR_FILLRGN`,
+  `EMR_SETDIBITSTODEVICE`); unknown types are named by number. Records that only set
+  state the subset does not draw (text colour, background mode, palettes, comments) are
+  skipped silently.
+- `unsupported` for pattern brushes, RLE/JPEG/PNG-compressed DIBs, and DIBs with
+  palette-index colours; `approximation` for hatched brushes (drawn solid), raster
+  operations other than copy, mix modes other than `R2_COPYPEN`, the clip modes or and
+  xor (not applied), `WidenPath` (unsupported; the path is drawn unwidened), and EMF+
+  comments (EMF+ records are not interpreted; a dual EMF+ picture is drawn from its EMF
+  records, an EMF+ only picture is reported as `unsupported`).
+- `omitted` `Malformed bitmap in metafile record omitted (...)` for one unreadable DIB;
+  the rest of the picture renders.
+
+Bitmaps go through the PNG/JPEG size policy under [resource limits](#resource-limits):
+they are decoded row by row only after the size check, encoded as PNG (never embedded
+as BMP), downscaled with the same `approximation` diagnostic, or the picture is omitted
+with the same ceiling message. A cosmetic pen is one reference-device pixel wide, and a
+geometric pen at least that. Limits per picture, each omitting the picture with a
+diagnostic: 500,000 records, 2,000,000 points (a clip region rectangle counts as four),
+50,000 SVG elements, 67,108,864 decoded bitmap pixels, `SaveDC` nesting of 1,024, and
+65,536 live objects; the translated SVG may be at most 32 MiB (it carries the PNG
+bitmaps; writing stops as soon as it passes the limit) and 100,000 XML nodes. Clip
+records are chained as SVG clip paths and masks, which the renderer follows
+recursively, so a chain is at most 32 links long: further clip records are not applied
+and reported once as `approximation`. At most 64 distinct diagnostics are kept per
+picture; the rest are summarized by one `unsupported` diagnostic. Truncated
+records, invalid record sizes, a missing end-of-file record, invalid header sizes, and
+non-finite world transforms omit the picture as malformed.
+
+Comparison with LibreOffice (`make_metafile_pictures.py OUT --pptx`, then
+`compare.py --width 1600` with the default thresholds), macOS, LibreOffice 26.2.5.2,
+2026-10-20. All nine pages are within the unchanged thresholds; before this step every
+page but `emf-text` and `wmf-clip-bitmap` exceeded them (MAE 0.030 to 0.081).
+
+| Page | MAE | Changed pixels | Remaining difference |
+|---|---|---|---|
+| `emf-shapes` (88-byte header) | 0.009299 | 1.614% | antialiasing along outlines |
+| `emf-shapes` (108-byte header) | 0.006214 | 1.182% | antialiasing along outlines |
+| `emf-path` | 0.006753 | 1.095% | antialiasing along outlines |
+| `emf-transform` | 0.007286 | 1.186% | antialiasing along outlines |
+| `emf-clip` | 0.010538 | 2.014% | pptx2img draws the `ExcludeClipRect` hole MS-EMF specifies; LibreOffice does not, so this part rests on the specification, not on the reference |
+| `emf-bitmap` | 0.005600 | 1.058% | edges of the stretched pixels |
+| `emf-text` | 0.006773 | 1.127% | LibreOffice draws the text; pptx2img reports it as `unsupported` |
+| `wmf-shapes` | 0.003045 | 0.594% | antialiasing along outlines |
+| `wmf-clip-bitmap` | 0.005641 | 0.877% | LibreOffice draws the `TextOut` text; pptx2img reports it |
+
+The text pages pass only because the text is small; passing does not mean text is
+supported.
+
 ## Known limitations
 
 - Complete layout/master property and text-style inheritance; `themeOverride` and
@@ -415,8 +500,9 @@ stored as WMF/EMF go through the same decoder.
   unsupported under [picture effects and fills](#picture-effects-and-fills).
   Selected color alpha and outer shadows are supported; see the feature-specific
   notes for their limits.
-- EMF/WMF images, SVG data referenced directly from `a:blip/@r:embed`, text inside
-  SVG pictures, external links, animations, Strict OOXML, legacy `.ppt`, and
+- Text, arcs, regions, and EMF+ records inside EMF/WMF pictures (see
+  [EMF and WMF pictures](#emf-and-wmf-pictures)), non-placeable WMF, SVG data
+  referenced directly from `a:blip/@r:embed`, text inside SVG pictures, external links, animations, Strict OOXML, legacy `.ppt`, and
   encrypted files.
 
 SVG pictures stored the Office 2016 way (`a:blip/a:extLst/a:ext/asvg:svgBlip/@r:embed`,
@@ -442,8 +528,9 @@ they do not count toward the size limits below, and a media payload larger than 
 picture, renders. Generator: `tests/visual/make_embedded_media.py` (writes a deck of
 about 40 MiB uncompressed, so write it outside the repository).
 
-Pictures that are not PNG/JPEG (for example EMF, WMF, SVG, or WDP), or whose
-dimensions cannot be read, are omitted with an `omitted` diagnostic naming the
+Pictures that are not PNG/JPEG, EMF, or placeable WMF (for example SVG referenced
+from `a:blip/@r:embed`, or WDP), malformed metafiles, or pictures whose dimensions
+cannot be read, are omitted with an `omitted` diagnostic naming the
 media part; the rest of the slide, layout, and master still renders.
 The same applies to a picture whose `r:embed` names no relationship
 (`Missing image relationship: <id>`), whose relationship target is absent from the

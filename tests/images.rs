@@ -3,7 +3,8 @@ mod support;
 use std::fs;
 use support::*;
 
-/// A minimal EMF header record (EMR_HEADER with the " EMF" signature), written for this test.
+/// A minimal EMF header record (EMR_HEADER with the " EMF" signature) and nothing else,
+/// written for this test: no reference device size and no EMR_EOF, so it cannot be drawn.
 fn emf() -> Vec<u8> {
     let mut data = vec![0u8; 88];
     data[0..4].copy_from_slice(&1u32.to_le_bytes());
@@ -45,7 +46,7 @@ fn undecodable_slide_pictures_are_omitted_and_the_rest_renders() {
         (
             "a.emf",
             emf(),
-            "Only PNG/JPEG images are supported: ppt/media/a.emf",
+            "Malformed EMF picture (invalid reference device size): ppt/media/a.emf",
         ),
         (
             "a.svg",
@@ -133,7 +134,7 @@ fn undecodable_layout_picture_is_omitted_on_every_slide() {
         assert_eq!(
             omitted(&report, index),
             (
-                "Only PNG/JPEG images are supported: ppt/media/logo.emf",
+                "Malformed EMF picture (invalid reference device size): ppt/media/logo.emf",
                 "ppt/layouts/layout.xml",
                 "9"
             )

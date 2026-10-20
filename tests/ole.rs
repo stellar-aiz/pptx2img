@@ -11,6 +11,8 @@ fn render(mode: &str) -> (Pixmap, serde_json::Value) {
     let data = match mode {
         "jpeg" => include_bytes!("fixtures/ole-preview.jpg").to_vec(),
         "unsupported" => b"not an image".to_vec(),
+        "wmf" => include_bytes!("fixtures/metafile/wmf-shapes.wmf").to_vec(),
+        "emf" => include_bytes!("fixtures/metafile/emf-shapes.emf").to_vec(),
         _ => png.encode_png().unwrap(),
     };
     let pic = if mode == "missing" {
@@ -84,6 +86,31 @@ fn internal_preview_uses_frame_coordinates_once() {
     let (jpeg, _) = render("jpeg");
     let (r, g, b) = rgb(&jpeg, 30, 40);
     assert!(r > 240 && g < 10 && b < 10);
+}
+#[test]
+fn metafile_previews_render_through_the_metafile_decoder() {
+    for (mode, format) in [("wmf", "EMF/WMF"), ("emf", "EMF/WMF")] {
+        let (img, report) = render(mode);
+        // The red rectangle (10..90, 10..60 of 200 units) inside the 40x30 px frame at (20, 30).
+        assert_eq!(rgb(&img, 30, 35), (220, 30, 30), "{mode}");
+        assert_eq!(rgb(&img, 75, 75), (255, 255, 255), "{mode}");
+        let diagnostics = report["slides"][0]["diagnostics"].as_array().unwrap();
+        let messages: Vec<_> = diagnostics
+            .iter()
+            .map(|d| (d["code"].as_str().unwrap(), d["message"].as_str().unwrap()))
+            .collect();
+        assert_eq!(
+            messages,
+            [(
+                "approximation",
+                format!(
+                    "Rendered embedded {format} preview for OLE (Own.Document) without executing OLE"
+                )
+                .as_str()
+            )],
+            "{mode}"
+        );
+    }
 }
 #[test]
 fn unavailable_previews_have_concrete_diagnostics() {

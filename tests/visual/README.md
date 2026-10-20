@@ -69,9 +69,9 @@ remain in the report.
 ## Independent unsupported-image fixture
 
 Generate a deck whose slide and shared layout each place a minimal EMF picture
-(written byte by byte by the script). pptx2img omits both pictures with diagnostics
-and renders every slide; LibreOffice draws the EMF rectangles, so the difference is
-a known limitation, not a regression.
+(written byte by byte by the script). Since issue #78 step 2 pptx2img translates
+these EMF rectangles to SVG and draws them, as LibreOffice does; the deck now checks
+that a layout picture renders on every slide.
 
 ```sh
 .venv-visual/bin/python tests/visual/make_unsupported_images.py /tmp/unsupported-images.pptx
@@ -319,7 +319,7 @@ that owns its behaviour.
 | `make_arrow_sizes.py`, `make_connector_routing.py`, `make_lines.py`, `make_preset_shapes.py`, `make_theme_lines.py` | [preset shapes](../../docs/preset-shapes.md) |
 | `make_auto_punctuation.py`, `make_boundary_widths.py`, `make_character_spacing.py`, `make_composite_shapes.py`, `make_punctuation_positions.py` | [rendering notes](../../docs/rendering-notes.md) |
 | `make_colors.py`, `make_fills.py`, `make_gradients.py` | [colors](../../docs/colors.md) |
-| `make_metafile_pictures.py` | [EMF and WMF pictures survey](../../docs/rendering.md#emf-and-wmf-pictures-survey) |
+| `make_metafile_pictures.py` | [EMF and WMF pictures survey](../../docs/rendering.md#emf-and-wmf-pictures-survey) and [EMF and WMF pictures](../../docs/rendering.md#emf-and-wmf-pictures); `tests/fixtures/metafile/` holds its nine metafiles for `tests/metafile_pictures.rs` |
 | `make_ole.py` | [OLE previews](../../docs/ole-preview.md) |
 | `make_shadows.py` | [shadows](../../docs/shadows.md) |
 | `make_table_styles.py` | [table styles](../../docs/table-styles.md) |
