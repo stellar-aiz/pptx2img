@@ -581,9 +581,9 @@ fn render_shape(
     ) else {
         bail!("Missing shape position or dimensions");
     };
-    let x = number(offset, "x", 0.0) / EMU;
+    let mut x = number(offset, "x", 0.0) / EMU;
     let mut y = number(offset, "y", 0.0) / EMU;
-    let w = number(extent, "cx", 0.0) / EMU;
+    let mut w = number(extent, "cx", 0.0) / EMU;
     let mut h = number(extent, "cy", 0.0) / EMU;
     if w < 0.0 || h < 0.0 {
         bail!("Shape dimensions are negative");
@@ -591,6 +591,18 @@ fn render_shape(
     let mut text_svg = String::new();
     // Horizontal centre (in shape coordinates) of the final text rectangle.
     let mut text_center = w / 2.0;
+    let rotation = number(transform, "rot", 0.0) / 60_000.0;
+    let fx = if matches!(transform.attribute("flipH"), Some("1" | "true")) {
+        -1
+    } else {
+        1
+    };
+    let fy = if matches!(transform.attribute("flipV"), Some("1" | "true")) {
+        -1
+    } else {
+        1
+    };
+    let text_mirrored = (fx != fy) != shape.mirrored;
     if let Some(body) = child(node, P, "txBody") {
         // Measure within the shape's text area. Height changes may also change its width,
         // so measure again at the final size. Do not search for a new saved fontScale.
@@ -629,18 +641,41 @@ fn render_shape(
             );
             text_svg.push_str("</g>");
             let growth = extent.height - rect.3;
-            if growth > 0.01 && (rect.3 > 0.0 || h == 0.0) && attempt < 15 && h < 100_000.0 {
-                let ratio = if rect.3 > 0.0 {
-                    (h / rect.3).max(1.0)
-                } else {
-                    1.0
-                };
-                let new_height = (h + growth * ratio).min(100_000.0);
-                y += extent.offset_y / growth * (new_height - h);
-                h = new_height;
+            let widening = extent.width - rect.2;
+            let grow_height = growth > 0.01 && (rect.3 > 0.0 || h == 0.0) && h < 100_000.0;
+            let resize_width = widening.abs() > 0.01 && (rect.2 > 0.0 || w == 0.0) && w < 100_000.0;
+            if (grow_height || resize_width) && attempt < 15 {
+                if grow_height {
+                    let ratio = if rect.3 > 0.0 {
+                        (h / rect.3).max(1.0)
+                    } else {
+                        1.0
+                    };
+                    let new_height = (h + growth * ratio).min(100_000.0);
+                    y += extent.offset_y / growth * (new_height - h);
+                    h = new_height;
+                }
+                if resize_width {
+                    // The fitted width is exact, so map it from the text area to the shape.
+                    let new_width = if rect.2 > 0.0 {
+                        w * extent.width / rect.2
+                    } else {
+                        extent.width
+                    }
+                    .min(100_000.0);
+                    let change = new_width - w;
+                    // Move the box centre along the text's own horizontal axis so the
+                    // alignment-side edge stays put, through the text's flips and rotation.
+                    let shift = (extent.offset_x / widening + 0.5) * change;
+                    let direction = f64::from(fx) * if text_mirrored { -1.0 } else { 1.0 };
+                    let (sin, cos) = rotation.to_radians().sin_cos();
+                    x += direction * shift * cos - change / 2.0;
+                    y += direction * shift * sin;
+                    w = new_width;
+                }
                 continue;
             }
-            if growth > 0.01 {
+            if growth > 0.01 || widening.abs() > 0.01 {
                 warn(
                     warnings,
                     "Shape text autofit reached its limit; text may not fit",
@@ -653,19 +688,8 @@ fn render_shape(
             break;
         }
     }
-    let rotation = number(transform, "rot", 0.0) / 60_000.0;
-    let fx = if matches!(transform.attribute("flipH"), Some("1" | "true")) {
-        -1
-    } else {
-        1
-    };
-    let fy = if matches!(transform.attribute("flipV"), Some("1" | "true")) {
-        -1
-    } else {
-        1
-    };
     // Flips mirror the geometry, never the glyphs.
-    text_svg = unmirror_text(text_svg, (fx != fy) != shape.mirrored, text_center);
+    text_svg = unmirror_text(text_svg, text_mirrored, text_center);
     svg.push_str(&format!(
         "<g transform=\"translate({} {}) rotate({rotation}) scale({fx} {fy}) translate({} {})\">",
         x + w / 2.0,

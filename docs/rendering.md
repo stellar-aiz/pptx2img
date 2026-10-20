@@ -63,14 +63,31 @@ of all runs. `lnSpcReduction` (default 0%) subtracts from percentage line spacin
 inherited autofit. The renderer does not search for a new shrink ratio.
 
 `spAutoFit` expands height for fixed-width horizontal text, preserving anchoring
-and margins. Table-cell/vertical autofit and horizontal expansion without wrapping
-are unsupported and warned about. Shape text areas are remeasured at their final
-size, with diagnostics for expansion limits.
+and margins. Table-cell/vertical autofit is unsupported and warned about. Shape
+text areas are remeasured at their final size, with diagnostics for expansion limits.
+
+When the body also has `wrap="none"`, the shape width is set to the widest line plus
+the left and right insets (and paragraph margins), so the outline, fill, and effects
+follow the text; a saved width that is too wide shrinks as well. The edge on the
+first paragraph's alignment side stays fixed: the left edge for left-aligned (and
+justified) text, the centre for `algn="ctr"`, the right edge for `algn="r"`. Bodies
+without visible text keep their saved width. The edge is taken along the text's own
+direction, so rotation and flips that turn the text (for example `rot="10800000"` or
+`flipV`) keep the edge that is on the alignment side as the text reads.
 
 Fixture: `examples/text-autofit.pptx`; generator:
 `tests/visual/make_text_autofit.py`. LibreOffice 26.2.5.2 recalculates this fixture's
 saved shrink ratios and does not expand its saved boxes, so pixel differences
 remain. Thresholds have not been relaxed.
+
+Page 5 holds left, centred, and right-aligned `wrap="none"` + `spAutoFit` labels
+whose saved widths are too narrow (top row) and too wide (bottom row). Measured at
+`--width 1600` on macOS, LibreOffice 26.2.5.2 keeps every saved width and wraps the
+narrow labels inside their boxes despite `wrap="none"`, so this page passed before
+(MAE 0.0159, changed 0.0273) and now exceeds the thresholds (MAE 0.0250, changed
+0.1057). The difference is the width rule itself, not a measurement error; the
+alignment-side anchoring follows the Office interpretation and is not confirmed by
+LibreOffice. PowerPoint was not compared directly.
 
 - [NormalAutoFit](https://learn.microsoft.com/en-us/dotnet/api/documentformat.openxml.drawing.normalautofit)
 - [Office spAutoFit interpretation](https://learn.microsoft.com/en-us/openspecs/office_standards/ms-oe376/19d31037-28bf-4693-85be-3a37bfe82d51)

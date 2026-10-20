@@ -965,3 +965,108 @@ fn other_shape_property_extensions_are_reported_by_element_name() {
             .success()
     );
 }
+
+fn diagnostics(out: &Path) -> Vec<serde_json::Value> {
+    let manifest: serde_json::Value =
+        serde_json::from_slice(&fs::read(out.join("manifest.json")).unwrap()).unwrap();
+    manifest["slides"][0]["diagnostics"]
+        .as_array()
+        .unwrap()
+        .clone()
+}
+
+#[test]
+fn unwrapped_shape_autofit_sets_width_and_keeps_the_alignment_edge() {
+    // "AAAA" is 32px wide in the metrics font at 12pt; with 4px insets the box is 40px.
+    // Under rot="180" or flipV the text reads from the page's right edge, so the
+    // left-aligned edge that stays fixed is the page-right one.
+    for (align, x, w, left, xfrm) in [
+        ("l", 40, 10, 40, ""),
+        ("ctr", 40, 10, 25, ""),
+        ("r", 40, 10, 10, ""),
+        ("l", 20, 60, 20, ""),
+        ("ctr", 20, 60, 30, ""),
+        ("r", 20, 60, 40, ""),
+        ("l", 40, 10, 40, r#"flipH="1""#),
+        ("l", 40, 10, 10, r#"rot="10800000""#),
+        ("l", 40, 10, 10, r#"flipV="1""#),
+    ] {
+        let dir = tempfile::tempdir().unwrap();
+        let input = dir.path().join("autofit-width.pptx");
+        let out = dir.path().join("out");
+        let shape = format!(
+            r#"<p:sp><p:spPr>{}<a:prstGeom prst="rect"/><a:solidFill><a:srgbClr val="00FF00"/></a:solidFill><a:ln w="0"><a:noFill/></a:ln></p:spPr><p:txBody><a:bodyPr wrap="none" lIns="38100" rIns="38100" tIns="0" bIns="0"><a:spAutoFit/></a:bodyPr><a:p><a:pPr algn="{align}"><a:defRPr sz="1200"><a:latin typeface="Pptx2img Metrics Test"/></a:defRPr></a:pPr><a:r><a:t>AAAA</a:t></a:r></a:p></p:txBody></p:sp>"#,
+            transform(x, 10, w, 60).replace("<a:xfrm>", &format!("<a:xfrm {xfrm}>"))
+        );
+        write_deck(&input, page("sld", "", "", &shape), vec![]);
+        check(run(&input, &out, false));
+        let img = image(&out);
+        let row = 65;
+        assert_eq!(rgb(&img, left, row), (0, 255, 0), "{align} {x} {w} {xfrm}");
+        assert_eq!(
+            rgb(&img, left + 39, row),
+            (0, 255, 0),
+            "{align} {x} {w} {xfrm}"
+        );
+        if left > 0 {
+            assert_eq!(
+                rgb(&img, left - 1, row),
+                (255, 255, 255),
+                "{align} {x} {w} {xfrm}"
+            );
+        }
+        assert_eq!(
+            rgb(&img, left + 40, row),
+            (255, 255, 255),
+            "{align} {x} {w} {xfrm}"
+        );
+        let records = diagnostics(&out);
+        assert!(
+            !records.iter().any(|d| {
+                let message = d["message"].as_str().unwrap();
+                message.contains("Horizontal shape autofit") || d["code"] == "text_overflow"
+            }),
+            "{records:?}"
+        );
+    }
+}
+
+#[test]
+fn unwrapped_shape_autofit_keeps_width_for_empty_and_vertical_bodies() {
+    for (vert, text, warned) in [
+        ("horz", "", false),
+        ("horz", "   ", false),
+        ("vert270", "AAAA", true),
+    ] {
+        let dir = tempfile::tempdir().unwrap();
+        let input = dir.path().join("autofit-kept.pptx");
+        let out = dir.path().join("out");
+        let shape = format!(
+            r#"<p:sp><p:spPr>{}<a:prstGeom prst="rect"/><a:solidFill><a:srgbClr val="00FF00"/></a:solidFill><a:ln w="0"><a:noFill/></a:ln></p:spPr><p:txBody><a:bodyPr wrap="none" vert="{vert}" lIns="0" rIns="0" tIns="0" bIns="0"><a:spAutoFit/></a:bodyPr><a:p><a:pPr><a:defRPr sz="600"><a:latin typeface="Pptx2img Metrics Test"/></a:defRPr></a:pPr><a:r><a:t>{text}</a:t></a:r></a:p></p:txBody></p:sp>"#,
+            transform(40, 10, 10, 80)
+        );
+        write_deck(&input, page("sld", "", "", &shape), vec![]);
+        check(run(&input, &out, false));
+        let img = image(&out);
+        assert_eq!(rgb(&img, 40, 85), (0, 255, 0), "{vert} {text:?}");
+        assert_eq!(rgb(&img, 49, 85), (0, 255, 0), "{vert} {text:?}");
+        assert_eq!(rgb(&img, 39, 85), (255, 255, 255), "{vert} {text:?}");
+        assert_eq!(rgb(&img, 50, 85), (255, 255, 255), "{vert} {text:?}");
+        let records = diagnostics(&out);
+        assert_eq!(
+            records.iter().any(|d| d["message"]
+                .as_str()
+                .unwrap()
+                .contains("Shape autofit for table cells or vertical text is unsupported")),
+            warned,
+            "{records:?}"
+        );
+        assert!(
+            !records.iter().any(|d| d["message"]
+                .as_str()
+                .unwrap()
+                .contains("Horizontal shape autofit")),
+            "{records:?}"
+        );
+    }
+}
