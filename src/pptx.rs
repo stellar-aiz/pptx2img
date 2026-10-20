@@ -33,6 +33,7 @@ const P: &str = "http://schemas.openxmlformats.org/presentationml/2006/main";
 const R: &str = "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
 const PKG_R: &str = "http://schemas.openxmlformats.org/package/2006/relationships";
 const ASVG: &str = "http://schemas.microsoft.com/office/drawing/2016/SVG/main";
+const A14: &str = "http://schemas.microsoft.com/office/drawing/2010/main";
 const EMU: f64 = 9525.0;
 pub struct Deck {
     pub width: f64,
@@ -652,7 +653,14 @@ fn render_shape(
         .flat_map(|n| n.children())
         .filter(|n| n.is_element())
     {
-        if !matches!(
+        if attr.has_tag_name((A, "extLst")) {
+            for name in unsupported_extensions(attr) {
+                warn(
+                    warnings,
+                    format!("Unsupported shape property extension: {name}"),
+                );
+            }
+        } else if !matches!(
             attr.tag_name().name(),
             "xfrm"
                 | "prstGeom"
@@ -926,6 +934,37 @@ fn is_svg_extension(list: Node<'_, '_>) -> bool {
                     .filter(|n| n.is_element())
                     .all(|n| n.has_tag_name((ASVG, "svgBlip")))
         })
+}
+/// Elements of a shape-property `a:extLst` that change rendering, by qualified name.
+/// The Office 2010 `a14:hidden*` extensions keep the fill, line, effects, or 3-D settings
+/// a shape had before they were switched off; a renderer that honours the visible
+/// properties ignores them, so they are not reported.
+fn unsupported_extensions(list: Node<'_, '_>) -> Vec<String> {
+    let ignorable = |n: &Node<'_, '_>| {
+        n.tag_name().namespace() == Some(A14)
+            && matches!(
+                n.tag_name().name(),
+                "hiddenFill" | "hiddenLine" | "hiddenEffects" | "hiddenScene3d" | "hiddenSp3d"
+            )
+    };
+    let mut names = Vec::new();
+    // `a:extLst` holds only `a:ext` wrappers (ECMA-376 Part 1 §20.1.2.2.15).
+    for element in list
+        .children()
+        .filter(|n| n.has_tag_name((A, "ext")))
+        .flat_map(|ext| ext.children().filter(|n| n.is_element()))
+        .filter(|n| !ignorable(n))
+    {
+        let name = element.tag_name();
+        let qualified = match name.namespace().and_then(|ns| element.lookup_prefix(ns)) {
+            Some(prefix) if !prefix.is_empty() => format!("{prefix}:{}", name.name()),
+            _ => name.name().to_string(),
+        };
+        if !names.contains(&qualified) {
+            names.push(qualified);
+        }
+    }
+    names
 }
 /// `asvg:svgBlip` children of `a:blip/a:extLst/a:ext` (Office 2016 SVG pictures).
 fn svg_blips<'a, 'i>(blip: Node<'a, 'i>) -> impl Iterator<Item = Node<'a, 'i>> {

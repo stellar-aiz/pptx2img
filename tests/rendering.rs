@@ -917,3 +917,51 @@ fn negative_row_height_and_zero_column_width_are_still_rejected() {
         );
     }
 }
+const A14: &str = "http://schemas.microsoft.com/office/drawing/2010/main";
+/// Render one unfilled, unstroked rectangle whose `a:extLst` holds a red `a14:hiddenFill`
+/// plus `extra` extensions; return the output directory and the shape-property messages.
+fn render_extensions(dir: &Path, extra: &str, strict: bool) -> (std::path::PathBuf, Vec<String>) {
+    let input = dir.join("a.pptx");
+    let out = dir.join("out");
+    let shape = format!(
+        r#"<p:sp><p:spPr>{}<a:prstGeom prst="rect"/><a:noFill/><a:ln><a:noFill/></a:ln><a:extLst><a:ext uri="{{909E8E84-426E-40DD-AFC4-6F175D3DCCD1}}"><a14:hiddenFill xmlns:a14="{A14}"><a:solidFill><a:srgbClr val="FF0000"/></a:solidFill></a14:hiddenFill></a:ext>{extra}</a:extLst></p:spPr></p:sp>"#,
+        transform(10, 10, 80, 80)
+    );
+    write_deck(&input, page("sld", "", "", &shape), vec![]);
+    check(run(&input, &out, strict));
+    let manifest: serde_json::Value =
+        serde_json::from_slice(&fs::read(out.join("manifest.json")).unwrap()).unwrap();
+    let messages = manifest["slides"][0]["diagnostics"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|d| d["message"].as_str().unwrap().to_string())
+        .filter(|m| m.contains("shape property"))
+        .collect();
+    (out, messages)
+}
+#[test]
+fn hidden_office_extensions_are_ignored_without_diagnostics() {
+    let dir = tempfile::tempdir().unwrap();
+    let extra = format!(
+        r#"<a:ext uri="{{91240B29-F687-4F45-9708-019B960494DF}}"><a14:hiddenLine xmlns:a14="{A14}" w="9525"><a:solidFill><a:srgbClr val="0000FF"/></a:solidFill></a14:hiddenLine></a:ext><a:ext uri="{{AF507438-7753-43E0-B8FC-AC1667EBCBE1}}"><a14:hiddenEffects xmlns:a14="{A14}"><a:effectLst/></a14:hiddenEffects></a:ext>"#
+    );
+    let (out, messages) = render_extensions(dir.path(), &extra, true);
+    let img = image(&out);
+    assert_eq!(rgb(&img, 50, 50), (255, 255, 255));
+    assert_eq!(rgb(&img, 10, 50), (255, 255, 255));
+    assert!(messages.is_empty());
+}
+#[test]
+fn other_shape_property_extensions_are_reported_by_element_name() {
+    let dir = tempfile::tempdir().unwrap();
+    let extra = r#"<a:ext uri="{00000000-0000-0000-0000-000000000000}"><x:future xmlns:x="urn:example:future"/></a:ext>"#;
+    let (_, messages) = render_extensions(dir.path(), extra, false);
+    assert_eq!(messages, ["Unsupported shape property extension: x:future"]);
+    let strict = dir.path().join("strict");
+    assert!(
+        !run(&dir.path().join("a.pptx"), &strict, true)
+            .status
+            .success()
+    );
+}
