@@ -965,3 +965,183 @@ fn other_shape_property_extensions_are_reported_by_element_name() {
             .success()
     );
 }
+
+fn diagnostics(out: &Path) -> Vec<serde_json::Value> {
+    let manifest: serde_json::Value =
+        serde_json::from_slice(&fs::read(out.join("manifest.json")).unwrap()).unwrap();
+    manifest["slides"][0]["diagnostics"]
+        .as_array()
+        .unwrap()
+        .clone()
+}
+
+#[test]
+fn unwrapped_shape_autofit_sets_width_and_keeps_the_alignment_edge() {
+    // "AAAA" is 32px wide in the metrics font at 12pt; with 4px insets the box is 40px.
+    // Under rot="180" or flipV the text reads from the page's right edge, so the
+    // left-aligned edge that stays fixed is the page-right one.
+    for (align, x, w, left, xfrm) in [
+        ("l", 40, 10, 40, ""),
+        ("ctr", 40, 10, 25, ""),
+        ("r", 40, 10, 10, ""),
+        ("l", 20, 60, 20, ""),
+        ("ctr", 20, 60, 30, ""),
+        ("r", 20, 60, 40, ""),
+        ("l", 40, 10, 40, r#"flipH="1""#),
+        ("l", 40, 10, 10, r#"rot="10800000""#),
+        ("l", 40, 10, 10, r#"flipV="1""#),
+    ] {
+        let dir = tempfile::tempdir().unwrap();
+        let input = dir.path().join("autofit-width.pptx");
+        let out = dir.path().join("out");
+        let shape = format!(
+            r#"<p:sp><p:spPr>{}<a:prstGeom prst="rect"/><a:solidFill><a:srgbClr val="00FF00"/></a:solidFill><a:ln w="0"><a:noFill/></a:ln></p:spPr><p:txBody><a:bodyPr wrap="none" lIns="38100" rIns="38100" tIns="0" bIns="0"><a:spAutoFit/></a:bodyPr><a:p><a:pPr algn="{align}"><a:defRPr sz="1200"><a:latin typeface="Pptx2img Metrics Test"/></a:defRPr></a:pPr><a:r><a:t>AAAA</a:t></a:r></a:p></p:txBody></p:sp>"#,
+            transform(x, 10, w, 60).replace("<a:xfrm>", &format!("<a:xfrm {xfrm}>"))
+        );
+        write_deck(&input, page("sld", "", "", &shape), vec![]);
+        check(run(&input, &out, false));
+        let img = image(&out);
+        let row = 65;
+        assert_eq!(rgb(&img, left, row), (0, 255, 0), "{align} {x} {w} {xfrm}");
+        assert_eq!(
+            rgb(&img, left + 39, row),
+            (0, 255, 0),
+            "{align} {x} {w} {xfrm}"
+        );
+        if left > 0 {
+            assert_eq!(
+                rgb(&img, left - 1, row),
+                (255, 255, 255),
+                "{align} {x} {w} {xfrm}"
+            );
+        }
+        assert_eq!(
+            rgb(&img, left + 40, row),
+            (255, 255, 255),
+            "{align} {x} {w} {xfrm}"
+        );
+        let records = diagnostics(&out);
+        assert!(
+            !records.iter().any(|d| {
+                let message = d["message"].as_str().unwrap();
+                message.contains("Horizontal shape autofit") || d["code"] == "text_overflow"
+            }),
+            "{records:?}"
+        );
+    }
+}
+
+#[test]
+fn unwrapped_shape_autofit_keeps_width_for_empty_and_vertical_bodies() {
+    for (vert, text, warned) in [
+        ("horz", "", false),
+        ("horz", "   ", false),
+        ("vert270", "AAAA", true),
+    ] {
+        let dir = tempfile::tempdir().unwrap();
+        let input = dir.path().join("autofit-kept.pptx");
+        let out = dir.path().join("out");
+        let shape = format!(
+            r#"<p:sp><p:spPr>{}<a:prstGeom prst="rect"/><a:solidFill><a:srgbClr val="00FF00"/></a:solidFill><a:ln w="0"><a:noFill/></a:ln></p:spPr><p:txBody><a:bodyPr wrap="none" vert="{vert}" lIns="0" rIns="0" tIns="0" bIns="0"><a:spAutoFit/></a:bodyPr><a:p><a:pPr><a:defRPr sz="600"><a:latin typeface="Pptx2img Metrics Test"/></a:defRPr></a:pPr><a:r><a:t>{text}</a:t></a:r></a:p></p:txBody></p:sp>"#,
+            transform(40, 10, 10, 80)
+        );
+        write_deck(&input, page("sld", "", "", &shape), vec![]);
+        check(run(&input, &out, false));
+        let img = image(&out);
+        assert_eq!(rgb(&img, 40, 85), (0, 255, 0), "{vert} {text:?}");
+        assert_eq!(rgb(&img, 49, 85), (0, 255, 0), "{vert} {text:?}");
+        assert_eq!(rgb(&img, 39, 85), (255, 255, 255), "{vert} {text:?}");
+        assert_eq!(rgb(&img, 50, 85), (255, 255, 255), "{vert} {text:?}");
+        let records = diagnostics(&out);
+        assert_eq!(
+            records.iter().any(|d| d["message"]
+                .as_str()
+                .unwrap()
+                .contains("Shape autofit for table cells or vertical text is unsupported")),
+            warned,
+            "{records:?}"
+        );
+        assert!(
+            !records.iter().any(|d| d["message"]
+                .as_str()
+                .unwrap()
+                .contains("Horizontal shape autofit")),
+            "{records:?}"
+        );
+    }
+}
+
+#[test]
+fn autofit_in_a_small_inset_text_area_grows_only_by_the_needed_height() {
+    // A custom geometry with the `plus` preset's text rectangle: inset on every side
+    // by 47.769% of the shorter side, so the text area is under 1px of a 20px square.
+    // It does not scale with the shape, which used to drive the height to the limit.
+    let geometry = r#"<a:custGeom><a:avLst/><a:gdLst><a:gd name="x1" fmla="*/ ss 47769 100000"/><a:gd name="x2" fmla="+- r 0 x1"/><a:gd name="y2" fmla="+- b 0 x1"/></a:gdLst><a:rect l="x1" t="x1" r="x2" b="y2"/><a:pathLst><a:path w="100" h="100"><a:moveTo><a:pt x="0" y="0"/></a:moveTo><a:lnTo><a:pt x="100" y="0"/></a:lnTo><a:lnTo><a:pt x="100" y="100"/></a:lnTo><a:lnTo><a:pt x="0" y="100"/></a:lnTo><a:close/></a:path></a:pathLst></a:custGeom>"#;
+    for (paragraph, grows) in [
+        ("<a:p><a:endParaRPr sz=\"600\"/></a:p>", false),
+        (
+            r#"<a:p><a:pPr><a:defRPr sz="600"><a:latin typeface="Pptx2img Metrics Test"/></a:defRPr></a:pPr><a:r><a:t>A</a:t></a:r></a:p>"#,
+            true,
+        ),
+    ] {
+        let dir = tempfile::tempdir().unwrap();
+        let input = dir.path().join("inset.pptx");
+        let out = dir.path().join("out");
+        let shape = format!(
+            r#"<p:sp><p:spPr>{}{geometry}<a:solidFill><a:srgbClr val="00FF00"/></a:solidFill><a:ln w="0"><a:noFill/></a:ln></p:spPr><p:txBody><a:bodyPr wrap="square" lIns="54000" tIns="54000" rIns="54000" bIns="54000" anchor="ctr"><a:spAutoFit/></a:bodyPr>{paragraph}</p:txBody></p:sp>"#,
+            transform(40, 40, 20, 20)
+        );
+        write_deck(&input, page("sld", "", "", &shape), vec![]);
+        check(run(&input, &out, false));
+        let img = image(&out);
+        let filled: Vec<u32> = (0..100)
+            .filter(|&y| rgb(&img, 41, y) == (0, 255, 0))
+            .collect();
+        let (top, bottom) = (filled[0], *filled.last().unwrap());
+        if grows {
+            // About 20px of text area are needed (8px line plus two 5.7px insets),
+            // so the square grows to roughly 39px around its centre, not to the limit.
+            assert!(top < 38 && bottom > 61, "{top}..{bottom}");
+            assert!(top > 25 && bottom < 75, "{top}..{bottom}");
+        } else {
+            assert_eq!((top, bottom), (40, 59));
+        }
+        let records = diagnostics(&out);
+        assert!(
+            !records.iter().any(|d| {
+                let message = d["message"].as_str().unwrap();
+                // The one-letter case still overflows its sub-pixel width, which
+                // autofit does not change for wrapped text.
+                message.contains("autofit reached its limit")
+                    || (!grows && d["code"] == "text_overflow")
+            }),
+            "{records:?}"
+        );
+    }
+    // Unwrapped text sizes the width through the same small text area: "AAAA" needs
+    // 16px plus two 5.7px insets, so the left-aligned square grows to about 46px.
+    let dir = tempfile::tempdir().unwrap();
+    let input = dir.path().join("inset-width.pptx");
+    let out = dir.path().join("out");
+    let shape = format!(
+        r#"<p:sp><p:spPr>{}{geometry}<a:solidFill><a:srgbClr val="00FF00"/></a:solidFill><a:ln w="0"><a:noFill/></a:ln></p:spPr><p:txBody><a:bodyPr wrap="none" lIns="54000" tIns="54000" rIns="54000" bIns="54000" anchor="ctr"><a:spAutoFit/></a:bodyPr><a:p><a:pPr><a:defRPr sz="600"><a:latin typeface="Pptx2img Metrics Test"/></a:defRPr></a:pPr><a:r><a:t>AAAA</a:t></a:r></a:p></p:txBody></p:sp>"#,
+        transform(40, 40, 20, 20)
+    );
+    write_deck(&input, page("sld", "", "", &shape), vec![]);
+    check(run(&input, &out, false));
+    let img = image(&out);
+    let filled: Vec<u32> = (0..100)
+        .filter(|&x| rgb(&img, x, 50) == (0, 255, 0))
+        .collect();
+    let (left, right) = (filled[0], *filled.last().unwrap());
+    assert_eq!(left, 40);
+    assert!(right > 80 && right < 92, "{left}..{right}");
+    // Once the square is wider than tall, the inset follows the height, so the text
+    // area cannot catch up: the growth stops after one step and says so.
+    assert!(diagnostics(&out).iter().any(|d| {
+        d["message"]
+            .as_str()
+            .unwrap()
+            .contains("autofit reached its limit")
+    }));
+}

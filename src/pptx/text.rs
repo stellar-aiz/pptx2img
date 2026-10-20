@@ -459,6 +459,12 @@ pub(super) struct TextExtent {
     /// Height the text needs including the top and bottom insets, independent of the
     /// given box height and anchor. Tables use it to grow rows to fit their content.
     pub required_height: f64,
+    /// Final box width. It differs from the given width only for `spAutoFit` bodies
+    /// that do not wrap, which take the widest line plus the left and right insets.
+    pub width: f64,
+    /// Horizontal shift of the box's left edge that keeps the edge on the first
+    /// paragraph's alignment side fixed (0 for left, half the change for centre).
+    pub offset_x: f64,
 }
 #[derive(Clone, Copy, Debug)]
 struct AutoFit {
@@ -601,6 +607,12 @@ pub(super) fn render<'a>(
     let mut counters = bullets::Counters::default();
     let mut lines = Vec::new();
     let mut cursor = 0.0;
+    // Widest line, measured from the left inset to the end of its paragraph's right margin.
+    let mut natural_width: f64 = 0.0;
+    let mut has_visible_text = false;
+    // Only unwrapped shape autofit needs the natural width.
+    let fit_width = autofit.expand && !wrap_enabled;
+    let mut first_alignment = None;
     for paragraph in body.children().filter(|n| n.has_tag_name((A, "p"))) {
         let pp = child(paragraph, A, "pPr");
         let level = pp
@@ -728,6 +740,13 @@ pub(super) fn render<'a>(
         let paragraph_left = left + margin_left;
         let paragraph_width = (available - margin_left - margin_right).max(1.0);
         let first_indent = if marker.is_some() { 0.0 } else { indent };
+        if first_alignment.is_none() {
+            first_alignment = Some(attr(&paragraph_props, "algn").unwrap_or("l"));
+        }
+        has_visible_text |= autofit.expand && all.iter().any(|g| !g.ch.is_whitespace());
+        if fit_width && !marker_glyphs.is_empty() {
+            natural_width = natural_width.max(margin_left + indent + text_width(&marker_glyphs));
+        }
         if marker.is_some() && text_width(&marker_glyphs) > -indent && !marker_glyphs.is_empty() {
             warn(
                 warnings,
@@ -804,6 +823,10 @@ pub(super) fn render<'a>(
             let line_indent = if line_index == 0 { first_indent } else { 0.0 };
             let line_available = paragraph_width - line_indent;
             let width = layout_width(&glyph_line, line_available, hanging);
+            if fit_width {
+                natural_width = natural_width
+                    .max(margin_left + line_indent + text_width(&glyph_line) + margin_right);
+            }
             if width > line_available + 0.01 {
                 warnings.push(Code::TextOverflow, "Text exceeds the text box width");
             }
@@ -876,13 +899,16 @@ pub(super) fn render<'a>(
             "Shape autofit for table cells or vertical text is unsupported",
         );
     }
-    if autofit.expand && !wrap_enabled {
-        warn(
-            warnings,
-            "Horizontal shape autofit without wrapping is unsupported; only height is expanded",
-        );
-    }
-    let expanded_height = if can_expand {
+    // Without wrapping, shape autofit also sets the width to the widest line. A body
+    // without visible text keeps its saved width rather than collapsing to its insets.
+    let fitted_width = if can_expand && fit_width && has_visible_text {
+        left + right + natural_width
+    } else {
+        w
+    };
+    // A body without visible text keeps its saved size: the saved box is what Office
+    // displays, and an inset text area can be far smaller than the shape.
+    let expanded_height = if can_expand && has_visible_text {
         h.max(top + content_height + bottom)
     } else {
         h
@@ -896,9 +922,18 @@ pub(super) fn render<'a>(
                 _ => 0.0,
             },
         required_height: top + content_height + bottom,
+        width: fitted_width,
+        offset_x: -(fitted_width - w)
+            * match first_alignment {
+                Some("ctr") => 0.5,
+                Some("r") => 1.0,
+                _ => 0.0,
+            },
     };
     let h = expanded_height;
-    if content_height > h - top - bottom + 0.01 {
+    // An autofit body without visible text keeps its saved height; its empty line
+    // overflowing that box draws nothing, so it is not reported.
+    if content_height > h - top - bottom + 0.01 && (has_visible_text || !autofit.expand) {
         warnings.push(Code::TextOverflow, "Text exceeds the text box height");
     }
     let vertical = match anchor {
@@ -1521,8 +1556,17 @@ mod tests {
         anchor: &str,
         paragraphs: &str,
     ) -> (String, TextExtent, Warnings) {
+        autofit_fixture_with_wrap(mode, inherited_mode, anchor, "square", paragraphs)
+    }
+    fn autofit_fixture_with_wrap(
+        mode: &str,
+        inherited_mode: &str,
+        anchor: &str,
+        wrap: &str,
+        paragraphs: &str,
+    ) -> (String, TextExtent, Warnings) {
         let xml = format!(
-            r#"<root xmlns:a="{A}" xmlns:p="{P}"><p:txBody><a:bodyPr lIns="0" rIns="0" tIns="0" bIns="0" anchor="{anchor}">{mode}</a:bodyPr><a:lstStyle><a:lvl1pPr><a:defRPr sz="1500"><a:latin typeface="Pptx2img Metrics Test"/></a:defRPr></a:lvl1pPr></a:lstStyle>{paragraphs}</p:txBody><p:txBody><a:bodyPr>{inherited_mode}</a:bodyPr></p:txBody></root>"#
+            r#"<root xmlns:a="{A}" xmlns:p="{P}"><p:txBody><a:bodyPr lIns="0" rIns="0" tIns="0" bIns="0" anchor="{anchor}" wrap="{wrap}">{mode}</a:bodyPr><a:lstStyle><a:lvl1pPr><a:defRPr sz="1500"><a:latin typeface="Pptx2img Metrics Test"/></a:defRPr></a:lvl1pPr></a:lstStyle>{paragraphs}</p:txBody><p:txBody><a:bodyPr>{inherited_mode}</a:bodyPr></p:txBody></root>"#
         );
         let doc = Document::parse(&xml).unwrap();
         let bodies: Vec<_> = doc
@@ -1621,6 +1665,31 @@ mod tests {
                     .any(|d| d.code == Code::TextOverflow)
             );
         }
+    }
+    #[test]
+    fn unwrapped_shape_fit_measures_the_widest_line_and_alignment_offset() {
+        // Metrics-font "A" is 10px at 15pt; the fixture box is 200px wide with zero insets.
+        for (align, offset) in [("l", 0.0), ("ctr", 70.0), ("r", 140.0)] {
+            let paragraphs = format!(
+                r#"<a:p><a:pPr algn="{align}"/><a:r><a:t>AA</a:t></a:r></a:p><a:p><a:pPr algn="l"/><a:r><a:t>AAAAAA</a:t></a:r></a:p>"#
+            );
+            let (_, extent, warnings) =
+                autofit_fixture_with_wrap("<a:spAutoFit/>", "", "t", "none", &paragraphs);
+            assert!(
+                !warnings
+                    .iter()
+                    .any(|w| w.contains("Horizontal shape autofit"))
+            );
+            assert_eq!(extent.width, 60.0);
+            assert_eq!(extent.offset_x, offset);
+        }
+        let (_, extent, _) = autofit_fixture(
+            "<a:spAutoFit/>",
+            "",
+            "t",
+            "<a:p><a:r><a:t>AA</a:t></a:r></a:p>",
+        );
+        assert_eq!((extent.width, extent.offset_x), (200.0, 0.0));
     }
     #[test]
     fn bullets_and_wrapped_lines_have_separate_starts() {
