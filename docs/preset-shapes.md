@@ -33,7 +33,7 @@ definitions instead of hand-written outlines: chevron, triangle, downArrow,
 leftArrow, leftRightArrow, upDownArrow, diamond, trapezoid, pie, star5, cloud,
 round2SameRect, wedgeEllipseCallout, flowChartAlternateProcess,
 flowChartMultidocument, and the connectors bentConnector3, bentConnector4,
-curvedConnector2, and curvedConnector3.
+curvedConnector2, and curvedConnector3. The [next tier](#next-tier-presets) adds 31 more.
 
 Each definition lists the preset's adjustment defaults, guides, text rectangle,
 and paths from the ECMA-376 Part 1 DrawingMLGeometries part. An independent
@@ -81,6 +81,49 @@ saved preset path, even without connection sites. Page 6 draws the same geometri
 as ordinary shapes, where LibreOffice follows the preset path and the pages match.
 This renderer always draws the saved preset path. Before this change, page 5/6
 "passed" only because the omitted thin lines are a small share of the page.
+
+## Next tier presets
+
+Thirty-one further presets use the same evaluator: rtTriangle, foldedCorner,
+borderCallout1, borderCallout2, wedgeRectCallout, cloudCallout, upArrowCallout,
+downArrowCallout, rightArrowCallout, flowChartDocument, flowChartMagneticDisk,
+flowChartTerminator, flowChartExtract, flowChartConnector, blockArc, donut, arc,
+can, snip1Rect, mathPlus, mathMultiply, plus, leftBracket, rightBracket, leftBrace,
+bentUpArrow, curvedDownArrow, circularArrow, irregularSeal2, star7, and
+parallelogram. They were transcribed independently from the ECMA-376 Part 1
+DrawingMLGeometries part and checked against LibreOffice renderings. Presets
+unknown to the table (for example heart) still produce `Unsupported preset shape`.
+
+The definition format gained one directive, `approx <note>`, which records an
+approximation warning once per shape:
+
+- Lighten/darken path shading (foldedCorner's folded flap, can's top face) is not
+  drawn; the shapes use the normal fill. Warning: "lighten and darken path shading
+  is not drawn".
+- curvedDownArrow draws the darker inner face of the band with the normal fill.
+- cloudCallout draws the published cloud body; its two trailing bubbles are placed
+  along the tail by a fitted ratio rather than the published guide chain, so their
+  size and position are approximate.
+- Callouts keep the whole box as the text rectangle; brackets and braces inset it
+  by the corner arc; arrow callouts use the box part only.
+
+Fixture pages 7-10 of `tests/visual/make_preset_shapes.py`: pages 7-8 hold the 31
+presets at their defaults (18 and 13 shapes), pages 9-10 the same presets with
+non-default adjustments, 15 degree rotation, and alternating flips. Pages 1-6 are
+unchanged.
+
+Comparison with LibreOffice 26.2.5.2 at 1600px on 2026-10-20 (thresholds unchanged:
+MAE 0.02, changed pixels 5%, channel tolerance 16):
+
+| Page | Before (`0f85650`) | After |
+|---|---|---|
+| 7 next tier, defaults (18) | MAE 0.333579, changed 48.117% (fail: omitted) | MAE 0.003503, changed 1.663% |
+| 8 next tier, defaults (13) | MAE 0.188520, changed 27.271% (fail: omitted) | MAE 0.001318, changed 1.164% |
+| 9 adjusted, rotated, flipped (18) | MAE 0.335346, changed 48.332% (fail: omitted) | MAE 0.005556, changed 2.562% |
+| 10 adjusted, rotated, flipped (13) | MAE 0.183331, changed 26.453% (fail: omitted) | MAE 0.003309, changed 2.262% |
+
+Pages 1-6 keep their recorded results (page 5 remains the known `p:cxnSp` routing
+difference above).
 
 ## Lines and connectors
 
