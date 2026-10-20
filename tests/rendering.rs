@@ -1108,10 +1108,13 @@ fn autofit_in_a_small_inset_text_area_grows_only_by_the_needed_height() {
         }
         let records = diagnostics(&out);
         assert!(
-            !records.iter().any(|d| d["message"]
-                .as_str()
-                .unwrap()
-                .contains("autofit reached its limit")),
+            !records.iter().any(|d| {
+                let message = d["message"].as_str().unwrap();
+                // The one-letter case still overflows its sub-pixel width, which
+                // autofit does not change for wrapped text.
+                message.contains("autofit reached its limit")
+                    || (!grows && d["code"] == "text_overflow")
+            }),
             "{records:?}"
         );
     }

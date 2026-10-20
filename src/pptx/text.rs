@@ -931,7 +931,9 @@ pub(super) fn render<'a>(
             },
     };
     let h = expanded_height;
-    if content_height > h - top - bottom + 0.01 {
+    // An autofit body without visible text keeps its saved height; its empty line
+    // overflowing that box draws nothing, so it is not reported.
+    if content_height > h - top - bottom + 0.01 && (has_visible_text || !autofit.expand) {
         warnings.push(Code::TextOverflow, "Text exceeds the text box height");
     }
     let vertical = match anchor {
