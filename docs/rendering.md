@@ -296,7 +296,14 @@ densities below 1 dpi are ignored, so a deck cannot inflate the rasterized patte
 `b`) shrink or, when negative, extend the stretched picture inside the frame; the frame
 still clips it, and an inset that leaves no area omits the picture (`Image fill
 rectangle leaves no visible area: <part>`). These apply to `p:pic` pictures (and OLE
-previews); picture fills of shapes and backgrounds are not covered here.
+previews). Picture fills of shapes and backgrounds (`a:blipFill` in `p:spPr` or `p:bgPr`)
+go through the same code, so `a:tile` on them repeats the picture over the shape's box
+with the same tile-size rules and bounds, and records no tiling diagnostic.
+
+Tile density is not verified against PowerPoint (unmeasured): on a self-made fixture
+(a picture without `pHYs`, `sx`/`sy` of 50%) LibreOffice draws about 9 tile columns and
+this renderer about 7, because the 96 dpi default above differs from LibreOffice's. The
+default is kept until PowerPoint has been measured.
 
 Fixture: `examples/image-effects.pptx` with per-picture regions
 `examples/image-effects.json`; generator: `tests/visual/make_image_effects.py`. Each

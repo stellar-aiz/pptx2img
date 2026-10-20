@@ -35,6 +35,7 @@ const P: &str = "http://schemas.openxmlformats.org/presentationml/2006/main";
 const R: &str = "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
 const PKG_R: &str = "http://schemas.openxmlformats.org/package/2006/relationships";
 const ASVG: &str = "http://schemas.microsoft.com/office/drawing/2016/SVG/main";
+/// Office 2010 drawing extensions (`a14:hidden*`, `a14:imgProps`, `a14:useLocalDpi`).
 const A14: &str = "http://schemas.microsoft.com/office/drawing/2010/main";
 const EMU: f64 = 9525.0;
 pub struct Deck {
@@ -913,8 +914,10 @@ fn fill_line(node: Node<'_, '_>, theme: &Theme, warnings: &mut Warnings) -> Stri
     }
     fill(node, "none", theme, warnings)
 }
-/// Paint the `a:blipFill` of `props` stretched over a `size` box, as an SVG pattern that the
-/// shape outline (or background rectangle) clips. Returns `none` if the picture is omitted.
+/// Paint the `a:blipFill` of `props` over a `size` box, as an SVG pattern that the shape
+/// outline (or background rectangle) clips. The picture is stretched, or repeated through
+/// the shared tile pattern when the fill has `a:tile` (with the tile-size bounds of
+/// `picture_effects::tile_pattern`). Returns `none` if the picture is omitted.
 fn picture_fill(
     props: Node<'_, '_>,
     parts: &Parts,
@@ -1023,33 +1026,41 @@ fn svg_picture<'p>(id: &str, parts: &'p Parts, rels: &'p Relationships) -> Resul
 }
 /// Report each extension element of `list` that changes rendering.
 fn warn_extensions(list: Node<'_, '_>, warnings: &mut Warnings) {
-    for name in unsupported_extensions(list) {
+    for name in unsupported_shape_extensions(list) {
         warn(
             warnings,
             format!("Unsupported shape property extension: {name}"),
         );
     }
 }
-/// Elements of a shape-property `a:extLst` that change rendering, by qualified name.
+/// Extension elements of `list` (an `a:extLst`) whose `(namespace, local name)` is not in
+/// `allow`. `a:extLst` holds only `a:ext` wrappers (ECMA-376 Part 1 §20.1.2.2.15).
+fn unsupported_extensions<'a, 'i>(list: Node<'a, 'i>, allow: &[(&str, &str)]) -> Vec<Node<'a, 'i>> {
+    list.children()
+        .filter(|n| n.has_tag_name((A, "ext")))
+        .flat_map(|ext| ext.children().filter(|n| n.is_element()))
+        .filter(|n| {
+            let name = n.tag_name();
+            !allow
+                .iter()
+                .any(|(ns, local)| name.namespace() == Some(ns) && name.name() == *local)
+        })
+        .collect()
+}
+/// Shape-property extensions that change rendering, by qualified name.
 /// The Office 2010 `a14:hidden*` extensions keep the fill, line, effects, or 3-D settings
 /// a shape had before they were switched off; a renderer that honours the visible
 /// properties ignores them, so they are not reported.
-fn unsupported_extensions(list: Node<'_, '_>) -> Vec<String> {
-    let ignorable = |n: &Node<'_, '_>| {
-        n.tag_name().namespace() == Some(A14)
-            && matches!(
-                n.tag_name().name(),
-                "hiddenFill" | "hiddenLine" | "hiddenEffects" | "hiddenScene3d" | "hiddenSp3d"
-            )
-    };
+fn unsupported_shape_extensions(list: Node<'_, '_>) -> Vec<String> {
+    let allow = [
+        (A14, "hiddenFill"),
+        (A14, "hiddenLine"),
+        (A14, "hiddenEffects"),
+        (A14, "hiddenScene3d"),
+        (A14, "hiddenSp3d"),
+    ];
     let mut names = Vec::new();
-    // `a:extLst` holds only `a:ext` wrappers (ECMA-376 Part 1 §20.1.2.2.15).
-    for element in list
-        .children()
-        .filter(|n| n.has_tag_name((A, "ext")))
-        .flat_map(|ext| ext.children().filter(|n| n.is_element()))
-        .filter(|n| !ignorable(n))
-    {
+    for element in unsupported_extensions(list, &allow) {
         let name = element.tag_name();
         let qualified = match name.namespace().and_then(|ns| element.lookup_prefix(ns)) {
             Some(prefix) if !prefix.is_empty() => format!("{prefix}:{}", name.name()),

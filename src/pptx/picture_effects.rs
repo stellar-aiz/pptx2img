@@ -5,9 +5,6 @@
 //! All primitives work on sRGB values (`color-interpolation-filters="sRGB"`).
 use super::*;
 
-/// Office 2010 drawing extensions (`a14:useLocalDpi`, `a14:imgProps`).
-// Shape-side extension checks keep their own constant; share one when both land.
-const A14: &str = "http://schemas.microsoft.com/office/drawing/2010/main";
 /// Rec. 709 luma weights, as SVG `feColorMatrix type="saturate"` uses.
 const LUMA: [f64; 3] = [0.2126, 0.7152, 0.0722];
 
@@ -126,28 +123,23 @@ fn elements<'a, 'i>(node: Node<'a, 'i>) -> impl Iterator<Item = Node<'a, 'i>> {
 }
 /// Extensions of `a:blip/a:extLst`: SVG pictures and local-DPI flags draw nothing.
 fn extensions(list: Node<'_, '_>, chain: &mut Chain, warnings: &mut Warnings) {
-    for ext in elements(list) {
-        for item in elements(ext) {
-            if item.has_tag_name((ASVG, "svgBlip")) || item.has_tag_name((A14, "useLocalDpi")) {
-                continue;
-            }
-            if !item.has_tag_name((A14, "imgProps")) {
-                warn(
-                    warnings,
-                    format!("Unsupported picture extension: {}", item.tag_name().name()),
-                );
-                continue;
-            }
-            let effects = item
-                .children()
-                .filter(|n| n.has_tag_name((A14, "imgLayer")))
-                .flat_map(|layer| layer.children())
-                .filter(|n| n.has_tag_name((A14, "imgEffect")))
-                .flat_map(|effect| elements(effect));
-            for effect in effects {
-                office_effect(effect, chain, warnings);
-            }
-        }
+    let allow = [(ASVG, "svgBlip"), (A14, "useLocalDpi"), (A14, "imgProps")];
+    for item in unsupported_extensions(list, &allow) {
+        warn(
+            warnings,
+            format!("Unsupported picture extension: {}", item.tag_name().name()),
+        );
+    }
+    let effects = elements(list)
+        .flat_map(|ext| elements(ext))
+        .filter(|n| n.has_tag_name((A14, "imgProps")))
+        .flat_map(|props| props.children())
+        .filter(|n| n.has_tag_name((A14, "imgLayer")))
+        .flat_map(|layer| layer.children())
+        .filter(|n| n.has_tag_name((A14, "imgEffect")))
+        .flat_map(|effect| elements(effect));
+    for effect in effects {
+        office_effect(effect, chain, warnings);
     }
 }
 /// Replace `from` with `to` where all three channels match exactly.
