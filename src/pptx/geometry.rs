@@ -44,6 +44,71 @@ pub(super) fn custom(
     guides::custom(node, w, h, style, warnings)
 }
 
+/// Rectangle, rounded rectangle, and ellipse: the outline is an SVG primitive and the text
+/// rectangle follows the ECMA-376 preset definition (the full box, the box inset by
+/// `0.29289 * radius`, and the inscribed rectangle of the ellipse).
+fn basic(
+    node: Node<'_, '_>,
+    kind: &str,
+    w: f64,
+    h: f64,
+    style: &str,
+    warnings: &mut Warnings,
+) -> Geometry {
+    if kind != "roundRect" && node.descendants().any(|n| n.has_tag_name((A, "gd"))) {
+        warn(warnings, "Shape adjustments are unsupported");
+    }
+    match kind {
+        "rect" => Geometry {
+            svg: format!("<rect width=\"{w}\" height=\"{h}\" {style}/>"),
+            text: (0.0, 0.0, w, h),
+        },
+        "roundRect" => {
+            let mut adjustment = 16667.0_f64;
+            for guide in node.descendants().filter(|n| n.has_tag_name((A, "gd"))) {
+                let value = guide
+                    .attribute("fmla")
+                    .and_then(|s| s.strip_prefix("val "))
+                    .and_then(|s| s.trim().parse::<f64>().ok())
+                    .filter(|v| v.is_finite());
+                if let (Some("adj"), Some(value)) = (guide.attribute("name"), value) {
+                    adjustment = value;
+                } else {
+                    warn(
+                        warnings,
+                        "Rounded rectangle adjustment formulas are unsupported",
+                    );
+                }
+            }
+            let radius = w.min(h) * adjustment.clamp(0.0, 50000.0) / 100000.0;
+            let inset = radius * 0.29289;
+            Geometry {
+                svg: format!(
+                    "<rect width=\"{w}\" height=\"{h}\" rx=\"{radius}\" ry=\"{radius}\" {style}/>"
+                ),
+                text: (inset, inset, w - 2.0 * inset, h - 2.0 * inset),
+            }
+        }
+        _ => {
+            // Inset of the rectangle inscribed at 45 degrees on each axis.
+            let (dx, dy) = (
+                w / 2.0 * (1.0 - std::f64::consts::FRAC_1_SQRT_2),
+                h / 2.0 * (1.0 - std::f64::consts::FRAC_1_SQRT_2),
+            );
+            Geometry {
+                svg: format!(
+                    "<ellipse cx=\"{}\" cy=\"{}\" rx=\"{}\" ry=\"{}\" {style}/>",
+                    w / 2.0,
+                    h / 2.0,
+                    w / 2.0,
+                    h / 2.0
+                ),
+                text: (dx, dy, w - 2.0 * dx, h - 2.0 * dy),
+            }
+        }
+    }
+}
+
 pub(super) fn preset(
     node: Node<'_, '_>,
     w: f64,
@@ -52,6 +117,9 @@ pub(super) fn preset(
     warnings: &mut Warnings,
 ) -> Option<Geometry> {
     let kind = node.attribute("prst")?;
+    if matches!(kind, "rect" | "roundRect" | "ellipse") {
+        return Some(basic(node, kind, w, h, style, warnings));
+    }
     let definition = guides::find(kind);
     if definition.is_none()
         && !matches!(
@@ -209,6 +277,25 @@ pub(super) fn preset(
 #[cfg(test)]
 mod tests {
     use super::*;
+    fn text_of(source: &str, w: f64, h: f64) -> (f64, f64, f64, f64) {
+        let doc = Document::parse(source).unwrap();
+        preset(doc.root_element(), w, h, "", &mut Warnings::default())
+            .unwrap()
+            .text
+    }
+    #[test]
+    fn basic_presets_use_the_specified_text_rectangle() {
+        let ellipse = format!(r#"<a:prstGeom xmlns:a="{A}" prst="ellipse"/>"#);
+        let (l, t, tw, th) = text_of(&ellipse, 300.0, 200.0);
+        assert!((l - 300.0 * 0.146_446_6).abs() < 1e-3 && (t - 200.0 * 0.146_446_6).abs() < 1e-3);
+        assert!((tw - (300.0 - 2.0 * l)).abs() < 1e-9 && (th - (200.0 - 2.0 * t)).abs() < 1e-9);
+        let round = format!(r#"<a:prstGeom xmlns:a="{A}" prst="roundRect"/>"#);
+        let inset = 100.0 * 16667.0 / 100000.0 * 0.29289;
+        let rect = text_of(&round, 300.0, 100.0);
+        assert!((rect.0 - inset).abs() < 1e-9 && (rect.2 - (300.0 - 2.0 * inset)).abs() < 1e-9);
+        let plain = format!(r#"<a:prstGeom xmlns:a="{A}" prst="rect"/>"#);
+        assert_eq!(text_of(&plain, 30.0, 20.0), (0.0, 0.0, 30.0, 20.0));
+    }
     #[test]
     fn text_rect_follows_adjusted_outline_and_degenerate_size_is_finite() {
         let source = format!(

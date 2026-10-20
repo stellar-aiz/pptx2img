@@ -1191,3 +1191,89 @@ fn rotated_vertical_text_runs_along_the_box_and_stays_inside() {
         );
     }
 }
+
+type TextBounds = (u32, u32, u32, u32);
+
+/// Render one text-bearing preset shape without fill or outline, so only text pixels are blue.
+fn blue_text_bounds(
+    kind: &str,
+    guides: &str,
+    frame: (i32, i32, i32, i32),
+    anchor: &str,
+    paragraph: &str,
+) -> (Option<TextBounds>, Vec<serde_json::Value>) {
+    let dir = tempfile::tempdir().unwrap();
+    let input = dir.path().join("basic.pptx");
+    let out = dir.path().join("out");
+    let shape = format!(
+        r#"<p:sp><p:spPr>{}<a:prstGeom prst="{kind}"><a:avLst>{guides}</a:avLst></a:prstGeom><a:noFill/></p:spPr><p:txBody><a:bodyPr lIns="0" rIns="0" tIns="0" bIns="0" anchor="{anchor}"><a:noAutofit/></a:bodyPr><a:p><a:pPr algn="l"><a:defRPr sz="900"><a:solidFill><a:srgbClr val="0000FF"/></a:solidFill><a:latin typeface="Pptx2img Metrics Test"/></a:defRPr></a:pPr>{paragraph}</a:p></p:txBody></p:sp>"#,
+        transform(frame.0, frame.1, frame.2, frame.3)
+    );
+    write_deck(&input, page("sld", "", "", &shape), vec![]);
+    check(run(&input, &out, false));
+    let img = image(&out);
+    let mut bounds: Option<TextBounds> = None;
+    for y in 0..img.height() {
+        for x in 0..img.width() {
+            if rgb(&img, x, y) == (0, 0, 255) {
+                let b = bounds.get_or_insert((x, y, x, y));
+                *b = (b.0.min(x), b.1.min(y), b.2.max(x), b.3.max(y));
+            }
+        }
+    }
+    let manifest: serde_json::Value =
+        serde_json::from_slice(&fs::read(out.join("manifest.json")).unwrap()).unwrap();
+    let records = manifest["slides"][0]["diagnostics"]
+        .as_array()
+        .unwrap()
+        .clone();
+    (bounds, records)
+}
+
+#[test]
+fn ellipse_text_starts_inside_the_inscribed_rectangle_and_wraps_there() {
+    let words = "<a:r><a:t>AAAA AAAA AAAA AAAA AAAA AAAA</a:t></a:r>";
+    let (bounds, records) = blue_text_bounds("ellipse", "", (10, 10, 80, 80), "t", words);
+    let (left, top, right, _) = bounds.expect("text is drawn");
+    // Inset is 80 * (1 - cos 45deg) / 2 = 11.7px on each side.
+    assert!(left >= 21, "left {left}");
+    assert!(top >= 21, "top {top}");
+    assert!(right <= 78, "right {right}");
+    assert!(!records.iter().any(|d| d["code"] == "text_overflow"));
+}
+
+#[test]
+fn round_rect_text_is_inset_by_the_corner_radius() {
+    let text = "<a:r><a:t>AAAA AAAA AAAA AAAA AAAA AAAA</a:t></a:r>";
+    // adj 50000 on a 100x40 box gives radius 20 and an inset of 0.29289 * 20 = 5.86px.
+    let adj = r#"<a:gd name="adj" fmla="val 50000"/>"#;
+    let (bounds, records) = blue_text_bounds("roundRect", adj, (0, 20, 100, 40), "t", text);
+    let (left, _, right, _) = bounds.expect("text is drawn");
+    // Left-aligned text starts at the inset (5.86px); the full box would start it at 0.
+    assert!((5..=8).contains(&left) && right <= 94, "{left} {right}");
+    assert!(!records.iter().any(|d| d["code"] == "text_overflow"));
+    // Rounded rectangles keep the adjustment-formula diagnostic.
+    let formula = r#"<a:gd name="adj" fmla="*/ w 1 4"/>"#;
+    let (_, records) = blue_text_bounds("roundRect", formula, (0, 20, 100, 40), "ctr", text);
+    assert!(records.iter().any(|d| {
+        d["message"]
+            .as_str()
+            .unwrap()
+            .contains("Rounded rectangle adjustment formulas are unsupported")
+    }));
+}
+
+#[test]
+fn small_ellipse_records_text_overflow_when_text_exceeds_the_inscribed_rectangle() {
+    // Three 9pt lines are 36px tall: they fit the 40px box but not its 28.3px inscribed height.
+    let lines =
+        "<a:r><a:t>A</a:t></a:r><a:br/><a:r><a:t>A</a:t></a:r><a:br/><a:r><a:t>A</a:t></a:r>";
+    let (_, records) = blue_text_bounds("ellipse", "", (30, 30, 40, 40), "t", lines);
+    let overflow = records
+        .iter()
+        .filter(|d| d["code"] == "text_overflow")
+        .count();
+    assert_eq!(overflow, 1, "{records:?}");
+    let (_, records) = blue_text_bounds("rect", "", (30, 30, 40, 40), "t", lines);
+    assert!(!records.iter().any(|d| d["code"] == "text_overflow"));
+}

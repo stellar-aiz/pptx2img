@@ -316,7 +316,7 @@ that owns its behaviour.
 
 | Generator | Described in |
 |---|---|
-| `make_arrow_sizes.py`, `make_connector_routing.py`, `make_lines.py`, `make_preset_shapes.py`, `make_theme_lines.py` | [preset shapes](../../docs/preset-shapes.md) |
+| `make_arrow_sizes.py`, `make_connector_routing.py`, `make_ellipse_text.py`, `make_lines.py`, `make_preset_shapes.py`, `make_theme_lines.py` | [preset shapes](../../docs/preset-shapes.md) |
 | `make_auto_punctuation.py`, `make_boundary_widths.py`, `make_character_spacing.py`, `make_composite_shapes.py`, `make_punctuation_positions.py` | [rendering notes](../../docs/rendering-notes.md) |
 | `make_colors.py`, `make_fills.py`, `make_gradients.py` | [colors](../../docs/colors.md) |
 | `make_metafile_pictures.py` | [EMF and WMF pictures survey](../../docs/rendering.md#emf-and-wmf-pictures-survey) and [EMF and WMF pictures](../../docs/rendering.md#emf-and-wmf-pictures); `tests/fixtures/metafile/` holds its nine metafiles for `tests/metafile_pictures.rs` |

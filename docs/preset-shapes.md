@@ -186,3 +186,32 @@ specification agreement. Do not change transform order or thresholds to hide it.
 `python tests/visual/make_connector_routing.py /tmp/routing.pptx` generates paired
 controls differing only in connection references, showing LibreOffice's moved
 start point versus our preserved route.
+
+## Text rectangles of rect, roundRect, and ellipse
+
+`rect`, `roundRect`, and `ellipse` are still drawn as SVG primitives (their outlines are
+unchanged), but their text is laid out in the ECMA-376 Part 1 DrawingMLGeometries text
+rectangle instead of the whole bounding box:
+
+| Preset | Text rectangle |
+|---|---|
+| `rect` | The whole box |
+| `roundRect` | The box inset by `0.29289 * r` on every side, where `r = min(w, h) * adj / 100000` and `adj` is pinned to 0-50000 |
+| `ellipse` | The inscribed rectangle: inset by `w * (1 - cos 45deg) / 2` horizontally and `h * (1 - cos 45deg) / 2` vertically (about 14.6% per side) |
+
+Because the text area is smaller, text that does not fit it now records `text_overflow`
+(previously it was laid out over the full box, so it started at the corner of the box,
+outside a circle, and an ellipse drawn later could cover it without any diagnostic).
+The `roundRect` adjustment handling and its "Rounded rectangle adjustment formulas are
+unsupported" diagnostic are unchanged.
+
+`python tests/visual/make_ellipse_text.py /tmp/ellipse-text.pptx` generates three
+concentric circles, two overlapping ellipses, a roundRect (`adj` 50000), a rect, and a
+small ellipse with text taller than its inscribed rectangle. Against LibreOffice 26.2.5.2 (cd7284b4)
+at `--width 1600` with the default thresholds, the page changed from MAE 0.01918 / changed
+pixels 4.25% (before) to MAE 0.01324 / 3.49% (after). Both are inside the thresholds, so
+the numbers alone do not show the defect: before, the outer circle's label was hidden
+under the next circle and the overlapping-ellipse labels ran past the ellipse outline.
+Compare the label positions in the two renderings, not only the metrics. Thresholds were
+not changed. Remaining differences are line-breaking and glyph advance differences
+(LibreOffice breaks a few lines one character later) and are not hidden.
