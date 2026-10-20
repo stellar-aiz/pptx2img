@@ -231,6 +231,21 @@ recorded metrics.
   --regions examples/custom-geometry.json --width 1600 --out target/visual-tests/custom-geometry
 ```
 
+## Independent image-effects fixture
+
+Generate 13 pages, each with a generated picture shown unchanged and with one `a:blip`
+effect, `a:tile` fill, or `a:stretch/a:fillRect` inset, plus per-picture regions.
+LibreOffice ignores picture tiles, fill rectangles, and `a14:imgProps` corrections, so
+those pages are expected to differ. See
+[rendering](../../docs/rendering.md#picture-effects-and-fills) for recorded metrics.
+
+```sh
+.venv-visual/bin/python tests/visual/make_image_effects.py examples/image-effects.pptx
+.venv-visual/bin/python tests/visual/compare.py \
+  --binary target/release/pptx2img --fixture examples/image-effects.pptx \
+  --regions examples/image-effects.json --width 1600 --out target/visual-tests/image-effects
+```
+
 ## Generators documented elsewhere
 
 Every `make_*.py` generator is described either in this file or in the feature page

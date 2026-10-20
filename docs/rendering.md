@@ -203,6 +203,65 @@ corners, an open `fill="none"` quadratic curve, a `gdLst` bracket whose path has
 0.0074; every cell MAE <= 0.0023, changed <= 0.017). Before this support the same
 page measured MAE 0.1644, changed 0.4060. PowerPoint was not compared directly.
 
+## Picture effects and fills
+
+Children of a picture's `a:blip` are applied as one SVG filter, in document order:
+
+| Element | Rendering | Diagnostic |
+|---|---|---|
+| `a:alphaModFix` | Alpha multiplied by `amt` | none |
+| `a:grayscl` | Saturation 0 (Rec. 709 luma) | none |
+| `a:biLevel` | Black or white by luma against `thresh` | none |
+| `a:lum` | Linear brightness/contrast around mid-grey | `approximation` |
+| `a:duotone` | Luma mapped between the two colors | `approximation` |
+| `a:clrChange` | Pixels exactly equal to `clrFrom` become `clrTo` (with its alpha); no tolerance | `approximation` |
+| `a14:saturation` (in `a14:imgProps`) | Saturation scaled by `sat` | none |
+| `a14:brightnessContrast` (in `a14:imgProps`) | Same mapping as `a:lum` | `approximation` |
+| `a14:backgroundRemoval`, `a14:sharpenSoften`, other `a14:imgEffect` children | Picture drawn unchanged | `unsupported`, `Unsupported picture effect: <name>` |
+| Other `a:blip` children (for example `a:alphaBiLevel`, `a:hsl`, `a:tint`) | Ignored | `unsupported`, `Unsupported picture effect: <name>` |
+
+Extensions that do not change pixels produce no diagnostic: `asvg:svgBlip` (handled
+above) and `a14:useLocalDpi`. Background removal stores only marks; the removed area
+is not in the package, so it is not reproduced. Any other extension element is named
+in an `unsupported` diagnostic (`Unsupported picture extension: <name>`). Effects that
+leave pixels unchanged (`alphaModFix` without `amt`, an empty `lum`) add no filter.
+
+`a:tile` repeats the picture (after `srcRect` cropping) over the picture frame. The
+tile size is the picture's natural size scaled by `sx`/`sy`; the natural size uses the
+PNG `pHYs` or JPEG JFIF density, and 96 dpi when neither is present (EXIF resolution is
+not read). `algn` places the first tile, `tx`/`ty` offset it, and `flip` mirrors every
+other tile along x, y, or both. A tiled SVG picture has no natural size and uses the
+frame as the tile (`approximation`). `a:stretch/a:fillRect` insets (`l`, `t`, `r`,
+`b`) shrink or, when negative, extend the stretched picture inside the frame; the frame
+still clips it, and an inset that leaves no area omits the picture (`Image fill
+rectangle leaves no visible area: <part>`). These apply to `p:pic` pictures (and OLE
+previews); picture fills of shapes and backgrounds are not covered here.
+
+Fixture: `examples/image-effects.pptx` with per-picture regions
+`examples/image-effects.json`; generator: `tests/visual/make_image_effects.py`. Each
+of its 13 slides shows the original picture on the left and the effect on the right,
+over a checkerboard. At `--width 1600` on macOS against LibreOffice 26.2:
+
+| Slide | Before (main 0f85650): page MAE / changed, effect region | After: page MAE / changed, effect region |
+|---|---|---|
+| 1 alphaModFix | 0.0408 / 0.1672 fail, 0.2014 / 0.8877 | 0.0086 / 0.0262 pass, 0.0147 / 0.0718 fail |
+| 2 grayscl | 0.0326 / 0.1471 fail, 0.1693 / 0.7929 | 0.0093 / 0.0384 pass, 0.0346 / 0.1640 fail |
+| 3 biLevel | 0.0528 / 0.1486 fail, 0.2802 / 0.7929 | 0.0102 / 0.0179 pass, 0.0337 / 0.0364 fail |
+| 4 lum | 0.0286 / 0.1548 fail, 0.1158 / 0.7958 | 0.0143 / 0.0278 pass, 0.0333 / 0.0614 fail |
+| 5 a14 saturation | 0.0065 / 0.0185 pass, 0.0083 / 0.0343 | 0.0350 / 0.1502 fail, 0.1733 / 0.7967 fail |
+| 6 a14 brightnessContrast | 0.0109 / 0.0245 pass, 0.0083 / 0.0343 | 0.0291 / 0.1557 fail, 0.1139 / 0.7934 fail |
+| 7 duotone | 0.0417 / 0.1879 fail, 0.2019 / 0.9995 | 0.0111 / 0.0359 pass, 0.0247 / 0.1203 fail |
+| 8 clrChange | 0.0246 / 0.0464 fail, 0.0756 / 0.1430 | 0.0137 / 0.0292 pass, 0.0121 / 0.0436 pass |
+| 9-11 tile (9a-9c) | pass (picture stretched once, as LibreOffice draws it) | 0.0761-0.0777 / 0.178-0.182 fail, region MAE 0.40-0.42 |
+| 12 fillRect (10) | pass (as LibreOffice) | 0.0609 / 0.1648 fail, 0.3090 / 0.8633 fail |
+| 13 metadata + backgroundRemoval (11) | 0.0160 / 0.0311 pass | unchanged |
+
+LibreOffice 26.2 draws `p:pic` tiles and fill rectangles as one stretched picture and
+ignores `a14:imgProps` corrections, so slides 5, 6, and 9-12 differ from it by design;
+the remaining region failures on slides 1-4 and 7 are edge resampling and the differing
+effect curves, and are kept at the unchanged thresholds. PowerPoint was not compared
+directly.
+
 ## Known limitations
 
 - Complete layout/master property and text-style inheritance; `themeOverride` and
@@ -213,9 +272,10 @@ page measured MAE 0.1644, changed 0.4060. PowerPoint was not compared directly.
 - Charts, SmartArt, group-fill inheritance, freeform path fill modes other than
   normal and none, and many presets.
 - Full table theme-style coverage, theme/line/table-cell/text gradients,
-  inner shadows/glow, theme effects,
-  and image tiling/effects/fill rectangles. Selected color alpha and outer shadows
-  are supported; see the feature-specific notes for their limits.
+  inner shadows/glow, theme effects, and the picture effects listed as
+  unsupported under [picture effects and fills](#picture-effects-and-fills).
+  Selected color alpha and outer shadows are supported; see the feature-specific
+  notes for their limits.
 - EMF/WMF images, SVG data referenced directly from `a:blip/@r:embed`, text inside
   SVG pictures, external links, animations, Strict OOXML, legacy `.ppt`, and
   encrypted files.

@@ -38,13 +38,31 @@ fn with_alpha(rgb: &str, alpha: f64) -> String {
         format!("{rgb}{alpha:02X}")
     }
 }
+/// Like `with_opacity`, for one color element itself (for example each `a:duotone` child).
+pub(super) fn element_with_opacity(
+    element: Node<'_, '_>,
+    theme: &Theme,
+    warnings: &mut Warnings,
+) -> (String, f64) {
+    resolve_first(std::iter::once(element), theme, None, warnings)
+        .unwrap_or_else(|| ("#000000".into(), 1.0))
+}
 fn resolve_inner(
     node: Node<'_, '_>,
     theme: &Theme,
     placeholder: Option<&str>,
     warnings: &mut Warnings,
 ) -> Option<(String, f64)> {
-    for c in node.children().filter(|n| n.is_element()) {
+    resolve_first(node.children(), theme, placeholder, warnings)
+}
+/// The first resolvable color element among `candidates`.
+fn resolve_first<'a, 'i: 'a>(
+    candidates: impl Iterator<Item = Node<'a, 'i>>,
+    theme: &Theme,
+    placeholder: Option<&str>,
+    warnings: &mut Warnings,
+) -> Option<(String, f64)> {
+    for c in candidates.filter(|n| n.is_element()) {
         let base = match c.tag_name().name() {
             "prstClr" => match c.attribute("val") {
                 Some("black") => Some("#000000"),

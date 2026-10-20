@@ -19,6 +19,7 @@ pub(crate) use fonts::Resolver as FontResolver;
 mod layout;
 mod lines;
 mod objects;
+mod picture_effects;
 mod raster;
 mod table_styles;
 mod text;
@@ -701,7 +702,7 @@ fn render_shape(
         })
         .unwrap_or(0);
     if node.has_tag_name((P, "pic")) {
-        render_image(node, parts, rels, w, h, svg, warnings)?;
+        render_image(node, parts, rels, theme, (w, h), svg, warnings)?;
     } else {
         let explicit_fill = props_chain.iter().copied().find(|n| layout::has_fill(*n));
         let fill = if let Some(explicit) = explicit_fill {
@@ -846,9 +847,11 @@ fn fill_line(node: Node<'_, '_>, theme: &Theme, warnings: &mut Warnings) -> Stri
     }
     fill(node, "none", theme, warnings)
 }
-/// An image part ready to embed: its `href` and diagnostics to record if it is drawn.
+/// An image part ready to embed: its `href`, natural size in px (raster only), and
+/// diagnostics to record if it is drawn.
 struct Picture {
     href: String,
+    size: Option<(f64, f64)>,
     notes: Vec<(Code, String)>,
 }
 /// Data of the internal part that relationship `id` names, or why it cannot be used.
@@ -886,9 +889,15 @@ fn raster_picture<'p>(
     let dimensions = imagesize::blob_size(data)
         .map_err(|_| format!("Cannot read image dimensions: {target}"))?;
     let (width, height) = (dimensions.width, dimensions.height);
+    let size = Some(picture_effects::natural_size(
+        data,
+        width as f64,
+        height as f64,
+    ));
     match raster::prepare(target, data, mime, width, height) {
         Ok(raster::Prepared::Embed) => Ok(Picture {
             href: format!("data:{mime};base64,{}", STANDARD.encode(data)),
+            size,
             notes: vec![],
         }),
         Ok(raster::Prepared::Downscaled {
@@ -897,6 +906,7 @@ fn raster_picture<'p>(
             height: th,
         }) => Ok(Picture {
             href: href.to_string(),
+            size,
             notes: vec![(
                 Code::Approximation,
                 format!(
@@ -921,19 +931,9 @@ fn svg_picture<'p>(id: &str, parts: &'p Parts, rels: &'p Relationships) -> Resul
     }
     Ok(Picture {
         href: format!("data:image/svg+xml;base64,{}", STANDARD.encode(data)),
+        size: None,
         notes,
     })
-}
-/// An `a:extLst` whose extensions hold only `asvg:svgBlip`.
-fn is_svg_extension(list: Node<'_, '_>) -> bool {
-    list.has_tag_name((A, "extLst"))
-        && list.children().filter(|n| n.is_element()).all(|ext| {
-            ext.has_tag_name((A, "ext"))
-                && ext
-                    .children()
-                    .filter(|n| n.is_element())
-                    .all(|n| n.has_tag_name((ASVG, "svgBlip")))
-        })
 }
 /// Elements of a shape-property `a:extLst` that change rendering, by qualified name.
 /// The Office 2010 `a14:hidden*` extensions keep the fill, line, effects, or 3-D settings
@@ -977,8 +977,8 @@ fn render_image(
     node: Node<'_, '_>,
     parts: &Parts,
     rels: &Relationships,
-    w: f64,
-    h: f64,
+    theme: &Theme,
+    (w, h): (f64, f64),
     svg: &mut String,
     warnings: &mut Warnings,
 ) -> Result<bool> {
@@ -1010,11 +1010,21 @@ fn render_image(
         .map(|key| crop.map(|n| number(n, key, 0.0) / 100000.0).unwrap_or(0.0))
         .collect();
     let (left, top, right, bottom) = (values[0], values[1], values[2], values[3]);
+    let name = rels.get(first).map_or(first, |part| part.target.as_str());
     if left + right >= 1.0 || top + bottom >= 1.0 {
-        let name = rels.get(first).map_or(first, |part| part.target.as_str());
         warnings.push(
             Code::Omitted,
             format!("Image crop leaves no visible area: {name}"),
+        );
+        return Ok(false);
+    }
+    let blip_fill = blip.parent().filter(|n| n.tag_name().name() == "blipFill");
+    let tile = blip_fill.and_then(|n| child(n, A, "tile"));
+    let rect = picture_effects::fill_rect(blip_fill, w, h);
+    if tile.is_none() && (rect.2 <= 0.0 || rect.3 <= 0.0) {
+        warnings.push(
+            Code::Omitted,
+            format!("Image fill rectangle leaves no visible area: {name}"),
         );
         return Ok(false);
     }
@@ -1040,28 +1050,49 @@ fn render_image(
         warnings.push(Code::Omitted, reasons.join("; "));
         return Ok(false);
     };
-    // The SVG extension is handled; any other blip child is an effect this renderer ignores.
-    let effects = blip
-        .children()
-        .any(|n| n.is_element() && !is_svg_extension(n));
-    if effects
-        || node.descendants().any(|n| {
-            n.has_tag_name((A, "tile"))
-                || (n.has_tag_name((A, "fillRect")) && n.attributes().len() > 0)
-        })
-    {
-        warn(
-            warnings,
-            "Image tiling, effects, and fill rectangles are unsupported",
-        );
-    }
+    let seed = svg.len();
+    let mut defs = String::new();
+    let filter = picture_effects::filter(blip, theme, (w, h), seed, &mut defs, warnings);
     for (code, message) in picture.notes {
         warnings.push(code, message);
     }
-    let iw = w / (1.0 - left - right);
-    let ih = h / (1.0 - top - bottom);
+    let crop = [left, top, right, bottom];
+    let body = match tile {
+        Some(tile) => {
+            let natural = picture.size.unwrap_or_else(|| {
+                warnings.push(
+                    Code::Approximation,
+                    "Tiled SVG pictures use the picture frame as the tile size",
+                );
+                (w, h)
+            });
+            let id = picture_effects::tile_pattern(
+                tile,
+                &picture.href,
+                natural,
+                crop,
+                (w, h),
+                seed,
+                &mut defs,
+            );
+            format!("<rect width=\"{w}\" height=\"{h}\" fill=\"url(#{id})\"/>")
+        }
+        // A full-frame picture keeps the single clipped `<image>` it always had.
+        None => picture_effects::image(&picture.href, crop, rect, rect != (0.0, 0.0, w, h)),
+    };
+    if !defs.is_empty() {
+        svg.push_str(&format!("<defs>{defs}</defs>"));
+    }
+    if let Some(id) = &filter {
+        svg.push_str(&format!("<g filter=\"url(#{id})\">"));
+    }
     // Clip to the nested SVG viewport; rotate and flip in the outer shape coordinates.
-    svg.push_str(&format!("<svg width=\"{w}\" height=\"{h}\" overflow=\"hidden\"><image x=\"{}\" y=\"{}\" width=\"{iw}\" height=\"{ih}\" preserveAspectRatio=\"none\" href=\"{}\"/></svg>", -left*iw, -top*ih, picture.href));
+    svg.push_str(&format!(
+        "<svg width=\"{w}\" height=\"{h}\" overflow=\"hidden\">{body}</svg>"
+    ));
+    if filter.is_some() {
+        svg.push_str("</g>");
+    }
     Ok(true)
 }
 #[cfg(test)]

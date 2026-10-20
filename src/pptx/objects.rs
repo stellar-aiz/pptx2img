@@ -191,8 +191,8 @@ impl<'d> Renderer<'_, 'd> {
             preview.unwrap(),
             self.parts,
             self.rels,
-            w,
-            h,
+            self.theme,
+            (w, h),
             self.svg,
             self.warnings,
         )?;

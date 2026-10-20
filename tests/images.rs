@@ -328,3 +328,188 @@ fn oversized_layout_picture_is_downscaled_on_every_slide() {
         );
     }
 }
+
+const A14: &str = "http://schemas.microsoft.com/office/drawing/2010/main";
+/// A 60x60 px picture at the origin whose `a:blip` holds `effects`, filled by `fill`.
+fn effect_picture(effects: &str, fill: &str) -> String {
+    format!(
+        r#"<p:pic><p:nvPicPr><p:cNvPr id="5" name="fx"/></p:nvPicPr><p:blipFill><a:blip xmlns:a14="{A14}" r:embed="img">{effects}</a:blip>{fill}</p:blipFill><p:spPr>{}</p:spPr></p:pic>"#,
+        transform(0, 0, 60, 60)
+    )
+}
+const STRETCH: &str = "<a:stretch><a:fillRect/></a:stretch>";
+fn office_effect(inner: &str) -> String {
+    format!(
+        r#"<a:extLst><a:ext uri="{{BEBA8EAE-BF5A-486C-A8C5-ECC9F3942E4B}}"><a14:imgProps><a14:imgLayer><a14:imgEffect>{inner}</a14:imgEffect></a14:imgLayer></a14:imgProps></a:ext></a:extLst>"#
+    )
+}
+/// A red left half and a white right half.
+fn red_white() -> Vec<u8> {
+    png_columns(10, 10, |x| {
+        if x < 5 {
+            [255, 0, 0, 255]
+        } else {
+            [255, 255, 255, 255]
+        }
+    })
+}
+fn near((r, g, b): (u8, u8, u8), expected: (u8, u8, u8)) -> bool {
+    [(r, expected.0), (g, expected.1), (b, expected.2)]
+        .iter()
+        .all(|(a, e)| a.abs_diff(*e) <= 6)
+}
+
+#[test]
+fn metadata_extensions_record_no_picture_diagnostic() {
+    let dir = tempfile::tempdir().unwrap();
+    let effects = r#"<a:extLst><a:ext uri="{28A0092B-C50C-407E-A947-70E740481C1C}"><a14:useLocalDpi val="0"/></a:ext></a:extLst>"#;
+    let (img, report) = render_deck(
+        dir.path(),
+        "dpi.png",
+        &effect_picture(effects, STRETCH),
+        red_white(),
+    );
+    assert_eq!(rgb(&img, 10, 30), (255, 0, 0));
+    assert!(messages(&report, "unsupported").is_empty(), "{report}");
+    assert!(messages(&report, "approximation").is_empty(), "{report}");
+}
+
+#[test]
+fn office_corrections_are_rendered_or_named() {
+    let dir = tempfile::tempdir().unwrap();
+    let removal = office_effect(r#"<a14:backgroundRemoval t="0" b="100000" l="0" r="100000"/>"#);
+    let (img, report) = render_deck(
+        dir.path(),
+        "removal.png",
+        &effect_picture(&removal, STRETCH),
+        red_white(),
+    );
+    assert_eq!(rgb(&img, 10, 30), (255, 0, 0));
+    assert_eq!(
+        messages(&report, "unsupported"),
+        ["Unsupported picture effect: backgroundRemoval"]
+    );
+    let saturation = office_effect(r#"<a14:saturation sat="0"/>"#);
+    let (img, report) = render_deck(
+        dir.path(),
+        "saturation.png",
+        &effect_picture(&saturation, STRETCH),
+        red_white(),
+    );
+    let (r, g, b) = rgb(&img, 10, 30);
+    assert!(
+        r == g && g == b && r < 80,
+        "red becomes dark grey: {r},{g},{b}"
+    );
+    assert!(messages(&report, "unsupported").is_empty(), "{report}");
+}
+
+#[test]
+fn standard_picture_effects_change_pixels() {
+    let dir = tempfile::tempdir().unwrap();
+    for (name, effects, red, white) in [
+        // Half opacity over the white slide.
+        (
+            "alpha.png",
+            r#"<a:alphaModFix amt="50000"/>"#,
+            (255, 128, 128),
+            (255, 255, 255),
+        ),
+        // Rec. 709 luma of red is 0.2126.
+        ("gray.png", "<a:grayscl/>", (54, 54, 54), (255, 255, 255)),
+        (
+            "bilevel.png",
+            r#"<a:biLevel thresh="50000"/>"#,
+            (0, 0, 0),
+            (255, 255, 255),
+        ),
+        (
+            "lum.png",
+            r#"<a:lum bright="50000"/>"#,
+            (255, 128, 128),
+            (255, 255, 255),
+        ),
+        // Black maps to the first color and white to the second.
+        (
+            "duotone.png",
+            r#"<a:duotone><a:srgbClr val="000080"/><a:srgbClr val="FFFF00"/></a:duotone>"#,
+            (54, 54, 100),
+            (255, 255, 0),
+        ),
+    ] {
+        let (img, report) = render_deck(
+            dir.path(),
+            name,
+            &effect_picture(effects, STRETCH),
+            red_white(),
+        );
+        assert!(
+            near(rgb(&img, 10, 30), red),
+            "{name}: {:?}",
+            rgb(&img, 10, 30)
+        );
+        assert!(
+            near(rgb(&img, 50, 30), white),
+            "{name}: {:?}",
+            rgb(&img, 50, 30)
+        );
+        assert!(
+            messages(&report, "unsupported").is_empty(),
+            "{name}: {report}"
+        );
+    }
+}
+
+#[test]
+fn color_change_makes_the_matching_color_transparent() {
+    let dir = tempfile::tempdir().unwrap();
+    let effects = r#"<a:clrChange><a:clrFrom><a:srgbClr val="FFFFFF"/></a:clrFrom><a:clrTo><a:srgbClr val="FFFFFF"><a:alpha val="0"/></a:srgbClr></a:clrTo></a:clrChange>"#;
+    let shapes = rect(0, 0, 60, 60, "00FF00") + &effect_picture(effects, STRETCH);
+    let (img, report) = render_deck(dir.path(), "change.png", &shapes, red_white());
+    assert_eq!(rgb(&img, 10, 30), (255, 0, 0));
+    assert_eq!(rgb(&img, 50, 30), (0, 255, 0));
+    assert_eq!(
+        messages(&report, "approximation"),
+        ["Picture color change is approximated with an exact color match"]
+    );
+}
+
+#[test]
+fn tiled_picture_fill_repeats_the_scaled_image() {
+    let dir = tempfile::tempdir().unwrap();
+    // A 10x10 px picture at twice its size tiles every 20 px; stretched once, x=15 would
+    // be red and x=45 blue.
+    let tile = r#"<a:tile tx="0" ty="0" sx="200000" sy="200000" flip="none" algn="tl"/>"#;
+    let (img, report) = render_deck(
+        dir.path(),
+        "tile.png",
+        &effect_picture("", tile),
+        png_columns(10, 10, red_blue(10)),
+    );
+    for (x, expected) in [
+        (5, (255, 0, 0)),
+        (15, (0, 0, 255)),
+        (25, (255, 0, 0)),
+        (45, (255, 0, 0)),
+        (55, (0, 0, 255)),
+    ] {
+        assert_eq!(rgb(&img, x, 30), expected, "x={x}");
+    }
+    assert!(messages(&report, "unsupported").is_empty(), "{report}");
+}
+
+#[test]
+fn fill_rectangle_insets_the_stretched_picture() {
+    let dir = tempfile::tempdir().unwrap();
+    let fill = r#"<a:stretch><a:fillRect l="50000"/></a:stretch>"#;
+    let (img, report) = render_deck(
+        dir.path(),
+        "inset.png",
+        &effect_picture("", fill),
+        png_columns(10, 10, red_blue(10)),
+    );
+    assert_eq!(rgb(&img, 15, 30), (255, 255, 255));
+    assert_eq!(rgb(&img, 35, 30), (255, 0, 0));
+    assert_eq!(rgb(&img, 55, 30), (0, 0, 255));
+    assert!(messages(&report, "unsupported").is_empty(), "{report}");
+}
