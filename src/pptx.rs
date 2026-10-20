@@ -817,42 +817,10 @@ fn render_shape(
             if let Some(preset) = outline(geometry, w, h, &style, warnings) {
                 svg.push_str(&preset.svg);
             } else {
-                if geometry.attribute("prst") != Some("roundRect")
-                    && geometry.descendants().any(|n| n.has_tag_name((A, "gd")))
-                {
+                if geometry.descendants().any(|n| n.has_tag_name((A, "gd"))) {
                     warn(warnings, "Shape adjustments are unsupported");
                 }
                 match geometry.attribute("prst").unwrap_or("") {
-                    "rect" => {
-                        svg.push_str(&format!("<rect width=\"{w}\" height=\"{h}\" {style}/>"))
-                    }
-                    "roundRect" => {
-                        let mut adjustment = 16667.0_f64;
-                        for guide in geometry.descendants().filter(|n| n.has_tag_name((A, "gd"))) {
-                            let value = guide
-                                .attribute("fmla")
-                                .and_then(|s| s.strip_prefix("val "))
-                                .and_then(|s| s.trim().parse::<f64>().ok())
-                                .filter(|v| v.is_finite());
-                            if let (Some("adj"), Some(value)) = (guide.attribute("name"), value) {
-                                adjustment = value;
-                            } else {
-                                warn(
-                                    warnings,
-                                    "Rounded rectangle adjustment formulas are unsupported",
-                                );
-                            }
-                        }
-                        let radius = w.min(h) * adjustment.clamp(0.0, 50000.0) / 100000.0;
-                        svg.push_str(&format!("<rect width=\"{w}\" height=\"{h}\" rx=\"{radius}\" ry=\"{radius}\" {style}/>"));
-                    }
-                    "ellipse" => svg.push_str(&format!(
-                        "<ellipse cx=\"{}\" cy=\"{}\" rx=\"{}\" ry=\"{}\" {style}/>",
-                        w / 2.0,
-                        h / 2.0,
-                        w / 2.0,
-                        h / 2.0
-                    )),
                     "bentConnector2" => {
                         svg.push_str(&format!("<path d=\"M0 0 H{w} V{h}\" {style}/>"))
                     }
