@@ -1,5 +1,5 @@
 {
-  "comment": "Pins the LibreOffice reference on Windows runners to Noto Sans CJK JP, which the visual job installs from a pinned release (see README, Deterministic reference fonts). Keys match font-substitution.json.",
+  "comment": "Pins the LibreOffice reference on Windows runners to Noto Sans CJK JP, which the visual job installs from a pinned release (see README, Deterministic reference fonts). Keys match font-substitution.json. The CJK, Aptos and Century families added after the corpus survey are those whose LibreOffice fallback was seen to switch between runs.",
   "families": {
     "Meiryo": "Noto Sans CJK JP",
     "Meiryo UI": "Noto Sans CJK JP",
@@ -20,6 +20,33 @@
     "Calibri": "Noto Sans CJK JP",
     "Calibri Light": "Noto Sans CJK JP",
     "Cambria": "Noto Sans CJK JP",
-    "Segoe UI": "Noto Sans CJK JP"
+    "Segoe UI": "Noto Sans CJK JP",
+    "HGP創英角ｺﾞｼｯｸUB": "Noto Sans CJK JP",
+    "HG創英角ｺﾞｼｯｸUB": "Noto Sans CJK JP",
+    "HGP創英角ゴシックUB": "Noto Sans CJK JP",
+    "HG創英角ゴシックUB": "Noto Sans CJK JP",
+    "HG丸ｺﾞｼｯｸM-PRO": "Noto Sans CJK JP",
+    "HGP丸ｺﾞｼｯｸM-PRO": "Noto Sans CJK JP",
+    "メイリオ": "Noto Sans CJK JP",
+    "游ゴシック Light": "Noto Sans CJK JP",
+    "游ゴシック Medium": "Noto Sans CJK JP",
+    "Yu Gothic Light": "Noto Sans CJK JP",
+    "Yu Gothic Medium": "Noto Sans CJK JP",
+    "Microsoft YaHei": "Noto Sans CJK JP",
+    "Microsoft YaHei UI": "Noto Sans CJK JP",
+    "微软雅黑": "Noto Sans CJK JP",
+    "BIZ UDPゴシック": "Noto Sans CJK JP",
+    "BIZ UDゴシック": "Noto Sans CJK JP",
+    "BIZ UDP明朝": "Noto Sans CJK JP",
+    "BIZ UD明朝": "Noto Sans CJK JP",
+    "IPA Pゴシック": "Noto Sans CJK JP",
+    "IPAexゴシック": "Noto Sans CJK JP",
+    "RB Office": "Noto Sans CJK JP",
+    "Aptos": "Noto Sans CJK JP",
+    "Aptos Display": "Noto Sans CJK JP",
+    "Aptos Narrow": "Noto Sans CJK JP",
+    "Arial Nova Cond": "Noto Sans CJK JP",
+    "Century Gothic": "Noto Sans CJK JP",
+    "Century": "Noto Sans CJK JP"
   }
 }

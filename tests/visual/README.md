@@ -121,16 +121,43 @@ comparison measures layout rather than font choice. Override it with
 | `environment.libreoffice_font_substitution` | The family-to-substitute table pinned in the profile |
 | `environment.font_substitution_sha256` | Hash of the copied `font-substitution.json` |
 | `reference_pdf_fonts` | Fonts used by text in the reference PDF (`name`, `embedded`, `pages`) |
+| `requested_families` | `a:latin` / `a:ea` typefaces declared by the deck (slides, layouts, masters, notes, theme, charts, diagrams); theme references such as `+mn-lt` are skipped because the theme part declares the faces they name |
+| `unpinned_families` | The requested families the table does not list (compared case-insensitively). Their reference font is left to LibreOffice's own fallback and can differ between runs |
 
 The table pins only the listed families. A family that is not listed, or a substitute that
-is not installed, still falls back inside LibreOffice, so compare `reference_pdf_fonts`
-between runs when reference images differ. The substitution replaces font choice, not font
+is not installed, still falls back inside LibreOffice. `compare.py` therefore prints the
+unpinned families as a warning and records them in `unpinned_families`; a drifting
+reference for text in those families is explained by the report itself. The theme's
+declared faces are listed even when no text uses them, so the list can be longer than the
+set of families actually drawn. `--strict-font-pinning` turns a non-empty list into a
+failure (`status` = `unpinned_families`, exit 1); `check_determinism.py` accepts the same
+flag and otherwise lists the unpinned families as a warning in its summary. Compare
+`reference_pdf_fonts` between runs when reference images differ.
+
+The default tables also pin the families that fell back differently between runs in a
+local corpus survey: Japanese gothic variants (HGP/HG, Meiryo, Yu Gothic Light/Medium,
+BIZ UD, IPA P), Microsoft YaHei, and the Latin families Aptos, Century and Century Gothic,
+which otherwise ended up on HiraMinProN, SimSong, PyosuFontFree or Liberation. The macOS
+table additionally maps shipped faces (Arial, Georgia, Times New Roman, ...) to themselves
+so they count as pinned without changing the reference; the Linux and Windows tables
+leave those out, so Arial text is reported as unpinned there. Add a row to all three
+tables when a new family shows up in `unpinned_families`. The substitution replaces font choice, not font
 metrics: pinned references still differ from pptx2img where layout differs.
 
 ```sh
 .venv-visual/bin/python tests/visual/make_font_substitution.py /tmp/font-substitution.pptx
 .venv-visual/bin/python tests/visual/compare.py --binary target/release/pptx2img \
   --fixture /tmp/font-substitution.pptx --width 1600 --out target/visual-tests/font-substitution
+```
+
+`make_unpinned_font.py` writes a deck whose only text requests a family that no table
+lists; `compare.py` reports it in `unpinned_families` (add `--strict-font-pinning` to make
+that an error):
+
+```sh
+.venv-visual/bin/python tests/visual/make_unpinned_font.py /tmp/unpinned-font.pptx
+.venv-visual/bin/python tests/visual/compare.py --binary target/release/pptx2img \
+  --fixture /tmp/unpinned-font.pptx --width 1600 --out target/visual-tests/unpinned-font
 ```
 
 ### Per-OS tables in the visual CI job

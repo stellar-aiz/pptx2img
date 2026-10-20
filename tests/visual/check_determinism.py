@@ -4,6 +4,10 @@ Prints a Markdown summary (the pinned table, the PDF fonts actually used, and th
 PNG hashes of both runs) so a CI job can append it to its job summary. Exit status 1 means
 the two runs produced different reference images; comparison thresholds are reported but
 do not decide the exit status here (the cargo comparison tests own the thresholds).
+
+Requested families outside the table (`unpinned_families` in the report) are listed as a
+warning, because LibreOffice's own fallback for them can differ between runs. With
+--strict-font-pinning they also fail the check (exit status 1).
 """
 import argparse
 import hashlib
@@ -23,6 +27,8 @@ def run_once(args: argparse.Namespace, index: int) -> tuple[Path, int]:
     out = args.out / f"run-{index}"
     command = [sys.executable, str(COMPARE), "--binary", str(args.binary), "--fixture", str(args.fixture),
                "--out", str(out), "--width", str(args.width), "--font-substitution-map", str(args.font_substitution_map)]
+    if args.strict_font_pinning:
+        command.append("--strict-font-pinning")
     if args.soffice:
         command += ["--soffice", args.soffice]
     status = subprocess.run(command).returncode
@@ -39,6 +45,8 @@ def main() -> int:
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--soffice")
     parser.add_argument("--width", type=int, default=1600)
+    parser.add_argument("--strict-font-pinning", action="store_true",
+                        help="Fail when the fixture requests a family that the table does not list (default: warn)")
     args = parser.parse_args()
     first, first_status = run_once(args, 1)
     second, second_status = run_once(args, 2)
@@ -46,11 +54,15 @@ def main() -> int:
     report = json.loads((first / "report.json").read_text(encoding="utf-8"))
     environment = report["environment"]
     identical = bool(hashes[0]) and hashes[0] == hashes[1]
+    unpinned = report.get("unpinned_families", [])
     lines = [f"### Pinned font substitution: `{args.font_substitution_map.name}`", "",
              f"- Fixture: `{args.fixture.name}` at width {args.width}",
              f"- Map SHA-256: `{environment['font_substitution_sha256']}`",
              f"- Reference PNG hashes identical across two runs: **{'yes' if identical else 'NO'}**",
-             f"- Comparison exit status (thresholds unchanged): run 1 = {first_status}, run 2 = {second_status}", "",
+             f"- Comparison exit status (thresholds unchanged): run 1 = {first_status}, run 2 = {second_status}",
+             f"- Requested families outside the table: **{', '.join(unpinned) if unpinned else 'none'}**"
+             + (" (error: --strict-font-pinning)" if unpinned and args.strict_font_pinning
+                else " (warning: their reference font is not pinned)" if unpinned else ""), "",
              "| Replaced family | Pinned substitute |", "|---|---|"]
     lines += [f"| {family} | {substitute} |" for family, substitute in environment["libreoffice_font_substitution"].items()]
     lines += ["", "| Reference PDF font | Embedded | Pages |", "|---|---|---|"]
@@ -58,7 +70,7 @@ def main() -> int:
     lines += ["", "| Reference page | Run 1 SHA-256 | Run 2 SHA-256 |", "|---|---|---|"]
     lines += [f"| {name} | `{digest}` | `{hashes[1].get(name)}` |" for name, digest in hashes[0].items()]
     print("\n".join(lines))
-    return 0 if identical else 1
+    return 0 if identical and not (unpinned and args.strict_font_pinning) else 1
 
 
 if __name__ == "__main__":
