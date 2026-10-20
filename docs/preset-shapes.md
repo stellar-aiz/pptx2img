@@ -178,14 +178,61 @@ ECMA-376 Part 1 DrawingMLGeometries defines bentConnector2 as top-left -> top-ri
 A horizontal flip followed by 270-degree rotation gives top-left -> bottom-left
 -> bottom-right with a rightward head. Pixel regression tests cover this path.
 
-Even with stCxn/endCxn, use saved geometry and transforms. Rerouting from connection
-sites is unsupported and produces a targeted diagnostic. LibreOffice may change
-routes depending on those references; distinguish reference behavior from static
-specification agreement. Do not change transform order or thresholds to hide it.
+The static-rendering policy is to use saved geometry and transforms, including
+when `stCxn`/`endCxn` references are present. One `approximation` diagnostic per
+rendered slide states that live rerouting is not evaluated; it retains the first
+connector's target for traceability. The reference alone no longer produces a
+per-connector `unsupported` diagnostic. This is a saved-route policy, not a claim
+that all connector presets or files with stale saved geometry have been verified.
 
 `python tests/visual/make_connector_routing.py /tmp/routing.pptx` generates paired
 controls differing only in connection references, showing LibreOffice's moved
 start point versus our preserved route.
+
+### PowerPoint observation (2026-10-20)
+
+PowerPoint for Mac 16.105.3 (26020123), macOS 27.0.1 (26A434), at 100% normal-view
+zoom initially displayed the same saved L-shaped route on both fixture slides.
+Moving the lower pentagon ten unmodified Right-arrow presses left slide 1's
+unattached connector behind; slide 2's attached connector followed and rerouted.
+Saving a copy as `routing-moved.pptx` changed only slide 2's connector transform:
+
+| Saved value (EMU) | Original | After moving and saving |
+|---|---|---|
+| `a:off` (`x`, `y`) | (1097280, 1371600) | (1179830, 1174750) |
+| `a:ext` (`cx`, `cy`) | (1828800, 457200) | (1828800, 850900) |
+
+`rot=16200000`, `flipH=1`, `bentConnector2`, and the connection references stayed
+unchanged; slide 1's connector geometry stayed unchanged. Re-rendering the saved
+copy at `--width 1600 --font-fallback` reproduced the moved connector route and
+endpoint. Gradient and shadow differences remain: this verifies the route in
+this paired fixture, not pixel-perfect shape appearance or other presets. See the
+[measurement record](https://github.com/stellar-aiz/pptx2img/issues/74#issuecomment-6286205921).
+
+This measurement supports retaining saved geometry for static rendering: the
+authoring application stores its updated route after the target moves. LibreOffice
+may choose a different route; do not change transform order or thresholds to hide it.
+
+The paired fixture was compared again against LibreOffice 26.2.5.2 with the
+unchanged `compare.py` defaults: width 1200, pixel tolerance 16, maximum MAE 0.02,
+maximum changed ratio 0.05. The results are identical before and after the
+diagnostic-only change:
+
+| Slide | Connection references | MAE | Changed pixels | Default result |
+|---|---|---|---|---|
+| 1 | absent | 0.0156192 | 4.8524% | pass |
+| 2 | present | 0.0219688 | 5.7204% | known difference (fail) |
+
+LibreOffice's reference-dependent connector route contributes to slide 2's
+failure; gradient and shadow rendering also differ on both pages. The page
+metrics measure all those differences, not just the connector. The fixture and
+the failing result remain reproducible; no threshold or transform was changed.
+
+```sh
+python tests/visual/make_connector_routing.py /tmp/routing.pptx
+python tests/visual/compare.py --fixture /tmp/routing.pptx \
+  --binary target/release/pptx2img --out /tmp/routing-comparison
+```
 
 ## Text rectangles of rect, roundRect, and ellipse
 

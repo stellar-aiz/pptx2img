@@ -39,6 +39,7 @@ const ASVG: &str = "http://schemas.microsoft.com/office/drawing/2016/SVG/main";
 /// Office 2010 drawing extensions (`a14:hidden*`, `a14:imgProps`, `a14:useLocalDpi`).
 const A14: &str = "http://schemas.microsoft.com/office/drawing/2010/main";
 const EMU: f64 = 9525.0;
+const SAVED_CONNECTOR_NOTE: &str = "Connectors with connection-site references use saved geometry; live rerouting is not evaluated";
 pub struct Deck {
     pub width: f64,
     pub height: f64,
@@ -566,6 +567,8 @@ fn render_slide(
     // once per slide.
     warnings.keep_first_per_message(text::DATE_FIELD_NOTE);
     warnings.keep_first_per_message(text::OTHER_FIELD_NOTE);
+    // Keep the first connector target while reporting the saved-route policy once per slide.
+    warnings.keep_first_per_message(SAVED_CONNECTOR_NOTE);
     let (warnings, diagnostics) = warnings.into_parts();
     Ok(Some(Slide {
         number: 0,
@@ -590,10 +593,7 @@ fn render_shape(
             .descendants()
             .any(|n| n.has_tag_name((A, "stCxn")) || n.has_tag_name((A, "endCxn")))
     {
-        warnings.push(
-            Code::Unsupported,
-            "Connector rerouting from connection sites is unsupported; using saved geometry and transforms",
-        );
+        warnings.push(Code::Approximation, SAVED_CONNECTOR_NOTE);
     }
     let props_chain: Vec<_> = shape
         .chain

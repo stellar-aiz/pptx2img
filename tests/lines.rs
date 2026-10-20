@@ -242,22 +242,27 @@ fn bent_connector_rotation_after_flip_keeps_saved_bend_and_end_direction() {
 }
 
 #[test]
-fn attached_connector_keeps_saved_pixels_and_reports_targeted_routing_limit() {
+fn attached_connectors_keep_saved_pixels_and_report_one_approximation_per_slide() {
     let d = tempfile::tempdir().unwrap();
     let input = d.path().join("attached.pptx");
     let mut outputs = Vec::new();
-    for attached in [false, true] {
-        let links = if attached {
-            r#"<a:stCxn id="10" idx="2"/><a:endCxn id="11" idx="1"/>"#
-        } else {
-            ""
-        };
+    for (index, links) in [
+        "",
+        r#"<a:stCxn id="10" idx="2"/>"#,
+        r#"<a:endCxn id="11" idx="1"/>"#,
+        r#"<a:stCxn id="10" idx="2"/><a:endCxn id="11" idx="1"/>"#,
+    ]
+    .iter()
+    .enumerate()
+    {
         let shape = format!(
             r#"<p:cxnSp><p:nvCxnSpPr><p:cNvPr id="7" name="接続線"/><p:cNvCxnSpPr>{links}</p:cNvCxnSpPr></p:nvCxnSpPr><p:spPr>{}<a:prstGeom prst="bentConnector2"/><a:ln w="19050"><a:solidFill><a:srgbClr val="000000"/></a:solidFill></a:ln></p:spPr></p:cxnSp>"#,
             transform(20, 20, 60, 60)
         );
-        write_deck(&input, page("sld", "", "", &shape), vec![]);
-        let out = d.path().join(if attached { "attached" } else { "free" });
+        // Distinct object targets must not multiply the slide's policy diagnostic.
+        let second = shape.replace(r#"id="7""#, r#"id="8""#);
+        write_deck(&input, page("sld", "", "", &(shape + &second)), vec![]);
+        let out = d.path().join(index.to_string());
         check(run(&input, &out, false));
         outputs.push(image(&out));
         let manifest: serde_json::Value =
@@ -270,14 +275,16 @@ fn attached_connector_keeps_saved_pixels_and_reports_targeted_routing_limit() {
                 d["message"]
                     .as_str()
                     .unwrap()
-                    .contains("Connector rerouting")
+                    .contains("connection-site references")
             })
             .collect();
-        assert_eq!(records.len(), usize::from(attached));
-        if attached {
-            assert_eq!(records[0]["code"], "unsupported");
+        assert_eq!(records.len(), usize::from(!links.is_empty()));
+        if !links.is_empty() {
+            assert_eq!(records[0]["code"], "approximation");
             assert_eq!(records[0]["object_id"], "7");
         }
     }
-    assert_eq!(outputs[0].data(), outputs[1].data());
+    for output in &outputs[1..] {
+        assert_eq!(outputs[0].data(), output.data());
+    }
 }
