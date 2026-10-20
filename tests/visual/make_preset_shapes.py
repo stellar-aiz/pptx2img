@@ -38,6 +38,7 @@ def main(out):
             else:
                 shape._element.remove(shape._element.txBody)
     more_presets(prs)
+    next_tier_presets(prs)
     prs.save(out)
 
 
@@ -51,6 +52,33 @@ PRESETS = [
     ('round2SameRect', [('adj1', 30000), ('adj2', 10000)]),
     ('wedgeEllipseCallout', [('adj1', 30000), ('adj2', 80000)]),
     ('flowChartAlternateProcess', []), ('flowChartMultidocument', []),
+]
+# Next tier (callouts, flowchart symbols, arcs, brackets, arrows, stars), with non-default
+# adjustments for the adjusted pages. Kinds without adjustments are only rotated and flipped.
+NEXT_TIER = [
+    ('rtTriangle', []), ('foldedCorner', [('adj', 30000)]),
+    ('borderCallout1', [('adj1', 30000), ('adj2', -20000), ('adj3', 120000), ('adj4', -50000)]),
+    ('flowChartDocument', []), ('flowChartMagneticDisk', []),
+    ('blockArc', [('adj1', 14400000), ('adj2', 3600000), ('adj3', 15000)]),
+    ('flowChartTerminator', []), ('wedgeRectCallout', [('adj1', 30000), ('adj2', 80000)]),
+    ('donut', [('adj', 40000)]), ('cloudCallout', [('adj1', 30000), ('adj2', 80000)]),
+    ('arc', [('adj1', 3600000), ('adj2', 12600000)]),
+    ('borderCallout2', [('adj1', 30000), ('adj2', -10000), ('adj3', 40000), ('adj4', -30000),
+                        ('adj5', 120000), ('adj6', -50000)]),
+    ('can', [('adj', 40000)]), ('flowChartExtract', []), ('snip1Rect', [('adj', 30000)]),
+    ('mathPlus', [('adj1', 35000)]), ('leftBracket', [('adj', 20000)]),
+    ('upArrowCallout', [('adj1', 35000), ('adj2', 20000), ('adj3', 30000), ('adj4', 55000)]),
+    ('downArrowCallout', [('adj1', 35000), ('adj2', 20000), ('adj3', 30000), ('adj4', 55000)]),
+    ('rightBracket', [('adj', 20000)]), ('leftBrace', [('adj1', 15000), ('adj2', 35000)]),
+    ('bentUpArrow', [('adj1', 35000), ('adj2', 20000), ('adj3', 30000)]),
+    ('irregularSeal2', []), ('plus', [('adj', 35000)]),
+    ('curvedDownArrow', [('adj1', 40000), ('adj2', 35000), ('adj3', 30000)]),
+    ('star7', [('adj', 25000), ('hf', 102572), ('vf', 105210)]),
+    ('parallelogram', [('adj', 40000)]),
+    ('rightArrowCallout', [('adj1', 35000), ('adj2', 20000), ('adj3', 30000), ('adj4', 55000)]),
+    ('flowChartConnector', []), ('mathMultiply', [('adj1', 35000)]),
+    ('circularArrow', [('adj1', 20000), ('adj2', 1500000), ('adj3', 19000000),
+                       ('adj4', 9000000), ('adj5', 15000)]),
 ]
 CONNECTORS = [
     ('bentConnector3', [('adj1', 30000)]), ('bentConnector4', [('adj1', 30000), ('adj2', 70000)]),
@@ -105,6 +133,25 @@ def more_presets(prs):
             style = shape._element.find('{http://schemas.openxmlformats.org/presentationml/2006/main}style')
             if style is not None: shape._element.remove(style)
             shape._element.remove(shape._element.txBody)
+
+def next_tier_presets(prs):
+    """Pages 7-10: the next-tier presets at their defaults (7-8), then adjusted, rotated by
+    15 degrees, and alternately flipped (9-10). Eighteen shapes per page."""
+    for adjusted in [False, True]:
+        for start in range(0, len(NEXT_TIER), 18):
+            slide = prs.slides.add_slide(prs.slide_layouts[6])
+            for i, (kind, guides) in enumerate(NEXT_TIER[start:start+18]):
+                shape = slide.shapes.add_shape(MSO_SHAPE.RECTANGLE, Inches(.25+(i % 6)*1.6), Inches(.2+(i // 6)*1.8), Inches(1.45), Inches(1.3))
+                shape.fill.solid(); shape.fill.fore_color.rgb = RGBColor.from_string('245A51')
+                shape.line.color.rgb = RGBColor.from_string('C37B49'); shape.line.width = Pt(2)
+                style = shape._element.find('{http://schemas.openxmlformats.org/presentationml/2006/main}style')
+                if style is not None: shape._element.remove(style)
+                geometry(shape, kind, guides if adjusted else [])
+                if adjusted:
+                    shape.rotation = 15
+                    shape._element.spPr.xfrm.set('flipH' if i % 2 else 'flipV', '1')
+                shape._element.remove(shape._element.txBody)
+
 
 if __name__ == '__main__':
     main(Path(sys.argv[1]))
