@@ -11,6 +11,44 @@ use skrifa::{
     instance::{LocationRef, Size},
 };
 
+/// Diagnostic prefixes for fields whose saved text is drawn; see [`field_text`].
+pub(super) const DATE_FIELD_NOTE: &str = "Date and time fields";
+pub(super) const OTHER_FIELD_NOTE: &str = "Field type ";
+
+/// The text drawn for an `a:fld` run. `slidenum` shows the slide's number; every other type
+/// keeps its saved text so output stays deterministic, and says so.
+fn field_text<'a>(
+    field: Node<'a, '_>,
+    options: &RenderOptions<'_>,
+    warnings: &mut Warnings,
+) -> std::borrow::Cow<'a, str> {
+    let saved = child(field, A, "t").and_then(|n| n.text()).unwrap_or("");
+    let kind = field.attribute("type").unwrap_or("");
+    if kind == "slidenum" {
+        if let Some(number) = options.slide_number.get() {
+            return number.to_string().into();
+        }
+    } else if kind.starts_with("datetime") {
+        warnings.push(
+            Code::Approximation,
+            format!(
+                "{DATE_FIELD_NOTE} are drawn with their saved text; the conversion date is not substituted"
+            ),
+        );
+    } else {
+        let name = if kind.is_empty() {
+            "(unspecified)"
+        } else {
+            kind
+        };
+        warnings.push(
+            Code::Approximation,
+            format!("{OTHER_FIELD_NOTE}{name} is not resolved; its saved text is drawn"),
+        );
+    }
+    saved.into()
+}
+
 #[derive(Clone, Debug, PartialEq)]
 struct Style {
     face: String,
@@ -738,7 +776,14 @@ fn layout(
                     .into_iter()
                     .chain(defaults.iter().copied())
                     .collect();
-                let value = child(run, A, "t").and_then(|n| n.text()).unwrap_or("");
+                let value = if run.has_tag_name((A, "fld")) {
+                    field_text(run, options, warnings)
+                } else {
+                    child(run, A, "t")
+                        .and_then(|n| n.text())
+                        .unwrap_or("")
+                        .into()
+                };
                 // Resolve Latin and East Asian font declarations separately.
                 let mut segment = String::new();
                 let mut last = None;
@@ -1286,6 +1331,7 @@ mod tests {
                 &RenderOptions {
                     fonts: Resolver::new(&Database::new(), &HashMap::new()),
                     punctuation_compression: true,
+                    slide_number: Default::default(),
                 },
                 &mut svg,
                 &mut warnings,
@@ -1386,6 +1432,7 @@ mod tests {
                 &RenderOptions {
                     fonts: Resolver::new(&Database::new(), &HashMap::new()),
                     punctuation_compression: false,
+                    slide_number: Default::default(),
                 },
                 &mut svg,
                 &mut Warnings::default(),
@@ -1408,6 +1455,7 @@ mod tests {
             &RenderOptions {
                 fonts: Resolver::new(&Database::new(), &HashMap::new()),
                 punctuation_compression: false,
+                slide_number: Default::default(),
             },
             &mut String::new(),
             &mut warnings,
@@ -1552,6 +1600,7 @@ mod tests {
             &RenderOptions {
                 fonts: Resolver::new(&fonts, &HashMap::new()),
                 punctuation_compression: false,
+                slide_number: Default::default(),
             },
             &mut svg,
             &mut warnings,
@@ -1654,6 +1703,7 @@ mod tests {
             &RenderOptions {
                 fonts: Resolver::new(&fonts, &HashMap::new()),
                 punctuation_compression: false,
+                slide_number: Default::default(),
             },
             &mut svg,
             &mut warnings,
@@ -1777,6 +1827,7 @@ mod tests {
                 &RenderOptions {
                     fonts: Resolver::new(&Database::new(), &HashMap::new()),
                     punctuation_compression: false,
+                    slide_number: Default::default(),
                 },
                 &mut svg,
                 &mut warnings,

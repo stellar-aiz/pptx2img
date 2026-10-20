@@ -217,6 +217,7 @@ fn convert_inner(
         &pptx::RenderOptions {
             fonts: pptx::FontResolver::new(&options.fontdb, &settings.font_mapping),
             punctuation_compression: settings.punctuation_compression,
+            slide_number: Default::default(),
         },
         settings.include_hidden,
     )?;

@@ -183,6 +183,32 @@ unless `--include-hidden` is passed, and the manifest records them (`hidden`,
 `skipped_hidden_slides`). This matches LibreOffice's PDF export, which also skips them,
 so the comparator pairs pages one to one. See [usage](usage.md#hidden-slides).
 
+## Text fields
+
+`a:fld` runs are resolved by `@type` while text is laid out, including text boxes that a
+layout or master draws onto a slide.
+
+| Field type | Drawn text | Diagnostic |
+|---|---|---|
+| `slidenum` | The slide's number as an Arabic numeral: its 1-based position in `p:sldIdLst` plus `p:presentation/@firstSlideNum` minus 1 (default 1). Hidden slides are counted even when they are skipped, so later slides keep their number | none |
+| `datetime*` | The saved text, so output stays deterministic; the conversion date is never substituted | one `approximation` per slide ("Date and time fields ...") |
+| `title`, `footer`, other or missing `@type` | The saved text | one `approximation` per slide and type ("Field type ... is not resolved") |
+
+PowerPoint saves the slide-number field in layouts and masters as `‹#›`; before this
+handling that placeholder was drawn on every slide and widened the line it sat on.
+Numbers are never formatted as roman numerals or letters, since `a:fld` carries no
+number-format information.
+
+Generator: `tests/visual/make_fields.py` (`--first-slide-num N` sets `firstSlideNum`).
+Comparison against LibreOffice (`compare.py --width 1600`, default thresholds): the
+whole-page results are within thresholds both before and after the change (MAE about
+0.012, changed pixels about 1.5%), which is why the placeholder was not caught. With
+`--regions` on the footer number and the slide text, the digit is the right one after
+the change, and the footer region of slide 1 passes. The footer regions of slides 2 and 3
+and the slide-text regions still exceed the thresholds because of an existing vertical
+offset of about 4 px at 1600 px width between this renderer's and LibreOffice's text
+baseline, which also affects text without fields; the thresholds are not relaxed.
+
 ## Hidden elements
 
 Shapes, pictures, connectors, groups, and non-OLE graphic frames marked hidden
