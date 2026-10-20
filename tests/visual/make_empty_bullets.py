@@ -1,5 +1,4 @@
 """Independent fixture: bulleted list with empty and whitespace-only paragraphs."""
-import copy
 import sys
 from pptx import Presentation
 from pptx.util import Inches, Pt
@@ -21,6 +20,9 @@ def bullet(par):
     ppr[-1].set("char", "•")
 
 
+# PowerPoint for Mac 16.105.3, 100% zoom (2026-10-20, Issue #53):
+# paragraph 5 (one space) has a marker; paragraphs 3, 7, 8 (no runs) do not.
+# Preserve this fixture content so the recorded observation remains reproducible.
 # kind: "text", "empty" (no runs), "space" (whitespace-only run)
 for i, (kind, text) in enumerate([
     ("text", "First item"), ("text", "Second item"), ("empty", ""),
