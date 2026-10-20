@@ -16,14 +16,19 @@ jobs:
             os: macos-15
             exe: ''
             substitution_map: tests/visual/font-substitution.json
+            # The macOS table covers every family the determinism fixtures request. Linux and
+            # Windows leave Arial unpinned, so the strict flag stays off there.
+            strict_pinning: '--strict-font-pinning'
           - name: Linux
             os: ubuntu-24.04
             exe: ''
             substitution_map: tests/visual/font-substitution.linux.json
+            strict_pinning: ''
           - name: Windows
             os: windows-2025
             exe: .exe
             substitution_map: tests/visual/font-substitution.windows.json
+            strict_pinning: ''
     runs-on: ${{ matrix.os }}
     timeout-minutes: 45
     defaults:
@@ -118,7 +123,7 @@ jobs:
       - name: Summarize comparison metrics
         if: ${{ !cancelled() }}
         run: |
-          python - <<'PY' >> "$GITHUB_STEP_SUMMARY"
+          python - <<'PY' | tee -a "$GITHUB_STEP_SUMMARY"
           import json
           from pathlib import Path
           print("## ${{ matrix.name }} comparison metrics (comparison step: ${{ steps.comparison.outcome }})")
@@ -142,7 +147,7 @@ jobs:
           for fixture in examples/text-bullets.pptx target/visual-tests/fixtures/font-substitution.pptx; do
             python tests/visual/check_determinism.py --binary "target/release/pptx2img${{ matrix.exe }}" \
               --fixture "$fixture" --font-substitution-map "${{ matrix.substitution_map }}" \
-              --soffice "$SOFFICE" --out "target/visual-tests/determinism/$(basename "$fixture" .pptx)" >> determinism-summary.md || status=1
+              --soffice "$SOFFICE" ${{ matrix.strict_pinning }} --out "target/visual-tests/determinism/$(basename "$fixture" .pptx)" >> determinism-summary.md || status=1
           done
           cat determinism-summary.md
           { echo "## ${{ matrix.name }}"; cat determinism-summary.md; } >> "$GITHUB_STEP_SUMMARY"
