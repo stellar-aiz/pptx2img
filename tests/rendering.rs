@@ -1048,10 +1048,10 @@ fn unwrapped_shape_autofit_keeps_width_for_empty_and_vertical_bodies() {
         write_deck(&input, page("sld", "", "", &shape), vec![]);
         check(run(&input, &out, false));
         let img = image(&out);
-        assert_eq!(rgb(&img, 40, 85), (0, 255, 0), "{vert} {text:?}");
-        assert_eq!(rgb(&img, 49, 85), (0, 255, 0), "{vert} {text:?}");
-        assert_eq!(rgb(&img, 39, 85), (255, 255, 255), "{vert} {text:?}");
-        assert_eq!(rgb(&img, 50, 85), (255, 255, 255), "{vert} {text:?}");
+        assert_eq!(rgb(&img, 40, 15), (0, 255, 0), "{vert} {text:?}");
+        assert_eq!(rgb(&img, 49, 15), (0, 255, 0), "{vert} {text:?}");
+        assert_eq!(rgb(&img, 39, 15), (255, 255, 255), "{vert} {text:?}");
+        assert_eq!(rgb(&img, 50, 15), (255, 255, 255), "{vert} {text:?}");
         let records = diagnostics(&out);
         assert_eq!(
             records.iter().any(|d| d["message"]
@@ -1144,4 +1144,50 @@ fn autofit_in_a_small_inset_text_area_grows_only_by_the_needed_height() {
             .unwrap()
             .contains("autofit reached its limit")
     }));
+}
+
+#[test]
+fn rotated_vertical_text_runs_along_the_box_and_stays_inside() {
+    // "AAAA" is 32px long in the metrics font at 12pt. With lIns/tIns of 0, vert270
+    // starts at the bottom edge with its line on the left; vert starts at the top
+    // with its line on the right.
+    for (vert, starts_low, line_left) in [("vert270", true, true), ("vert", false, false)] {
+        let dir = tempfile::tempdir().unwrap();
+        let input = dir.path().join("vertical.pptx");
+        let out = dir.path().join("out");
+        let shape = format!(
+            r#"<p:sp><p:spPr>{}<a:prstGeom prst="rect"/><a:noFill/></p:spPr><p:txBody><a:bodyPr vert="{vert}" lIns="0" rIns="0" tIns="0" bIns="0" anchor="t"/><a:p><a:pPr><a:defRPr sz="1200"><a:latin typeface="Pptx2img Metrics Test"/></a:defRPr></a:pPr><a:r><a:t>AAAA</a:t></a:r></a:p></p:txBody></p:sp>"#,
+            transform(40, 5, 20, 90)
+        );
+        write_deck(&input, page("sld", "", "", &shape), vec![]);
+        check(run(&input, &out, false));
+        let img = image(&out);
+        let ink: Vec<(u32, u32)> = (0..100)
+            .flat_map(|y| (0..100).map(move |x| (x, y)))
+            .filter(|&(x, y)| rgb(&img, x, y).0 < 128)
+            .collect();
+        assert!(!ink.is_empty(), "{vert}");
+        let (xs, ys): (Vec<_>, Vec<_>) = ink.iter().copied().unzip();
+        let (left, right) = (*xs.iter().min().unwrap(), *xs.iter().max().unwrap());
+        let (top, bottom) = (*ys.iter().min().unwrap(), *ys.iter().max().unwrap());
+        assert!(
+            left >= 40 && right < 60 && top >= 5 && bottom < 95,
+            "{vert}: {ink:?}"
+        );
+        // The line runs along the box: much taller than wide.
+        assert!(
+            bottom - top > 2 * (right - left),
+            "{vert}: {left}..{right} x {top}..{bottom}"
+        );
+        assert_eq!(top > 50, starts_low, "{vert}: {top}..{bottom}");
+        assert_eq!(right < 58, line_left, "{vert}: {left}..{right}");
+        let records = diagnostics(&out);
+        assert!(
+            !records.iter().any(|d| {
+                let message = d["message"].as_str().unwrap();
+                message.contains("Vertical text is unsupported") || d["code"] == "text_overflow"
+            }),
+            "{records:?}"
+        );
+    }
 }
