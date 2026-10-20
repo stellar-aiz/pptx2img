@@ -889,11 +889,7 @@ fn raster_picture<'p>(
     let dimensions = imagesize::blob_size(data)
         .map_err(|_| format!("Cannot read image dimensions: {target}"))?;
     let (width, height) = (dimensions.width, dimensions.height);
-    let size = Some(picture_effects::natural_size(
-        data,
-        width as f64,
-        height as f64,
-    ));
+    let size = Some(raster::natural_size(data, width as f64, height as f64));
     match raster::prepare(target, data, mime, width, height) {
         Ok(raster::Prepared::Embed) => Ok(Picture {
             href: format!("data:{mime};base64,{}", STANDARD.encode(data)),
@@ -1057,6 +1053,9 @@ fn render_image(
         warnings.push(code, message);
     }
     let crop = [left, top, right, bottom];
+    let full = rect == (0.0, 0.0, w, h);
+    // A full-frame picture keeps the single clipped `<image>` it always had.
+    let stretched = || picture_effects::image(&picture.href, crop, rect, !full);
     let body = match tile {
         Some(tile) => {
             let natural = picture.size.unwrap_or_else(|| {
@@ -1066,7 +1065,7 @@ fn render_image(
                 );
                 (w, h)
             });
-            let id = picture_effects::tile_pattern(
+            match picture_effects::tile_pattern(
                 tile,
                 &picture.href,
                 natural,
@@ -1074,14 +1073,23 @@ fn render_image(
                 (w, h),
                 seed,
                 &mut defs,
-            );
-            format!("<rect width=\"{w}\" height=\"{h}\" fill=\"url(#{id})\"/>")
+            ) {
+                Some(id) => format!("<rect width=\"{w}\" height=\"{h}\" fill=\"url(#{id})\"/>"),
+                None => {
+                    warnings.push(
+                        Code::Approximation,
+                        format!("Picture tile size is out of range; drawn stretched: {name}"),
+                    );
+                    stretched()
+                }
+            }
         }
-        // A full-frame picture keeps the single clipped `<image>` it always had.
-        None => picture_effects::image(&picture.href, crop, rect, rect != (0.0, 0.0, w, h)),
+        None => stretched(),
     };
     if !defs.is_empty() {
-        svg.push_str(&format!("<defs>{defs}</defs>"));
+        svg.push_str("<defs>");
+        svg.push_str(&defs);
+        svg.push_str("</defs>");
     }
     if let Some(id) = &filter {
         svg.push_str(&format!("<g filter=\"url(#{id})\">"));

@@ -66,9 +66,16 @@ fn transfer(functions: Vec<(&'static str, String)>) -> impl FnOnce(&str, &str) -
         )
     }
 }
+/// One transfer function per color channel, from the channel index.
+fn rgb(attrs: impl Fn(usize) -> String) -> Vec<(&'static str, String)> {
+    ["R", "G", "B"]
+        .into_iter()
+        .enumerate()
+        .map(|(i, c)| (c, attrs(i)))
+        .collect()
+}
 fn rgb_linear(slope: f64, intercept: f64) -> Vec<(&'static str, String)> {
-    let attrs = format!("type=\"linear\" slope=\"{slope}\" intercept=\"{intercept}\"");
-    ["R", "G", "B"].map(|c| (c, attrs.clone())).into()
+    rgb(|_| format!("type=\"linear\" slope=\"{slope}\" intercept=\"{intercept}\""))
 }
 /// Brightness and contrast (fractions in -1..1) as one linear map around mid-grey.
 // stellar:debt(scope) Office's exact brightness/contrast curve is not specified. upgrade: fit against PowerPoint renders.
@@ -90,12 +97,7 @@ fn brightness_contrast(chain: &mut Chain, bright: f64, contrast: f64, warnings: 
 }
 /// `#RRGGBB` as 0..1 channels.
 fn channels(hex: &str) -> [f64; 3] {
-    let value = |i: usize| {
-        hex.get(1 + 2 * i..3 + 2 * i)
-            .and_then(|s| u8::from_str_radix(s, 16).ok())
-            .map_or(0.0, |v| f64::from(v) / 255.0)
-    };
-    [value(0), value(1), value(2)]
+    colors::components(hex.trim_start_matches('#'))
 }
 fn percent(node: Node<'_, '_>, attr: &str, default: f64) -> f64 {
     number(node, attr, default) / 100000.0
@@ -202,7 +204,7 @@ pub(super) fn filter(
         primitives: String::new(),
         last: "SourceGraphic".into(),
     };
-    for effect in blip.children().filter(|n| n.is_element()) {
+    for effect in elements(blip) {
         match effect.tag_name().name() {
             "extLst" => extensions(effect, &mut chain, warnings),
             "alphaModFix" => {
@@ -225,33 +227,19 @@ pub(super) fn filter(
                 // Shift luma so the threshold lands on 0.5, then step at 0.5.
                 let threshold = percent(effect, "thresh", 50000.0);
                 chain.push(matrix(luma(0.5 - threshold)));
-                chain.push(transfer(
-                    ["R", "G", "B"]
-                        .map(|c| (c, "type=\"discrete\" tableValues=\"0 1\"".to_string()))
-                        .into(),
-                ));
+                chain.push(transfer(rgb(|_| {
+                    "type=\"discrete\" tableValues=\"0 1\"".into()
+                })));
             }
             "duotone" => {
-                let colors: Vec<_> = effect
-                    .children()
-                    .filter(|n| n.is_element())
+                let colors: Vec<_> = elements(effect)
                     .map(|n| channels(&colors::element_with_opacity(n, theme, warnings).0))
                     .collect();
                 if let [dark, light] = colors[..] {
                     chain.push(matrix(luma(0.0)));
-                    chain.push(transfer(
-                        (0..3)
-                            .map(|i| {
-                                (
-                                    ["R", "G", "B"][i],
-                                    format!(
-                                        "type=\"table\" tableValues=\"{} {}\"",
-                                        dark[i], light[i]
-                                    ),
-                                )
-                            })
-                            .collect(),
-                    ));
+                    chain.push(transfer(rgb(|i| {
+                        format!("type=\"table\" tableValues=\"{} {}\"", dark[i], light[i])
+                    })));
                     warnings.push(Code::Approximation, "Picture duotone is approximated");
                 } else {
                     warn(warnings, "Unsupported picture effect: duotone");
@@ -314,8 +302,14 @@ pub(super) fn fill_rect(blip_fill: Option<Node<'_, '_>>, w: f64, h: f64) -> (f64
     let [l, t, r, b] = ["l", "t", "r", "b"].map(|k| percent(rect, k, 0.0));
     (l * w, t * h, w * (1.0 - l - r), h * (1.0 - t - b))
 }
+/// Largest number of tiles along one axis of the frame.
+const MAX_TILES_PER_AXIS: f64 = 256.0;
+/// Largest pattern cell, as a multiple of the frame area (the cell is rasterized whole).
+const MAX_CELL_AREA_RATIO: f64 = 16.0;
 /// Define an `a:tile` fill of `href` (natural size `natural` px, cropped by `crop`) over a
-/// `frame` and return the pattern id; fill a shape with `url(#id)`.
+/// `frame` and return the pattern id; fill a shape with `url(#id)`. Returns `None` when
+/// the tile is so small or so large that the pattern would defeat the picture size
+/// policy; the caller then draws the picture stretched.
 pub(super) fn tile_pattern(
     tile: Node<'_, '_>,
     href: &str,
@@ -324,11 +318,24 @@ pub(super) fn tile_pattern(
     frame: (f64, f64),
     seed: usize,
     defs: &mut String,
-) -> String {
+) -> Option<String> {
     let [left, top, right, bottom] = crop;
     let tw = natural.0 * (1.0 - left - right) * percent(tile, "sx", 100000.0).abs();
     let th = natural.1 * (1.0 - top - bottom) * percent(tile, "sy", 100000.0).abs();
     let (w, h) = frame;
+    let flip = tile.attribute("flip").unwrap_or("none");
+    let (fx, fy) = (flip.contains('x'), flip.contains('y'));
+    // A flip mirrors every other tile, so one pattern cell holds up to 2x2 tiles.
+    let cw = if fx { 2.0 * tw } else { tw };
+    let ch = if fy { 2.0 * th } else { th };
+    let bounded = tw.is_finite()
+        && th.is_finite()
+        && tw * MAX_TILES_PER_AXIS >= w
+        && th * MAX_TILES_PER_AXIS >= h
+        && cw * ch <= MAX_CELL_AREA_RATIO * w * h;
+    if !bounded {
+        return None;
+    }
     // Alignment places the first tile after scaling and before the offset.
     let algn = tile.attribute("algn").unwrap_or("tl");
     let x = match algn {
@@ -341,76 +348,30 @@ pub(super) fn tile_pattern(
         "bl" | "b" | "br" => h - th,
         _ => 0.0,
     } + number(tile, "ty", 0.0) / EMU;
-    let flip = tile.attribute("flip").unwrap_or("none");
-    let (fx, fy) = (flip.contains('x'), flip.contains('y'));
-    // A flip mirrors every other tile, so one pattern cell holds up to 2x2 tiles.
-    let one = image(href, crop, (0.0, 0.0, tw, th), true);
-    let mut cell = one.clone();
-    let mirrored = |sx: f64, sy: f64, dx: f64, dy: f64| {
-        format!("<g transform=\"translate({dx} {dy}) scale({sx} {sy})\">{one}</g>")
+    let id = format!("picture-tile-{seed}");
+    // The image is defined once and mirrored by reference, so the data URL is not copied.
+    let mut cell = format!(
+        "<g id=\"{id}-image\">{}</g>",
+        image(href, crop, (0.0, 0.0, tw, th), true)
+    );
+    let mut mirrored = |sx: f64, sy: f64| {
+        let (dx, dy) = ((1.0 - sx) * tw, (1.0 - sy) * th);
+        cell.push_str(&format!(
+            "<use href=\"#{id}-image\" transform=\"translate({dx} {dy}) scale({sx} {sy})\"/>"
+        ));
     };
     if fx {
-        cell.push_str(&mirrored(-1.0, 1.0, 2.0 * tw, 0.0));
+        mirrored(-1.0, 1.0);
     }
     if fy {
-        cell.push_str(&mirrored(1.0, -1.0, 0.0, 2.0 * th));
+        mirrored(1.0, -1.0);
     }
     if fx && fy {
-        cell.push_str(&mirrored(-1.0, -1.0, 2.0 * tw, 2.0 * th));
+        mirrored(-1.0, -1.0);
     }
-    let id = format!("picture-tile-{seed}");
-    let cw = if fx { 2.0 * tw } else { tw };
-    let ch = if fy { 2.0 * th } else { th };
     defs.push_str(&format!("<pattern id=\"{id}\" patternUnits=\"userSpaceOnUse\" x=\"{x}\" y=\"{y}\" width=\"{cw}\" height=\"{ch}\">{cell}</pattern>"));
-    id
+    Some(id)
 }
-/// Natural size in px at 96 dpi, from the PNG `pHYs` or JPEG JFIF density (96 dpi otherwise).
-// stellar:debt(scope) EXIF resolution in JPEG is ignored. upgrade: read EXIF XResolution/YResolution.
-pub(super) fn natural_size(data: &[u8], width: f64, height: f64) -> (f64, f64) {
-    let (dx, dy) = density(data).unwrap_or((96.0, 96.0));
-    (width * 96.0 / dx, height * 96.0 / dy)
-}
-fn density(data: &[u8]) -> Option<(f64, f64)> {
-    let be32 = |at: usize| {
-        data.get(at..at + 4)
-            .map(|b| u32::from_be_bytes([b[0], b[1], b[2], b[3]]))
-    };
-    let be16 = |at: usize| {
-        data.get(at..at + 2)
-            .map(|b| u16::from_be_bytes([b[0], b[1]]))
-    };
-    let valid = |dx: f64, dy: f64| (dx > 0.0 && dy > 0.0).then_some((dx, dy));
-    if data.starts_with(b"\x89PNG\r\n\x1a\n") {
-        let mut at = 8;
-        while let Some(length) = be32(at) {
-            let kind = data.get(at + 4..at + 8)?;
-            if kind == b"pHYs" {
-                // Unit 1 is pixels per metre; unit 0 gives only the aspect ratio.
-                if data.get(at + 16) != Some(&1) {
-                    return None;
-                }
-                let per_inch = |v: u32| f64::from(v) * 0.0254;
-                return valid(per_inch(be32(at + 8)?), per_inch(be32(at + 12)?));
-            }
-            if kind == b"IDAT" {
-                return None;
-            }
-            at = at.checked_add(12 + length as usize)?;
-        }
-        return None;
-    }
-    // JFIF APP0 directly after SOI: units 1 = per inch, 2 = per centimetre.
-    if data.get(2..4) == Some(b"\xff\xe0") && data.get(6..11) == Some(b"JFIF\0") {
-        let scale = match data.get(13)? {
-            1 => 1.0,
-            2 => 2.54,
-            _ => return None,
-        };
-        return valid(f64::from(be16(14)?) * scale, f64::from(be16(16)?) * scale);
-    }
-    None
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -526,27 +487,31 @@ mod tests {
             3,
             &mut defs,
         );
-        assert_eq!(id, "picture-tile-3");
+        assert_eq!(id.as_deref(), Some("picture-tile-3"));
         // 20x10 tile, centred (40, 20), offset 10 px; the x flip doubles the cell width.
         assert!(
             defs.starts_with(r#"<pattern id="picture-tile-3" patternUnits="userSpaceOnUse" x="50" y="20" width="40" height="10">"#),
             "{defs}"
         );
         assert!(defs.contains("scale(-1 1)"), "{defs}");
+        assert_eq!(defs.matches("data:x").count(), 1, "{defs}");
     }
     #[test]
-    fn density_comes_from_png_phys_and_jfif() {
-        let mut png = b"\x89PNG\r\n\x1a\n".to_vec();
-        png.extend(9u32.to_be_bytes());
-        png.extend(b"pHYs");
-        png.extend(2835u32.to_be_bytes()); // 72 dpi
-        png.extend(2835u32.to_be_bytes());
-        png.push(1);
-        png.extend([0; 4]);
-        let (w, _) = natural_size(&png, 72.0, 72.0);
-        assert!((w - 96.0).abs() < 0.1, "{w}");
-        let jfif = b"\xff\xd8\xff\xe0\x00\x10JFIF\0\x01\x01\x01\x00\x30\x00\x30";
-        assert_eq!(natural_size(jfif, 48.0, 48.0), (96.0, 96.0));
-        assert_eq!(natural_size(b"\xff\xd8\xff\xdb", 10.0, 10.0), (10.0, 10.0));
+    fn absurd_tile_scales_are_refused() {
+        for scale in ["1", "100000000", "0"] {
+            let xml = format!(r#"<a:tile xmlns:a="{A}" sx="{scale}" sy="{scale}"/>"#);
+            let doc = Document::parse(&xml).unwrap();
+            let mut defs = String::new();
+            let id = tile_pattern(
+                doc.root_element(),
+                "data:x",
+                (100.0, 100.0),
+                [0.0; 4],
+                (100.0, 100.0),
+                0,
+                &mut defs,
+            );
+            assert_eq!((id, defs.as_str()), (None, ""), "sx={scale}");
+        }
     }
 }

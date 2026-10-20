@@ -147,7 +147,7 @@ fn resolve_first<'a, 'i: 'a>(
     warn(warnings, "Cannot resolve color; using a fallback color");
     None
 }
-fn components(hex: &str) -> [f64; 3] {
+pub(super) fn components(hex: &str) -> [f64; 3] {
     std::array::from_fn(|i| {
         u8::from_str_radix(&hex[i * 2..i * 2 + 2], 16).unwrap_or(0) as f64 / 255.0
     })
