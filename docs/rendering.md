@@ -231,7 +231,12 @@ tile size is the picture's natural size scaled by `sx`/`sy`; the natural size us
 PNG `pHYs` or JPEG JFIF density, and 96 dpi when neither is present (EXIF resolution is
 not read). `algn` places the first tile, `tx`/`ty` offset it, and `flip` mirrors every
 other tile along x, y, or both. A tiled SVG picture has no natural size and uses the
-frame as the tile (`approximation`). `a:stretch/a:fillRect` insets (`l`, `t`, `r`,
+frame as the tile (`approximation`). A tile so small that more than 256 tiles fall
+along one axis of the frame, or a pattern cell (with flips) larger than 16 times the
+frame area, is not tiled: the picture is drawn stretched with an `approximation`
+diagnostic (`Picture tile size is out of range; drawn stretched: <part>`), and image
+densities below 1 dpi are ignored, so a deck cannot inflate the rasterized pattern.
+`a:stretch/a:fillRect` insets (`l`, `t`, `r`,
 `b`) shrink or, when negative, extend the stretched picture inside the frame; the frame
 still clips it, and an inset that leaves no area omits the picture (`Image fill
 rectangle leaves no visible area: <part>`). These apply to `p:pic` pictures (and OLE
