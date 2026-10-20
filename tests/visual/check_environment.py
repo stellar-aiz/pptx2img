@@ -5,10 +5,14 @@ from pathlib import Path
 import subprocess
 import unicodedata
 
+# Hiragino Sans files shipped on the macos-15 runner image (checked 2026-10-20, run 39366263037).
 EXPECTED_FONTS = {
-    "ヒラギノ角ゴシック W3.ttc": "ff92033a300f55aff2f45f57479a560af2c5467973b425d3f724f870af07f83e",
-    "ヒラギノ角ゴシック W6.ttc": "495faf728470c0111c15265fd5844293fb0bef4240371b79a888371a4ae38c3b",
+    "ヒラギノ角ゴシック W3.ttc": "833776a6fd68e2c71c0c52fd8041195bd3d0a336cdb278170b7ad71c7e1b3475",
+    "ヒラギノ角ゴシック W6.ttc": "790fe535987adc662e83489e162dc54c1e50be8de15169300082f6cc7a082e4e",
 }
+# Earlier baseline from a previous runner image, kept for the record (no longer accepted):
+#   W3 ff92033a300f55aff2f45f57479a560af2c5467973b425d3f724f870af07f83e
+#   W6 495faf728470c0111c15265fd5844293fb0bef4240371b79a888371a4ae38c3b
 
 
 def check():
