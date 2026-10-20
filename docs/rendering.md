@@ -39,6 +39,12 @@ Strict mode gates known warnings, not all incompatibilities.
   cells, selected [table styles](table-styles.md), [outer shadows](shadows.md), and
   [static OLE previews](ole-preview.md).
 
+Connectors use their saved geometry and transforms, even with connection-site
+references. Live rerouting is not evaluated; one `approximation` note per slide
+retains the first affected connector target. A paired PowerPoint save/move check
+supports this policy for `bentConnector2`; it does not verify all presets or stale
+saved routes. See [the observation and known reference differences](preset-shapes.md#saved-bent-routes-and-connection-sites).
+
 ## Inheritance
 
 Placeholders match by `idx` from slide to layout and by type from layout to master.
@@ -327,10 +333,32 @@ previews). Picture fills of shapes and backgrounds (`a:blipFill` in `p:spPr` or 
 go through the same code, so `a:tile` on them repeats the picture over the shape's box
 with the same tile-size rules and bounds, and records no tiling diagnostic.
 
-Tile density is not verified against PowerPoint (unmeasured): on a self-made fixture
-(a picture without `pHYs`, `sx`/`sy` of 50%) LibreOffice draws about 9 tile columns and
-this renderer about 7, because the 96 dpi default above differs from LibreOffice's. The
-default is kept until PowerPoint has been measured.
+### Tile density observation (2026-10-20)
+
+`python tests/visual/make_shape_tile.py /tmp/shape-tile.pptx` generates an 11-inch
+right-triangle base filled with a 64x64-pixel PNG without `pHYs`, at 50% X/Y tile
+scale, zero offsets, top-left alignment, and no mirroring. PowerPoint for Mac
+16.105.3 (26020123), macOS 27.0.1 (26A434), showed these settings at 100% normal-view
+zoom. The base spans about 1584 screenshot pixels (144 screenshot pixels/inch,
+Retina); one complete red/blue source tile repeats every 32 screenshot pixels.
+The individual 8-pixel color/white runs are not complete tiles.
+
+| Renderer | Complete tiles over the 11-inch base | Physical tile width |
+|---|---|---|
+| PowerPoint (observed screenshot) | about 49.5 | about 0.2222 inch |
+| pptx2img (96 dpi fallback) | about 33 | about 0.3333 inch |
+| LibreOffice 26.2.5.2 (supplied reference) | about 43 | about 0.26 inch |
+
+At 50% scale, `64 * 0.5 / 0.2222` corresponds to an effective 144 dpi in this
+PNG/shape fixture. The earlier rough 7/9-column estimates did not count complete
+source tiles and are superseded by these measurements. See the
+[PowerPoint measurement record](https://github.com/stellar-aiz/pptx2img/issues/88#issuecomment-6286206605).
+
+This is a known rendering difference. The 96 dpi fallback remains unchanged:
+one PNG/shape observation does not establish a universal density for PNG/JPEG,
+picture objects, backgrounds, or other Office versions. Explicit PNG `pHYs` and
+JPEG JFIF density handling is unchanged. Repetition is supported, but matching
+PowerPoint's physical tile size in this fixture remains a known difference.
 
 Fixture: `examples/image-effects.pptx` with per-picture regions
 `examples/image-effects.json`; generator: `tests/visual/make_image_effects.py`. Each
