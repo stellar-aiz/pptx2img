@@ -323,6 +323,77 @@ the remaining region failures on slides 1-4 and 7 are edge resampling and the di
 effect curves, and are kept at the unchanged thresholds. PowerPoint was not compared
 directly.
 
+## EMF and WMF pictures survey
+
+pptx2img does not render EMF or WMF yet: such a picture is omitted with
+`Only PNG/JPEG images are supported: <part>` (see [Known limitations](#known-limitations)).
+This section records the step 1 survey of issue #78 (2026-10-20), made before any
+implementation. It does not change rendering.
+
+Fixtures: `tests/visual/make_metafile_pictures.py OUT_DIR [--pptx]` writes nine
+metafiles with the standard library only, from MS-EMF and MS-WMF, plus a deck with one
+picture per slide. Each file isolates a record group: `emf-shapes` (also with an 88-byte
+and a 108-byte header), `emf-path`, `emf-transform`, `emf-clip`, `emf-bitmap`,
+`emf-text`, and the placeable WMFs `wmf-shapes` and `wmf-clip-bitmap`. All nine pass
+`emfsdk`'s strict validator, which was used only as a conformance check on the fixtures.
+The reference drawing is LibreOffice's rendering of the same files, a comparison
+reference and not PowerPoint ground truth.
+
+### Candidates
+
+Versions and dates are from crates.io and GitHub on 2026-10-20. No other crate for EMF
+or WMF turned up in a search of crates.io (`emf`, `wmf`, `metafile`, `windows metafile`).
+
+| | `emf-core` 0.1.1 (+ `wmf-core` 0.1.2) | `emfsdk` 0.2.0 |
+|---|---|---|
+| Maintenance | First release 2026-08-03, latest 2026-09-05; repository pushed 2026-10-03 (EMF) and 2026-09-20 (WMF); 4 and 3 open issues, 4 and 6 stars; the README says some records are not yet implemented | First release 2026-07-20, no release since; repository pushed 2026-10-07; no open issues, no stars; "pre-1.0, API may change" |
+| Licence | MIT (`emf-core`, `wmf-core`); the crate ships a `LICENSE` file | `MIT OR Apache-2.0`; the published package carries no licence file |
+| Transitive dependencies | `snafu`, `strum`, `embedded-io`, `tracing`, `encoding_rs`, `codepage`, `unicode-*`, `base64`; all permissive | Parsing only: `bitflags`, `encoding_rs`, `thiserror`. With `render`: also `image`, `fontdb`, `ttf-parser`; all permissive |
+| Output | SVG string (`converter::convert_to_svg`); WMF input falls back to `wmf-core` automatically; `Player` trait for other outputs | Typed records for parse/edit/write; the optional `render` feature produces a PNG (`decode_metafile_as_raster`), not vector data |
+| SVG or pixels | SVG, but with `viewBox` only (no `width`/`height`) and bitmaps as `data:image/bmp;base64` | Pixels only; a PNG would bypass the SVG pipeline but would pass through the existing PNG/JPEG size policy |
+
+Attribution fits the project's policy for either licence (a notice for the MIT text and
+copyright is enough); licences are not what separates the candidates.
+
+### Record coverage on the fixtures
+
+`ok` means the drawing matches the expected shapes, `partial` means drawn with a visible
+defect, `no` means the record had no effect, and `error` means the whole file failed.
+
+| Record group (fixture) | `emf-core` / `wmf-core` (SVG) | `emfsdk` `render` (PNG) |
+|---|---|---|
+| Rectangle, ellipse, polygon, polyline, MoveToEx/LineTo, pens, brushes (`emf-shapes`, `wmf-shapes`) | `ok`, except `EMR_ROUNDRECT` is not drawn | `ok`, but only when the header is 108 bytes: with the 88-byte (or 100-byte) header, which MS-EMF allows, the call returns `None` without a message |
+| Curves, `FillPath`, `StrokePath` (`emf-path`) | `ok` (fill and stroke) | `partial`: stroke only, `STROKEANDFILLPATH` is not filled |
+| `SelectClipPath` and shapes inside a path bracket (`emf-path`) | `no`: the clip is ignored and the ellipse inside the bracket is drawn immediately | `no`: same |
+| Map mode, window/viewport, `SetWorldTransform`, `ModifyWorldTransform` (`emf-transform`) | `no`: only the untransformed square is drawn | `ok` |
+| `IntersectClipRect` (`emf-clip`, `wmf-clip-bitmap`) | `no`: the clip is ignored | `ok` |
+| `ExcludeClipRect` (`emf-clip`) | `no` | `no` (LibreOffice does not draw the hole either, so the expectation is unverified) |
+| `StretchDIBits`, `BitBlt`, WMF `StretchDIB` (`emf-bitmap`, `wmf-clip-bitmap`) | `partial`: drawn at the source size, not stretched to the destination | `ok` |
+| Text: `ExtCreateFontIndirectW`, `ExtTextOutW`, WMF `TextOut` (`emf-text`, `wmf-clip-bitmap`) | EMF `error`: a conformant 92-byte `LogFontW` makes the whole file fail to parse (`elw` must be at least 320 bytes); WMF text is drawn | `ok` |
+| WMF placeable header (`wmf-shapes`, `wmf-clip-bitmap`) | `ok` | `ok` |
+
+### Recommendation
+
+Implement the subset independently from MS-EMF and MS-WMF in step 2; do not adopt either
+crate.
+
+- Neither crate covers the subset the issue names. `emf-core` ignores clipping and world
+  transforms and rejects the whole file on a common text record, while step 2 requires
+  text records to be reported as `unsupported` and the rest to render. `emfsdk` is
+  raster-only, does not fill paths, and silently declines two of the three header sizes.
+- The output form matters as much as coverage. `emf-core` SVG carries bitmaps as `data:`
+  URIs, which the SVG picture loader rejects by design (they would bypass the PNG/JPEG
+  size policy), and has no intrinsic size. `emfsdk` PNG fixes the resolution before the
+  slide scale is known. An independent decoder can emit paths and run bitmaps through
+  the existing size policy.
+- Both crates are weeks old, pre-1.0, with one maintainer and almost no issue history,
+  so a defect found later would be ours to fix either way.
+
+`emfsdk`'s strict validator is useful during development as a check that generated
+fixtures are conformant; that would be a development-time tool, not a dependency of the
+CLI. Text records stay `unsupported` in step 1 and step 2 either way, and OLE previews
+stored as WMF/EMF go through the same decoder.
+
 ## Known limitations
 
 - Complete layout/master property and text-style inheritance; `themeOverride` and

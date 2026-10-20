@@ -309,6 +309,7 @@ that owns its behaviour.
 | `make_arrow_sizes.py`, `make_connector_routing.py`, `make_lines.py`, `make_preset_shapes.py`, `make_theme_lines.py` | [preset shapes](../../docs/preset-shapes.md) |
 | `make_auto_punctuation.py`, `make_boundary_widths.py`, `make_character_spacing.py`, `make_composite_shapes.py`, `make_punctuation_positions.py` | [rendering notes](../../docs/rendering-notes.md) |
 | `make_colors.py`, `make_fills.py`, `make_gradients.py` | [colors](../../docs/colors.md) |
+| `make_metafile_pictures.py` | [EMF and WMF pictures survey](../../docs/rendering.md#emf-and-wmf-pictures-survey) |
 | `make_ole.py` | [OLE previews](../../docs/ole-preview.md) |
 | `make_shadows.py` | [shadows](../../docs/shadows.md) |
 | `make_table_styles.py` | [table styles](../../docs/table-styles.md) |
