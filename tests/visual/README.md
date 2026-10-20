@@ -187,6 +187,59 @@ The renderer still resolves families through its own system font lookup on each 
 table pins only the LibreOffice reference. Differences between the two faces are part of
 the recorded comparison.
 
+### Recorded CI baseline per OS (#71)
+
+The "Rendering comparison with unchanged thresholds" step gates on macOS only. On Linux and
+Windows it runs with `continue-on-error: true`: Noto Sans CJK JP is pinned in the LibreOffice
+reference, but pptx2img still resolves families from each OS's system fonts, so line widths
+differ. The "Reference determinism and pinned table" step gates on every OS, and the macOS leg
+also passes `--strict-font-pinning` because its table covers every family the determinism
+fixtures request (Linux and Windows still report Arial as unpinned, so the flag stays off
+there). The thresholds (`--max-mae 0.02`, `--max-changed-ratio 0.05`, `--pixel-tolerance 16`)
+are unchanged. A "Summarize comparison metrics" step prints the per-slide numbers into the job
+summary and the log of each leg, so a change from this baseline shows up without reading the
+step logs.
+
+Baseline measured by `workflow_dispatch` run 39368259323 on `ci/fleet-ci-71` (LibreOffice
+26.2.5.2, width 1600; MAE / changed ratio, "(over)" marks a slide above the thresholds). It
+covers the comparisons whose `report.json` sits directly under `target/visual-tests/<run>/`; the
+other cargo comparisons are not tabulated:
+
+| Fixture | Slide | macOS MAE / changed | Linux MAE / changed | Windows MAE / changed |
+|---|---|---|---|---|
+| `character-spacing` | 1 | 0.0184 / 0.0273 | 0.0331 / 0.0414 (over) | 0.0277 / 0.0354 (over) |
+| `character-spacing` | 2 | 0.0172 / 0.0255 | 0.0306 / 0.0387 (over) | 0.0258 / 0.0331 (over) |
+| `character-spacing` | 3 | 0.0184 / 0.0274 | 0.0331 / 0.0414 (over) | 0.0277 / 0.0354 (over) |
+| `character-spacing` | 4 | 0.0188 / 0.0277 | 0.0337 / 0.0422 (over) | 0.0277 / 0.0355 (over) |
+| `character-spacing` | 5 | 0.0124 / 0.0188 | 0.0226 / 0.0286 (over) | 0.0186 / 0.0241 |
+| `composite-shapes` | 1 | 0.0003 / 0.0018 | 0.0003 / 0.0018 | 0.0003 / 0.0018 |
+| `composite-shapes` | 2 | 0.0030 / 0.0097 | 0.0048 / 0.0123 | 0.0055 / 0.0133 |
+| `composite-shapes` | 3 | 0.0009 / 0.0028 | 0.0009 / 0.0028 | 0.0009 / 0.0028 |
+| `composite-shapes` | 4 | 0.0012 / 0.0041 | 0.0021 / 0.0051 | 0.0026 / 0.0058 |
+| `geometry` | 1 | 0.0017 / 0.0107 | 0.0018 / 0.0115 | 0.0017 / 0.0107 |
+| `text-theme` | 1 | 0.0035 / 0.0112 | 0.0055 / 0.0136 | 0.0055 / 0.0136 |
+| `text-theme` | 2 | 0.0126 / 0.0306 | 0.0181 / 0.0359 | 0.0181 / 0.0359 |
+| `theme` | 1 | 0.0035 / 0.0112 | 0.0055 / 0.0136 | 0.0055 / 0.0136 |
+
+Outcome per OS: macOS 0 slides over the thresholds; Linux 5 slides over (all of
+`character-spacing`); Windows 4 slides over (`character-spacing` slides 1-4). A comparison that
+gets worse than this table is the signal to investigate; the Linux and Windows numbers are not
+a statement that those OSes render acceptably.
+
+### macOS font baseline
+
+`check_environment.py` pins the SHA-256 of the two Hiragino Sans files of the current
+`macos-15` runner image and reports every differing file with its found hash. Hashes of the
+earlier image (no longer accepted) are kept as a comment in that file:
+
+| File | Earlier image | Current image (checked 2026-10-20) |
+|---|---|---|
+| `ヒラギノ角ゴシック W3.ttc` | `ff92033a300f55aff2f45f57479a560af2c5467973b425d3f724f870af07f83e` | `833776a6fd68e2c71c0c52fd8041195bd3d0a336cdb278170b7ad71c7e1b3475` |
+| `ヒラギノ角ゴシック W6.ttc` | `495faf728470c0111c15265fd5844293fb0bef4240371b79a888371a4ae38c3b` | `790fe535987adc662e83489e162dc54c1e50be8de15169300082f6cc7a082e4e` |
+
+The job does not install fonts on macOS; when the image changes again, update the hashes from
+the failure message.
+
 ## Independent table row-growth fixtures
 
 `make_table_row_growth.py` writes a table whose stored row heights are shorter than
