@@ -1277,3 +1277,191 @@ fn small_ellipse_records_text_overflow_when_text_exceeds_the_inscribed_rectangle
     let (_, records) = blue_text_bounds("rect", "", (30, 30, 40, 40), "t", lines);
     assert!(!records.iter().any(|d| d["code"] == "text_overflow"));
 }
+/// A deck of `count` slides sharing one layout whose text box holds the given runs. The test font
+/// has digits but not `‹#›`, so drawing the saved placeholder fails the conversion with a
+/// missing-glyph error.
+fn field_deck(
+    path: &Path,
+    count: usize,
+    hidden: &[usize],
+    first_slide_num: Option<&str>,
+    field: &str,
+) {
+    let mut zip = ZipWriter::new(fs::File::create(path).unwrap());
+    let ids: String = (1..=count)
+        .map(|i| format!(r#"<p:sldId id="{}" r:id="s{i}"/>"#, 255 + i))
+        .collect();
+    let first = first_slide_num
+        .map(|v| format!(r#" firstSlideNum="{v}""#))
+        .unwrap_or_default();
+    let slide_rels: String = (1..=count)
+        .map(|i| {
+            format!(r#"<Relationship Id="s{i}" Type="{R}/slide" Target="slides/slide{i}.xml"/>"#)
+        })
+        .collect();
+    let font = r#"<a:rPr><a:latin typeface="Pptx Bullets"/></a:rPr>"#;
+    let layout_box = format!(
+        r#"<p:sp><p:spPr>{}<a:prstGeom prst="rect"/></p:spPr><p:txBody><a:bodyPr/><a:p>{field}</a:p></p:txBody></p:sp>"#,
+        transform(0, 0, 100, 50)
+    )
+    .replace("<a:rPr/>", font);
+    let mut parts = vec![
+        (
+            "_rels/.rels".to_string(),
+            rel("officeDocument", "ppt/presentation.xml"),
+        ),
+        (
+            "ppt/presentation.xml".to_string(),
+            format!(
+                r#"<p:presentation xmlns:p="{P}" xmlns:r="{R}"{first}><p:sldIdLst>{ids}</p:sldIdLst><p:sldSz cx="952500" cy="952500"/></p:presentation>"#
+            ),
+        ),
+        (
+            "ppt/_rels/presentation.xml.rels".to_string(),
+            format!(r#"<Relationships xmlns="{PR}">{slide_rels}</Relationships>"#),
+        ),
+        (
+            "ppt/layouts/layout.xml".to_string(),
+            page("sldLayout", "", "", &layout_box),
+        ),
+        (
+            "ppt/layouts/_rels/layout.xml.rels".to_string(),
+            rel("slideMaster", "../masters/master.xml"),
+        ),
+        (
+            "ppt/masters/master.xml".to_string(),
+            page("sldMaster", "", "", ""),
+        ),
+    ];
+    for i in 1..=count {
+        let attrs = if hidden.contains(&i) {
+            r#"show="0""#
+        } else {
+            ""
+        };
+        parts.push((
+            format!("ppt/slides/slide{i}.xml"),
+            page("sld", attrs, "", ""),
+        ));
+        parts.push((
+            format!("ppt/slides/_rels/slide{i}.xml.rels"),
+            rel("slideLayout", "../layouts/layout.xml"),
+        ));
+    }
+    for (name, data) in parts {
+        zip.start_file(name, SimpleFileOptions::default()).unwrap();
+        zip.write_all(data.as_bytes()).unwrap();
+    }
+    zip.finish().unwrap();
+}
+/// Converts a field deck and returns the manifest.
+fn convert_fields(
+    count: usize,
+    hidden: &[usize],
+    first_slide_num: Option<&str>,
+    field: &str,
+) -> (serde_json::Value, tempfile::TempDir) {
+    let dir = tempfile::tempdir().unwrap();
+    let input = dir.path().join("fields.pptx");
+    let out = dir.path().join("out");
+    field_deck(&input, count, hidden, first_slide_num, field);
+    let mut command = Command::new(env!("CARGO_BIN_EXE_pptx2img"));
+    // Hidden slides stay skipped, which is the case under test.
+    command
+        .arg(&input)
+        .arg("--out")
+        .arg(&out)
+        .args(["--width", "100", "--no-system-fonts", "--font-fallback"])
+        .arg("--font-file")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/fixtures/bullets.ttf"
+        ));
+    let output = command.output().unwrap();
+    assert!(
+        out.join("manifest.json").exists(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let manifest = serde_json::from_slice(&fs::read(out.join("manifest.json")).unwrap()).unwrap();
+    (manifest, dir)
+}
+/// How many glyphs were drawn on each rendered slide, keyed by slide number. Every glyph of the
+/// test font is a separate box, so groups of dark columns count glyphs.
+fn glyph_counts(manifest: &serde_json::Value, out: &Path) -> Vec<(u64, usize)> {
+    manifest["slides"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|slide| {
+            let number = slide["slide"].as_u64().unwrap();
+            let img = Pixmap::load_png(out.join(format!("slide-{number:03}.png"))).unwrap();
+            let mut groups = 0;
+            let mut inside = false;
+            for x in 0..img.width() {
+                let dark = (0..img.height()).any(|y| rgb(&img, x, y).0 < 128);
+                groups += usize::from(dark && !inside);
+                inside = dark;
+            }
+            (number, groups)
+        })
+        .collect()
+}
+const SLIDE_NUMBER: &str = r#"<a:fld id="{B6F15528-21DE-4FAA-801E-634DDDAF4B2B}" type="slidenum"><a:rPr/><a:t>‹#›</a:t></a:fld>"#;
+#[test]
+fn slide_number_field_is_resolved_and_the_saved_placeholder_is_not_drawn() {
+    // Drawing `‹#›` would fail the conversion: the font has no such glyphs. Slides 9 and 10
+    // tell apart one-digit and two-digit numbers.
+    let (manifest, dir) = convert_fields(3, &[], Some("9"), SLIDE_NUMBER);
+    assert_eq!(
+        glyph_counts(&manifest, &dir.path().join("out")),
+        [(1, 1), (2, 2), (3, 2)]
+    );
+    let (manifest, dir) = convert_fields(3, &[], None, SLIDE_NUMBER);
+    assert_eq!(
+        glyph_counts(&manifest, &dir.path().join("out")),
+        [(1, 1), (2, 1), (3, 1)]
+    );
+}
+#[test]
+fn hidden_slides_still_count_in_the_numbering_of_later_slides() {
+    // Slide 3 is number 10 when hidden slide 2 is counted; it would be 9 otherwise.
+    let (manifest, dir) = convert_fields(3, &[2], Some("8"), SLIDE_NUMBER);
+    assert_eq!(
+        glyph_counts(&manifest, &dir.path().join("out")),
+        [(1, 1), (3, 2)]
+    );
+}
+#[test]
+fn date_field_keeps_its_saved_text_with_one_diagnostic_per_slide() {
+    let field = r#"<a:fld id="{1}" type="datetime1"><a:rPr/><a:t>AAA</a:t></a:fld><a:fld id="{2}" type="datetime4"><a:rPr/><a:t>AA</a:t></a:fld>"#;
+    let (manifest, _dir) = convert_fields(2, &[], None, field);
+    for slide in manifest["slides"].as_array().unwrap() {
+        let notes: Vec<_> = slide["diagnostics"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|d| {
+                d["message"]
+                    .as_str()
+                    .unwrap()
+                    .starts_with("Date and time fields")
+            })
+            .collect();
+        assert_eq!(notes.len(), 1, "{slide}");
+        assert_eq!(notes[0]["code"], "approximation");
+    }
+}
+#[test]
+fn other_field_types_keep_saved_text_and_name_the_type() {
+    let field = r#"<a:fld id="{1}" type="slidetitle"><a:rPr/><a:t>AAA</a:t></a:fld>"#;
+    let (manifest, _dir) = convert_fields(1, &[], None, field);
+    let diagnostics = manifest["slides"][0]["diagnostics"].as_array().unwrap();
+    assert!(
+        diagnostics.iter().any(|d| d["message"]
+            .as_str()
+            .unwrap()
+            .starts_with("Field type slidetitle is not resolved")),
+        "{diagnostics:?}"
+    );
+}

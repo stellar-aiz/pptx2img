@@ -130,6 +130,20 @@ impl Warnings {
             self.messages.push(message);
         }
     }
+    /// Keeps only the first record of each distinct message that starts with `prefix`.
+    pub fn keep_first_per_message(&mut self, prefix: &str) {
+        let mut seen = Vec::new();
+        self.records.retain(|record| {
+            if !record.message.starts_with(prefix) {
+                return true;
+            }
+            if seen.contains(&record.message) {
+                return false;
+            }
+            seen.push(record.message.clone());
+            true
+        });
+    }
     pub fn into_parts(self) -> (Vec<String>, Vec<Diagnostic>) {
         (self.messages, self.records)
     }

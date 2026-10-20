@@ -150,6 +150,9 @@ fn escape(s: &str) -> String {
 pub struct RenderOptions<'a> {
     pub fonts: FontResolver<'a>,
     pub punctuation_compression: bool,
+    /// The number the slide being rendered shows for `slidenum` fields, set by [`read`] before
+    /// each slide. `None` keeps the saved field text.
+    pub slide_number: std::cell::Cell<Option<i64>>,
 }
 
 pub fn read(path: &Path, options: &RenderOptions<'_>, include_hidden: bool) -> Result<Deck> {
@@ -229,6 +232,12 @@ pub fn read(path: &Path, options: &RenderOptions<'_>, include_hidden: bool) -> R
     if width <= 0.0 || height <= 0.0 || width > 100_000.0 || height > 100_000.0 {
         bail!("Invalid slide dimensions");
     }
+    // `firstSlideNum` is an xsd:int that defaults to 1.
+    let first_slide_number = doc
+        .root_element()
+        .attribute("firstSlideNum")
+        .and_then(|value| value.trim().parse::<i64>().ok())
+        .unwrap_or(1);
     let rels = relationships(&parts, &root.target)?;
     let mut slides = Vec::new();
     let mut skipped_hidden = Vec::new();
@@ -248,6 +257,10 @@ pub fn read(path: &Path, options: &RenderOptions<'_>, include_hidden: bool) -> R
         if part.external || !part.kind.ends_with("/slide") {
             bail!("Invalid slide relationship");
         }
+        // Hidden slides keep their place in the numbering even when they are not rendered.
+        options
+            .slide_number
+            .set(Some(first_slide_number + position as i64));
         let Some(mut slide) =
             render_slide(&parts, &part.target, width, height, options, include_hidden)?
         else {
@@ -549,6 +562,10 @@ fn render_slide(
         }
     }
     svg.push_str("</svg>");
+    // Field notes come from every text box on the slide, layout and master included; report each
+    // once per slide.
+    warnings.keep_first_per_message(text::DATE_FIELD_NOTE);
+    warnings.keep_first_per_message(text::OTHER_FIELD_NOTE);
     let (warnings, diagnostics) = warnings.into_parts();
     Ok(Some(Slide {
         number: 0,
