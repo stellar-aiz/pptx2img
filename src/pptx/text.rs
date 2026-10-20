@@ -526,6 +526,28 @@ fn auto_fit(nodes: &[Node<'_, '_>], warnings: &mut Warnings) -> AutoFit {
     result
 }
 
+/// Quarter turn of rotated vertical text (`a:bodyPr@vert`).
+#[derive(Clone, Copy)]
+enum Turn {
+    /// `vert`: horizontal lines turned 90 degrees clockwise.
+    Clockwise,
+    /// `vert270`: horizontal lines turned 90 degrees counter-clockwise.
+    CounterClockwise,
+}
+/// Inset keys (with the table-cell margin keys and defaults) that act as the left,
+/// right, top, and bottom insets of the lines once they are turned.
+fn insets(turn: Option<Turn>) -> [(&'static str, &'static str, f64); 4] {
+    let l = ("lIns", "marL", 91440.0);
+    let r = ("rIns", "marR", 91440.0);
+    let t = ("tIns", "marT", 45720.0);
+    let b = ("bIns", "marB", 45720.0);
+    match turn {
+        None => [l, r, t, b],
+        Some(Turn::Clockwise) => [t, b, r, l],
+        Some(Turn::CounterClockwise) => [b, t, l, r],
+    }
+}
+
 pub(super) fn render<'a>(
     source: impl Into<TextBody<'a>>,
     w: f64,
@@ -536,6 +558,52 @@ pub(super) fn render<'a>(
     warnings: &mut Warnings,
 ) -> TextExtent {
     let source = source.into();
+    let vert = std::iter::once(source.body)
+        .chain(source.inherited.iter().copied())
+        .filter_map(|n| child(n, A, "bodyPr"))
+        .find_map(|n| n.attribute("vert"));
+    let turn = match vert {
+        None | Some("horz") => None,
+        Some("vert") => Some(Turn::Clockwise),
+        Some("vert270") => Some(Turn::CounterClockwise),
+        // eaVert (upright East Asian columns), wordArtVert, and the other modes.
+        Some(_) => {
+            warn(warnings, "Vertical text is unsupported");
+            None
+        }
+    };
+    let Some(turn) = turn else {
+        return layout(source, w, h, None, theme, options, svg, warnings);
+    };
+    // Rotated text is horizontal text laid out in the box with its sides swapped and
+    // then turned into place about the box.
+    svg.push_str(&match turn {
+        Turn::Clockwise => format!("<g transform=\"translate({w} 0) rotate(90)\">"),
+        Turn::CounterClockwise => format!("<g transform=\"translate(0 {h}) rotate(-90)\">"),
+    });
+    layout(source, h, w, Some(turn), theme, options, svg, warnings);
+    svg.push_str("</g>");
+    // Shape autofit is never applied to vertical bodies, so the box keeps its size.
+    TextExtent {
+        height: h,
+        offset_y: 0.0,
+        required_height: h,
+        width: w,
+        offset_x: 0.0,
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn layout(
+    source: TextBody<'_>,
+    w: f64,
+    h: f64,
+    turn: Option<Turn>,
+    theme: &Theme,
+    options: &RenderOptions<'_>,
+    svg: &mut String,
+    warnings: &mut Warnings,
+) -> TextExtent {
     let body = source.body;
     let bodies: Vec<_> = std::iter::once(body)
         .chain(source.inherited.iter().copied())
@@ -555,9 +623,6 @@ pub(super) fn render<'a>(
         .iter()
         .filter_map(|n| child(*n, A, "bodyPr"))
         .collect();
-    if attr(&body_props, "vert").is_some_and(|s| s != "horz") {
-        warn(warnings, "Vertical text is unsupported");
-    }
     let autofit = auto_fit(&body_props, warnings);
     let text_style = |nodes: &[Node<'_, '_>], east: bool, warnings: &mut Warnings| {
         let mut style = style(nodes, east, theme, warnings);
@@ -573,10 +638,8 @@ pub(super) fn render<'a>(
             .unwrap_or_else(|| prop_number(&body_props, key, default))
             / EMU
     };
-    let left = margin("lIns", "marL", 91440.0);
-    let right = margin("rIns", "marR", 91440.0);
-    let top = margin("tIns", "marT", 45720.0);
-    let bottom = margin("bIns", "marB", 45720.0);
+    let [left, right, top, bottom] =
+        insets(turn).map(|(key, cell_key, default)| margin(key, cell_key, default));
     let wrap_enabled = attr(&body_props, "wrap") != Some("none");
     let available = (w - left - right).max(1.0);
     let placeholder_type = bodies
@@ -1690,6 +1753,56 @@ mod tests {
             "<a:p><a:r><a:t>AA</a:t></a:r></a:p>",
         );
         assert_eq!((extent.width, extent.offset_x), (200.0, 0.0));
+    }
+    #[test]
+    fn rotated_text_swaps_the_box_and_maps_insets_to_the_turned_lines() {
+        // 10px left inset, 20px top inset. Turned clockwise, the shape's top inset
+        // becomes the lines' left inset and the right inset (0) their top one.
+        for (vert, transform, first_x, baseline_shift, warned) in [
+            ("vert", "translate(50 0) rotate(90)", 20.0, 0.0, false),
+            ("vert270", "translate(0 100) rotate(-90)", 0.0, 10.0, false),
+            ("eaVert", "", 10.0, 20.0, true),
+        ] {
+            let source = format!(
+                r#"<a:txBody xmlns:a="{A}"><a:bodyPr vert="{vert}" lIns="95250" tIns="190500" rIns="0" bIns="0"/><a:p><a:r><a:rPr sz="750"/><a:t>AB</a:t></a:r></a:p></a:txBody>"#
+            );
+            let doc = Document::parse(&source).unwrap();
+            let mut svg = String::new();
+            let mut warnings = Warnings::default();
+            let extent = render(
+                doc.root_element(),
+                50.0,
+                100.0,
+                &Theme::default(),
+                &RenderOptions {
+                    fonts: Resolver::new(&Database::new(), &HashMap::new()),
+                    punctuation_compression: false,
+                },
+                &mut svg,
+                &mut warnings,
+            );
+            assert_eq!((extent.width, extent.height), (50.0, 100.0));
+            if transform.is_empty() {
+                assert!(!svg.contains("rotate("), "{svg}");
+            } else {
+                assert!(svg.contains(transform), "{svg}");
+            }
+            assert!(
+                svg.contains(&format!("<tspan x=\"{first_x} {}\"", first_x + 10.0)),
+                "{vert}: {svg}"
+            );
+            // Without fonts the ascent equals the 10px size.
+            assert!(
+                svg.contains(&format!("<text y=\"{}\"", 10.0 + baseline_shift)),
+                "{vert}: {svg}"
+            );
+            assert_eq!(
+                warnings
+                    .iter()
+                    .any(|w| w.contains("Vertical text is unsupported")),
+                warned
+            );
+        }
     }
     #[test]
     fn bullets_and_wrapped_lines_have_separate_starts() {

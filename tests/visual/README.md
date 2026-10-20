@@ -260,6 +260,7 @@ that owns its behaviour.
 | `make_shadows.py` | [shadows](../../docs/shadows.md) |
 | `make_table_styles.py` | [table styles](../../docs/table-styles.md) |
 | `make_text_autofit.py`, `make_text_bullets.py` | [rendering](../../docs/rendering.md) |
+| `make_vertical_text.py` | [rendering](../../docs/rendering.md#vertical-text) |
 
 ## Reproducibility
 

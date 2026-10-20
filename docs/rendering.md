@@ -23,6 +23,7 @@ Strict mode gates known warnings, not all incompatibilities.
 - Slide -> layout -> master -> theme relationships, color mappings, and major/
   minor Latin and Japanese theme fonts, including the Jpan supplemental font.
 - Explicit font, size, color, bold/italic, and left/center/right paragraph alignment.
+- Rotated [vertical text](#vertical-text) (`vert`, `vert270`).
 - Nominal font-advance wrapping, basic Japanese prohibited breaks, explicit line
   breaks and empty lines, paragraph spacing, point/percentage line spacing, and
   top/center/bottom vertical anchoring with overflow warnings.
@@ -91,6 +92,42 @@ LibreOffice. PowerPoint was not compared directly.
 
 - [NormalAutoFit](https://learn.microsoft.com/en-us/dotnet/api/documentformat.openxml.drawing.normalautofit)
 - [Office spAutoFit interpretation](https://learn.microsoft.com/en-us/openspecs/office_standards/ms-oe376/19d31037-28bf-4693-85be-3a37bfe82d51)
+
+## Vertical text
+
+`a:bodyPr@vert="vert"` and `"vert270"` are rotated horizontal text: the lines are
+laid out in the box with its width and height swapped, then turned 90 degrees
+clockwise (`vert`) or counter-clockwise (`vert270`) about the box. Wrapping,
+alignment, anchoring, and spacing therefore work along the turned lines, so
+`algn="l"` starts at the top for `vert` and at the bottom for `vert270`, and
+`anchor="t"` puts the first line on the right for `vert` and on the left for
+`vert270`. The insets turn with the lines: for `vert` the shape's top, bottom,
+right, and left insets act as the lines' left, right, top, and bottom insets; for
+`vert270` the bottom, top, left, and right insets do. Shape autofit stays
+unsupported for vertical bodies and is reported.
+
+`eaVert` (upright East Asian columns), `wordArtVert`, `wordArtVertRtl`, and
+`mongolianVert` are still laid out horizontally with a `Vertical text is
+unsupported` diagnostic.
+
+Fixture: `examples/vertical-text.pptx`; generator `tests/visual/make_vertical_text.py`.
+Measured at `--width 1600` on macOS against LibreOffice 26.2.5.2 with default
+thresholds: page 1 (`vert270` labels with three anchors and a `vert` label) moves
+from MAE 0.0145, changed 0.0237 to MAE 0.0063, changed 0.0149 and passes. Page 2
+(`eaVert` bodies) is unchanged (MAE 0.0603, changed 0.0855) and fails, because
+`eaVert` is not laid out as columns yet.
+
+An `eaVert` column layout (clockwise lines with upright CJK glyphs centred in an
+ideographic em box, advances from `vmtx`, sideways brackets and dashes) reached
+MAE 0.0287, changed 0.0515 on page 2 and was not landed, because it stays above the
+default thresholds. The same text laid out horizontally measures MAE 0.0401,
+changed 0.0636 against LibreOffice, so the remainder is not specific to vertical
+layout. It comes from two differences shared with horizontal Japanese text: the
+line pitch (Windows cell metrics, 1.26 em for Hiragino Sans W4, against about
+1.19 em in LibreOffice) and the face (W4 resolved here, W3 in LibreOffice). With
+the W3 face forced, the attempt measured MAE 0.0217, changed 0.0430. LibreOffice
+also adds space between Japanese and Latin runs, which this renderer does not.
+Thresholds have not been relaxed.
 
 ## Table row heights
 
