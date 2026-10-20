@@ -123,8 +123,12 @@ fixture as reproduction material.
   stretch the picture (after `srcRect` cropping) over the shape's box, and the shape
   outline clips it. The picture goes through the same loading, size, and omission
   rules as pictures; an omitted picture leaves the shape unfilled. Tiling (`a:tile`)
-  and non-empty `fillRect` still record `Image tiling, effects, and fill rectangles are
-  unsupported` and are drawn stretched.
+  is drawn through the same shared tile pattern as `p:pic` pictures, with no
+  diagnostic: the tile size, offset, alignment, and flip rules, and the size bounds
+  (more than 256 tiles along an axis, or a pattern cell above 16 times the box area,
+  fall back to a stretched picture with an `approximation` diagnostic) are described in
+  [rendering.md](rendering.md). Picture effects and non-empty `fillRect` insets follow
+  the same rules as pictures.
 - **Group fills** (`a:grpFill`): a child uses the fill of the nearest enclosing group
   that declares one; a group that itself says `a:grpFill` passes its parent's fill on,
   and a group without a fill leaves such children unfilled. Fill elements on a group

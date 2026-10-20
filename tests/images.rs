@@ -499,6 +499,37 @@ fn tiled_picture_fill_repeats_the_scaled_image() {
 }
 
 #[test]
+fn tiled_picture_fill_on_a_shape_repeats_without_a_tiling_diagnostic() {
+    let dir = tempfile::tempdir().unwrap();
+    // The shape fill goes through the same tile pattern as a `p:pic`: a 10x10 px picture at
+    // twice its size tiles every 20 px, where a stretched fill would show x=15 red.
+    let tile = r#"<a:tile tx="0" ty="0" sx="200000" sy="200000" flip="none" algn="tl"/>"#;
+    let shape = format!(
+        r#"<p:sp><p:nvSpPr><p:cNvPr id="6" name="tiled"/><p:cNvSpPr/><p:nvPr/></p:nvSpPr><p:spPr>{}<a:prstGeom prst="rect"><a:avLst/></a:prstGeom><a:blipFill><a:blip r:embed="img"/>{tile}</a:blipFill></p:spPr></p:sp>"#,
+        transform(0, 0, 60, 60)
+    );
+    let (img, report) = render_deck(
+        dir.path(),
+        "shape-tile.png",
+        &shape,
+        png_columns(10, 10, red_blue(10)),
+    );
+    for (x, expected) in [
+        (5, (255, 0, 0)),
+        (15, (0, 0, 255)),
+        (25, (255, 0, 0)),
+        (45, (255, 0, 0)),
+        (55, (0, 0, 255)),
+    ] {
+        assert_eq!(rgb(&img, x, 30), expected, "x={x}");
+    }
+    assert_eq!(rgb(&img, 75, 30), (255, 255, 255), "outside the shape");
+    for code in ["unsupported", "approximation"] {
+        assert!(messages(&report, code).is_empty(), "{code}: {report}");
+    }
+}
+
+#[test]
 fn fill_rectangle_insets_the_stretched_picture() {
     let dir = tempfile::tempdir().unwrap();
     let fill = r#"<a:stretch><a:fillRect l="50000"/></a:stretch>"#;

@@ -299,6 +299,16 @@ those pages are expected to differ. See
   --regions examples/image-effects.json --width 1600 --out target/visual-tests/image-effects
 ```
 
+### Shape tile fill
+
+`make_shape_tile.py` writes one slide with a right triangle filled by an `a:tile`
+picture (a checkerboard without `pHYs`, `sx`/`sy` of 50%). It is the fixture behind the
+density note in [rendering](../../docs/rendering.md#picture-effects-and-fills).
+
+```sh
+.venv-visual/bin/python tests/visual/make_shape_tile.py /tmp/shape-tile.pptx
+```
+
 ## Generators documented elsewhere
 
 Every `make_*.py` generator is described either in this file or in the feature page
