@@ -1,6 +1,6 @@
 //! EMF records (MS-EMF 2.3) played into the shared `Player`.
 use super::*;
-use std::collections::HashMap;
+use std::{borrow::Cow, collections::HashMap};
 
 /// `EMR_HEADER` (type 1) with the `" EMF"` signature at offset 40.
 pub(super) fn sniff(data: &[u8]) -> bool {
@@ -8,7 +8,7 @@ pub(super) fn sniff(data: &[u8]) -> bool {
 }
 
 fn malformed(what: impl std::fmt::Display) -> String {
-    format!("Malformed EMF picture ({what})")
+    super::malformed("EMF", what)
 }
 
 pub(super) fn translate(data: &[u8]) -> Result<Translated, String> {
@@ -70,7 +70,6 @@ pub(super) fn translate(data: &[u8]) -> Result<Translated, String> {
         plus: None,
     };
     let mut offset = header_size;
-    let mut records = 0;
     loop {
         let kind = file
             .u32(offset)
@@ -83,12 +82,7 @@ pub(super) fn translate(data: &[u8]) -> Result<Translated, String> {
                 "record at byte {offset} has an invalid size"
             )));
         }
-        records += 1;
-        if records > MAX_RECORDS {
-            return Err(format!(
-                "Metafile picture exceeds {MAX_RECORDS} records; not rendered"
-            ));
-        }
+        state.player.count_record()?;
         if kind == 14 {
             break;
         }
@@ -137,7 +131,7 @@ impl Emf {
             2..=6 | 85..=89 => {
                 let wide = kind <= 6;
                 let count = u32_at(24)? as usize;
-                let points = points(p, record, 28, count, wide).ok_or_else(truncated)??;
+                let points = p.points(record, 28, count, wide, truncated)?;
                 match if wide { kind } else { kind - 83 } {
                     2 => p.bezier(&points)?,
                     3 => p.polygon(&points)?,
@@ -160,15 +154,8 @@ impl Emf {
                 if counts.iter().try_fold(0usize, |a, &c| a.checked_add(c)) != Some(total) {
                     return Err(malformed(format!("{name} point counts do not add up")));
                 }
-                let all =
-                    points(p, record, 32 + polygons * 4, total, wide).ok_or_else(truncated)??;
-                let mut rest = all.as_slice();
-                let mut figures = Vec::with_capacity(polygons);
-                for count in counts {
-                    let (figure, tail) = rest.split_at(count);
-                    figures.push(figure.to_vec());
-                    rest = tail;
-                }
+                let all = p.points(record, 32 + polygons * 4, total, wide, truncated)?;
+                let figures = figures(&all, &counts);
                 if kind == 8 || kind == 91 {
                     p.poly_polygon(&figures)?;
                 } else {
@@ -192,15 +179,7 @@ impl Emf {
             }
             17 => p.dc.map_mode = u32_at(8)?,
             19 => p.dc.even_odd = u32_at(8)? != 2,
-            20 => {
-                let rop = u32_at(8)?;
-                if rop != 13 {
-                    p.note(
-                        Code::Approximation,
-                        format!("Metafile mix mode {rop} is drawn as R2_COPYPEN (EMR_SETROP2)"),
-                    );
-                }
-            }
+            20 => p.mix_mode(u32_at(8)?, name),
             27 => p.move_to(point(8)?),
             54 => {
                 let to = point(8)?;
@@ -274,10 +253,7 @@ impl Emf {
             }
             93 | 94 => {
                 let handle = u32_at(8)?;
-                self.player.note(
-                    Code::Unsupported,
-                    format!("Pattern brushes in metafile pictures are not drawn ({name})"),
-                );
+                self.player.pattern_brush(name);
                 self.create(handle, Object::Brush(Brush { color: None }))?;
             }
             // Fonts, palettes, and colour spaces occupy handles but draw nothing here.
@@ -324,10 +300,10 @@ impl Emf {
                 if count > record.0.len() / 16 {
                     return Err(truncated());
                 }
+                p.take_points(count * 4)?;
                 let mut outline = Outline::new(Affine::IDENTITY);
                 for i in 0..count {
-                    let r = rect(48 + i * 16)?;
-                    outline.rect(normalized(r.0, r.1, r.2, r.3));
+                    outline.rect(rect(48 + i * 16)?);
                 }
                 if count == 0 {
                     // An empty region clips everything away.
@@ -357,51 +333,27 @@ impl Emf {
                     dib::Alpha::OPAQUE
                 };
                 let rop = if kind == 114 { 0x00CC_0020 } else { rop };
-                let src = (src_origin.0, src_origin.1, src_size.0, src_size.1);
-                let source = if info_len == 0 {
-                    None
-                } else {
-                    source(
-                        p,
-                        name,
-                        record,
-                        usage,
-                        (off_info, info_len),
-                        (off_bits, bits_len),
-                        src,
-                        false,
-                        alpha,
-                    )?
+                let bitmap = Bitmap {
+                    usage,
+                    info: (off_info, info_len),
+                    bits: (off_bits, bits_len),
+                    rect: (src_origin.0, src_origin.1, src_size.0, src_size.1),
+                    dib_origin: false,
+                    alpha,
                 };
-                if info_len == 0 || source.is_some() {
-                    p.blit(name, rop, dest, source)?;
-                }
+                bitmap.blit(p, name, record, rop, dest)?;
             }
             81 => {
-                let dest = (i32_at(24)?, i32_at(28)?, i32_at(72)?, i32_at(76)?);
-                let src = rect(32)?;
-                let (off_info, info_len) = (u32_at(48)?, u32_at(52)?);
-                let (off_bits, bits_len) = (u32_at(56)?, u32_at(60)?);
-                let usage = u32_at(64)?;
-                let rop = u32_at(68)?;
-                let source = if info_len == 0 {
-                    None
-                } else {
-                    source(
-                        p,
-                        name,
-                        record,
-                        usage,
-                        (off_info, info_len),
-                        (off_bits, bits_len),
-                        src,
-                        true,
-                        dib::Alpha::OPAQUE,
-                    )?
+                let bitmap = Bitmap {
+                    usage: u32_at(64)?,
+                    info: (u32_at(48)?, u32_at(52)?),
+                    bits: (u32_at(56)?, u32_at(60)?),
+                    rect: rect(32)?,
+                    dib_origin: true,
+                    alpha: dib::Alpha::OPAQUE,
                 };
-                if info_len == 0 || source.is_some() {
-                    p.blit(name, rop, dest, source)?;
-                }
+                let dest = (i32_at(24)?, i32_at(28)?, i32_at(72)?, i32_at(76)?);
+                bitmap.blit(p, name, record, u32_at(68)?, dest)?;
             }
             83 | 84 | 96 | 97 | 108 => p.text_record(name),
             // State with no visible effect on the drawn subset.
@@ -429,82 +381,68 @@ impl Emf {
 
     fn create(&mut self, handle: u32, object: Object) -> Result<(), String> {
         if self.objects.len() >= MAX_OBJECTS && !self.objects.contains_key(&handle) {
-            return Err(format!(
-                "Metafile picture exceeds {MAX_OBJECTS} graphics objects; not rendered"
-            ));
+            return Err(too_many_objects());
         }
         self.objects.insert(handle, object);
         Ok(())
     }
 }
 
-/// `count` points at `at`, as 32-bit (`wide`) or 16-bit pairs. `None` when the record is
-/// shorter than the count states; `Some(Err)` when the picture's point limit is exceeded.
-fn points(
-    player: &mut Player,
-    record: Bytes<'_>,
-    at: usize,
-    count: usize,
-    wide: bool,
-) -> Option<Result<Vec<(f64, f64)>, String>> {
-    let size = if wide { 8 } else { 4 };
-    if count > record.0.len().saturating_sub(at) / size {
-        return None;
-    }
-    if let Err(error) = player.take_points(count) {
-        return Some(Err(error));
-    }
-    let read = |i: usize| {
-        let at = at + i * size;
-        if wide {
-            Some((f64::from(record.i32(at)?), f64::from(record.i32(at + 4)?)))
-        } else {
-            Some((f64::from(record.i16(at)?), f64::from(record.i16(at + 2)?)))
-        }
-    };
-    (0..count).map(read).collect::<Option<Vec<_>>>().map(Ok)
-}
-
-/// The bitmap a record carries, or `Ok(None)` (reported) when it is not usable.
-#[allow(clippy::too_many_arguments)]
-fn source<'a>(
-    player: &mut Player,
-    name: &str,
-    record: Bytes<'a>,
+/// The bitmap fields of a blit record: `DIB_*_COLORS` usage, offsets and sizes of the
+/// header and bits, the source rectangle, and how it and the alpha channel are read.
+struct Bitmap {
     usage: u32,
     info: (u32, u32),
     bits: (u32, u32),
     rect: (f64, f64, f64, f64),
     dib_origin: bool,
     alpha: dib::Alpha,
-) -> Result<Option<Source<'a>>, String> {
-    let info = record
-        .slice(info.0, info.1)
-        .ok_or_else(|| malformed(format!("{name} bitmap header lies outside the record")))?;
-    let bits = record
-        .slice(bits.0, bits.1)
-        .ok_or_else(|| malformed(format!("{name} bitmap data lies outside the record")))?;
-    let image = if usage != 0 {
-        Err(dib::Error::Unsupported("palette-index colours".into()))
-    } else {
-        dib::Dib::parse(info, bits)
-    };
-    match image {
-        Ok(image) => Ok(Some(Source {
-            image,
-            rect,
-            dib_origin,
-            alpha,
-        })),
-        Err(reason) => {
-            player.bitmap_failed(name, reason);
-            Ok(None)
+}
+impl Bitmap {
+    /// Blit onto `dest`; a record without a bitmap only fills (`PatBlt`-like operations),
+    /// and an unusable bitmap is reported and skipped.
+    fn blit(
+        self,
+        player: &mut Player,
+        name: &str,
+        record: Bytes<'_>,
+        rop: u32,
+        dest: (f64, f64, f64, f64),
+    ) -> Result<(), String> {
+        if self.info.1 == 0 {
+            return player.blit(name, rop, dest, None);
+        }
+        let info = record
+            .slice(self.info.0, self.info.1)
+            .ok_or_else(|| malformed(format!("{name} bitmap header lies outside the record")))?;
+        let bits = record
+            .slice(self.bits.0, self.bits.1)
+            .ok_or_else(|| malformed(format!("{name} bitmap data lies outside the record")))?;
+        let image = if self.usage != 0 {
+            Err(dib::Error::Unsupported("palette-index colours".into()))
+        } else {
+            dib::Dib::parse(info, bits)
+        };
+        match image {
+            Ok(image) => {
+                let source = Source {
+                    image,
+                    rect: self.rect,
+                    dib_origin: self.dib_origin,
+                    alpha: self.alpha,
+                };
+                player.blit(name, rop, dest, Some(source))
+            }
+            Err(reason) => {
+                player.bitmap_failed(name, reason);
+                Ok(())
+            }
         }
     }
 }
 
 /// The MS-EMF name of record type `kind` (2.1.1), or its number when unknown.
-fn name(kind: u32) -> String {
+fn name(kind: u32) -> Cow<'static, str> {
     const NAMES: [&str; 123] = [
         "",
         "EMR_HEADER",
@@ -631,7 +569,7 @@ fn name(kind: u32) -> String {
         "EMR_CREATECOLORSPACEW",
     ];
     match NAMES.get(kind as usize) {
-        Some(name) if !name.is_empty() => name.to_string(),
-        _ => format!("EMF record type {kind}"),
+        Some(name) if !name.is_empty() => Cow::Borrowed(name),
+        _ => Cow::Owned(format!("EMF record type {kind}")),
     }
 }

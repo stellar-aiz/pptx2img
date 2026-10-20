@@ -93,6 +93,13 @@ pub(super) fn prepare(part: &str, data: &[u8], mime: &str, width: usize, height:
     }
 }
 
+/// The `approximation` message for a picture downscaled from `from` to `to` px.
+pub(super) fn downscaled(from: (usize, usize), to: (usize, usize)) -> String {
+    format!(
+        "Downscaled oversized image from {}x{} to {}x{} px",
+        from.0, from.1, to.0, to.1
+    )
+}
 fn ceiling(width: usize, height: usize) -> String {
     format!(
         "Image exceeds the downscale ceiling of {CEILING_PIXELS} pixels or {CEILING_SIDE} px per side ({width}x{height} px)"
@@ -121,10 +128,7 @@ pub(super) fn encode_rows(
     if embed {
         let mut encoded = Vec::new();
         (|| {
-            let mut encoder = png::Encoder::new(&mut encoded, width as u32, height as u32);
-            encoder.set_color(png::ColorType::Rgba);
-            encoder.set_depth(png::BitDepth::Eight);
-            let mut writer = encoder.write_header()?;
+            let mut writer = rgba_writer(&mut encoded, width, height)?;
             let mut stream = writer.stream_writer()?;
             for y in 0..height {
                 row(y, &mut buffer)?;
@@ -160,13 +164,21 @@ fn downscale(data: &[u8], png: bool, probed: (usize, usize)) -> Result<(Vec<u8>,
 }
 fn encode(shrink: Shrink) -> Result<Vec<u8>> {
     let mut encoded = Vec::new();
-    let mut encoder = png::Encoder::new(&mut encoded, shrink.tw as u32, shrink.th as u32);
-    encoder.set_color(png::ColorType::Rgba);
-    encoder.set_depth(png::BitDepth::Eight);
-    let mut writer = encoder.write_header()?;
+    let mut writer = rgba_writer(&mut encoded, shrink.tw, shrink.th)?;
     writer.write_image_data(&shrink.out)?;
     writer.finish()?;
     Ok(encoded)
+}
+/// A PNG writer for 8-bit RGBA pixels of `width` x `height`.
+fn rgba_writer(
+    out: &mut Vec<u8>,
+    width: usize,
+    height: usize,
+) -> Result<png::Writer<&mut Vec<u8>>> {
+    let mut encoder = png::Encoder::new(out, width as u32, height as u32);
+    encoder.set_color(png::ColorType::Rgba);
+    encoder.set_depth(png::BitDepth::Eight);
+    Ok(encoder.write_header()?)
 }
 
 fn agree(decoded: (usize, usize), probed: (usize, usize)) -> Result<()> {

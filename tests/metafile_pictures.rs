@@ -387,3 +387,97 @@ fn broken_and_oversized_metafiles_are_omitted_without_aborting_the_deck() {
         );
     }
 }
+
+#[test]
+fn deep_clip_chains_are_capped() {
+    // Each clip record adds one link to an SVG mask or clip-path chain, which the renderer
+    // follows recursively; links beyond the cap are reported and not applied, so
+    // thousands of them neither grow the SVG quadratically nor exhaust the stack.
+    let mut records = red_brush();
+    for i in 0..2_000 {
+        let x = i % 40;
+        records.push(record(29, &ints(&[x, 0, x + 1, 1])));
+        records.push(record(30, &ints(&[0, 0, 100, 100])));
+    }
+    records.push(record(43, &ints(&[0, 10, 99, 99])));
+    let (img, manifest) = render_picture("clips.emf", emf(&records));
+    assert_color(
+        &img,
+        (50, 50),
+        (220, 30, 30),
+        "rectangle under the clip records",
+    );
+    assert_eq!(
+        diagnostics(&manifest),
+        [(
+            "approximation".into(),
+            "Metafile clip regions nested deeper than 32 are not applied: ppt/media/clips.emf"
+                .into()
+        )]
+    );
+}
+
+#[test]
+fn distinct_diagnostics_are_bounded() {
+    let mut records = red_brush();
+    records.push(record(43, &ints(&[10, 10, 90, 90])));
+    // 1,000 unknown record types and 1,000 different raster operations.
+    for kind in 200..1_200 {
+        records.push(record(kind, &[]));
+    }
+    for rop in 0..1_000 {
+        let mut payload = ints(&[0, 0, 0, 0, 0, 0, 1, 1, 0x00AA_0000 | rop]);
+        payload.resize(92, 0);
+        records.push(record(76, &payload));
+    }
+    let (img, manifest) = render_picture("notes.emf", emf(&records));
+    assert_color(&img, (50, 50), (220, 30, 30), "rectangle");
+    let notes = diagnostics(&manifest);
+    assert_eq!(notes.len(), 65, "{notes:?}");
+    assert_eq!(
+        notes.last().unwrap().1,
+        "Further metafile diagnostics omitted after 64: ppt/media/notes.emf"
+    );
+}
+
+#[test]
+fn many_wmf_objects_reuse_free_slots() {
+    // Fill 60,000 object slots, then delete and recreate the lowest one 60,000 times.
+    let record = |function: u16, params: &[u8]| {
+        let mut data = ((6 + params.len() as u32) / 2).to_le_bytes().to_vec();
+        data.extend(function.to_le_bytes());
+        data.extend(params);
+        data
+    };
+    let brush = record(0x02FC, &[0, 0, 0xDC, 0x1E, 0x1E, 0, 0, 0]);
+    let mut body = Vec::new();
+    for _ in 0..60_000 {
+        body.extend(&brush);
+    }
+    for _ in 0..60_000 {
+        body.extend(record(0x01F0, &0u16.to_le_bytes()));
+        body.extend(&brush);
+    }
+    body.extend(record(0x012D, &0u16.to_le_bytes()));
+    body.extend(record(0x041B, &[90, 0, 90, 0, 10, 0, 10, 0]));
+    body.extend(record(0, &[]));
+    let mut wmf = 0x9AC6_CDD7u32.to_le_bytes().to_vec();
+    for v in [0i16, 0, 0, 100, 100] {
+        wmf.extend(v.to_le_bytes());
+    }
+    wmf.extend(96u16.to_le_bytes());
+    wmf.extend([0; 6]);
+    for v in [1u16, 9, 0x0300] {
+        wmf.extend(v.to_le_bytes());
+    }
+    wmf.extend([0; 12]);
+    wmf.extend(body);
+    let (img, manifest) = render_picture("objects.wmf", wmf);
+    assert_color(
+        &img,
+        (50, 50),
+        (220, 30, 30),
+        "rectangle with the recreated brush",
+    );
+    assert_eq!(diagnostics(&manifest), []);
+}

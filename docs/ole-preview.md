@@ -1,15 +1,18 @@
 # Static OLE previews and hidden-object diagnostics
 
-OLE payloads are never executed. Only internal PNG/JPEG images enter the existing
-image renderer; external references are not fetched. The graphicFrame determines
+OLE payloads are never executed. Only internal PNG/JPEG, EMF, and placeable WMF
+images enter the existing image renderer (metafiles through the
+[EMF and WMF translation](rendering.md#emf-and-wmf-pictures)); external references are not fetched. The graphicFrame determines
 display coordinates, without reapplying the nested pic transform.
 For mc:AlternateContent, select exactly one OLE from Fallback rather than relying
 on Choice extensions. Preserve hidden status on either the frame or preview.
 
 Even a displayed internal image produces a static-substitution approximation
 diagnostic. Missing previews, parts/relationships, unsupported formats, and external
-references produce omission diagnostics with type and reason. WMF/EMF rendering
-and interpretation of OLE binaries are outside scope.
+references produce omission diagnostics with type and reason. The approximation
+diagnostic names the preview format (`Rendered embedded PNG/JPEG preview ...` or
+`Rendered embedded EMF/WMF preview ...`). Interpretation of OLE binaries is outside
+scope.
 
 ## Hidden OLE keeps its diagnostic
 

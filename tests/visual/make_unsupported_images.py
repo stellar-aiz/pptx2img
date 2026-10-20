@@ -1,8 +1,9 @@
 """Independent fixture: EMF pictures on a slide and in a shared slide layout.
 
-The EMF is a minimal metafile (one red rectangle) written byte by byte here. pptx2img
-does not render EMF; it should omit each picture with a diagnostic and still render
-every slide. python-pptx is needed only for generation.
+The EMF is a minimal metafile (one red rectangle) written byte by byte here. Before
+issue #78 step 2 pptx2img omitted each picture with a diagnostic; it now translates the
+EMF and draws the rectangle on every slide, including the shared layout logo.
+python-pptx is needed only for generation.
 """
 from io import BytesIO
 from pathlib import Path

@@ -1002,7 +1002,8 @@ fn raster_picture<'p>(
             notes: vec![(
                 Code::Approximation,
                 format!(
-                    "Downscaled oversized image from {width}x{height} to {tw}x{th} px: {target}"
+                    "{}: {target}",
+                    raster::downscaled((width, height), (tw, th))
                 ),
             )],
         }),
@@ -1014,12 +1015,10 @@ fn raster_picture<'p>(
 // stellar:debt(perf) a layout or master metafile is translated again on every slide. upgrade: cache by part like raster downscales.
 fn metafile_picture(target: &str, data: &[u8]) -> Result<Picture, String> {
     let translated = metafile::translate(data).map_err(|reason| format!("{reason}: {target}"))?;
+    // Text records are reported by the translator, which writes no `<text>`.
     vector::check_generated(&translated.svg).map_err(|reason| format!("{reason}: {target}"))?;
     Ok(Picture {
-        href: format!(
-            "data:image/svg+xml;base64,{}",
-            STANDARD.encode(&translated.svg)
-        ),
+        href: svg_href(&translated.svg),
         size: Some(translated.size),
         notes: translated
             .notes
@@ -1027,6 +1026,9 @@ fn metafile_picture(target: &str, data: &[u8]) -> Result<Picture, String> {
             .map(|(code, message)| (code, format!("{message}: {target}")))
             .collect(),
     })
+}
+fn svg_href(svg: &[u8]) -> String {
+    format!("data:image/svg+xml;base64,{}", STANDARD.encode(svg))
 }
 /// An SVG picture; vector data bypasses the PNG/JPEG pixel policy and uses its own gate.
 // stellar:debt(perf) a layout or master SVG is checked and encoded again on every slide. upgrade: cache by part like raster downscales.
@@ -1041,7 +1043,7 @@ fn svg_picture<'p>(id: &str, parts: &'p Parts, rels: &'p Relationships) -> Resul
         ));
     }
     Ok(Picture {
-        href: format!("data:image/svg+xml;base64,{}", STANDARD.encode(data)),
+        href: svg_href(data),
         size: None,
         notes,
     })

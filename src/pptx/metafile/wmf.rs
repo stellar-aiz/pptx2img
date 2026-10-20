@@ -4,6 +4,7 @@
 //! `SetWindowExt`) maps onto it, starting as the box itself. Viewport records only
 //! describe the playback device, so they do not move the picture.
 use super::*;
+use std::{borrow::Cow, collections::BTreeSet};
 
 /// The placeable-header key `0x9AC6CDD7`.
 pub(super) fn sniff(data: &[u8]) -> bool {
@@ -11,7 +12,7 @@ pub(super) fn sniff(data: &[u8]) -> bool {
 }
 
 fn malformed(what: impl std::fmt::Display) -> String {
-    format!("Malformed WMF picture ({what})")
+    super::malformed("WMF", what)
 }
 
 pub(super) fn translate(data: &[u8]) -> Result<Translated, String> {
@@ -24,7 +25,7 @@ pub(super) fn translate(data: &[u8]) -> Result<Translated, String> {
         coordinate(10)?,
         coordinate(12)?,
     );
-    let (l, t, r, b) = normalized(l, t, r, b);
+    let (l, t, r, b) = normalized((l, t, r, b));
     if r <= l || b <= t {
         return Err(malformed("empty bounding box"));
     }
@@ -44,9 +45,9 @@ pub(super) fn translate(data: &[u8]) -> Result<Translated, String> {
     let mut state = Wmf {
         player,
         objects: Vec::new(),
+        free: BTreeSet::new(),
     };
     let mut offset = 22 + header_words * 2;
-    let mut records = 0;
     loop {
         let ended = || malformed("ends without META_EOF");
         let words = file.u32(offset).ok_or_else(ended)? as usize;
@@ -57,12 +58,7 @@ pub(super) fn translate(data: &[u8]) -> Result<Translated, String> {
                 "record at byte {offset} has an invalid size"
             )));
         };
-        records += 1;
-        if records > MAX_RECORDS {
-            return Err(format!(
-                "Metafile picture exceeds {MAX_RECORDS} records; not rendered"
-            ));
-        }
+        state.player.count_record()?;
         if function == 0 {
             break;
         }
@@ -76,6 +72,8 @@ struct Wmf {
     player: Player,
     /// The object table: a new object takes the lowest free index (MS-WMF 3.1.4.1).
     objects: Vec<Option<Object>>,
+    /// Indices of deleted objects, so the lowest free one is found without a scan.
+    free: BTreeSet<usize>,
 }
 
 impl Wmf {
@@ -107,15 +105,7 @@ impl Wmf {
             }
             0x0103 => p.dc.map_mode = u32::from(word(0)?),
             0x0106 => p.dc.even_odd = word(0)? != 2,
-            0x0104 => {
-                let rop = word(0)?;
-                if rop != 13 {
-                    p.note(
-                        Code::Approximation,
-                        format!("Metafile mix mode {rop} is drawn as R2_COPYPEN (META_SETROP2)"),
-                    );
-                }
-            }
+            0x0104 => p.mix_mode(u32::from(word(0)?), name),
             0x02FA => {
                 let style = u32::from(word(0)?);
                 let width = int(2)?.abs();
@@ -128,10 +118,7 @@ impl Wmf {
                 self.create(Object::Brush(brush))?;
             }
             0x0142 | 0x01F9 => {
-                p.note(
-                    Code::Unsupported,
-                    format!("Pattern brushes in metafile pictures are not drawn ({name})"),
-                );
+                p.pattern_brush(name);
                 self.create(Object::Brush(Brush { color: None }))?;
             }
             0x02FB | 0x00F7 | 0x06FF => self.create(Object::Other)?,
@@ -144,8 +131,10 @@ impl Wmf {
             }
             0x01F0 => {
                 let index = usize::from(word(0)?);
-                if let Some(slot) = self.objects.get_mut(index) {
-                    *slot = None;
+                if let Some(slot) = self.objects.get_mut(index)
+                    && slot.take().is_some()
+                {
+                    self.free.insert(index);
                 }
             }
             0x041B => p.rectangle(rect(0)?)?,
@@ -156,7 +145,7 @@ impl Wmf {
             }
             0x0324 | 0x0325 => {
                 let count = usize::from(word(0)?);
-                let points = points(p, params, 2, count).ok_or_else(truncated)??;
+                let points = p.points(params, 2, count, false, truncated)?;
                 if function == 0x0324 {
                     p.polygon(&points)?;
                 } else {
@@ -170,14 +159,8 @@ impl Wmf {
                     counts.push(usize::from(word(2 + i * 2)?));
                 }
                 let total = counts.iter().sum();
-                let all = points(p, params, 2 + polygons * 2, total).ok_or_else(truncated)??;
-                let mut rest = all.as_slice();
-                let mut figures = Vec::with_capacity(polygons);
-                for count in counts {
-                    let (figure, tail) = rest.split_at(count);
-                    figures.push(figure.to_vec());
-                    rest = tail;
-                }
+                let all = p.points(params, 2 + polygons * 2, total, false, truncated)?;
+                let figures = figures(&all, &counts);
                 p.poly_polygon(&figures)?;
             }
             0x0214 => p.move_to(point(0)?),
@@ -218,29 +201,22 @@ impl Wmf {
                 }
             }
             0x0B41 | 0x0940 => {
-                // Without a bitmap, a reserved word follows the source position (MS-WMF 2.3.1.3).
+                // Without a bitmap, a reserved word follows the source position (MS-WMF
+                // 2.3.1.2-3); the destination fields shift by one word.
                 let stretch = function == 0x0B41;
                 let fixed = if stretch { 20 } else { 16 };
                 let has_bitmap = params.0.len() > fixed + 2;
                 let rop = dword(0)?;
-                let reserved = if stretch { 4 } else { 2 };
-                let at = |i: usize| {
-                    if !has_bitmap && i >= reserved {
-                        i + 1
-                    } else {
-                        i
-                    }
-                };
-                let mut values = [0.0; 8];
-                let used = if stretch { 8 } else { 6 };
-                for (i, value) in values.iter_mut().enumerate().take(used) {
-                    *value = int(4 + at(i) * 2)?;
-                }
+                let shift = if has_bitmap { 0 } else { 2 };
                 let (dest, src) = if stretch {
-                    let [sh, sw, sy, sx, dh, dw, dy, dx] = values;
+                    let (sh, sw, sy, sx) = (int(4)?, int(6)?, int(8)?, int(10)?);
+                    let at = 12 + shift;
+                    let (dh, dw, dy, dx) = (int(at)?, int(at + 2)?, int(at + 4)?, int(at + 6)?);
                     ((dx, dy, dw, dh), (sx, sy, sw, sh))
                 } else {
-                    let [sy, sx, h, w, dy, dx, ..] = values;
+                    let (sy, sx) = (int(4)?, int(6)?);
+                    let at = 8 + shift;
+                    let (h, w, dy, dx) = (int(at)?, int(at + 2)?, int(at + 4)?, int(at + 6)?);
                     ((dx, dy, w, h), (sx, sy, w, h))
                 };
                 let dib = if has_bitmap {
@@ -262,14 +238,12 @@ impl Wmf {
     }
 
     fn create(&mut self, object: Object) -> Result<(), String> {
-        if let Some(slot) = self.objects.iter_mut().find(|slot| slot.is_none()) {
-            *slot = Some(object);
+        if let Some(index) = self.free.pop_first() {
+            self.objects[index] = Some(object);
         } else if self.objects.len() < MAX_OBJECTS {
             self.objects.push(Some(object));
         } else {
-            return Err(format!(
-                "Metafile picture exceeds {MAX_OBJECTS} graphics objects; not rendered"
-            ));
+            return Err(too_many_objects());
         }
         Ok(())
     }
@@ -301,30 +275,8 @@ fn packed_blit(
     player.blit(name, rop, dest, source)
 }
 
-/// `count` 16-bit points at `at`; `None` when the record is shorter than the count states.
-fn points(
-    player: &mut Player,
-    params: Bytes<'_>,
-    at: usize,
-    count: usize,
-) -> Option<Result<Vec<(f64, f64)>, String>> {
-    if count > params.0.len().saturating_sub(at) / 4 {
-        return None;
-    }
-    if let Err(error) = player.take_points(count) {
-        return Some(Err(error));
-    }
-    (0..count)
-        .map(|i| {
-            let at = at + i * 4;
-            Some((f64::from(params.i16(at)?), f64::from(params.i16(at + 2)?)))
-        })
-        .collect::<Option<Vec<_>>>()
-        .map(Ok)
-}
-
 /// The MS-WMF name of a record function (2.1.1.1), or its number when unknown.
-fn name(function: u16) -> String {
+fn name(function: u16) -> Cow<'static, str> {
     let name = match function {
         0x0035 => "META_REALIZEPALETTE",
         0x0037 => "META_SETPALENTRIES",
@@ -395,7 +347,7 @@ fn name(function: u16) -> String {
         0x0F43 => "META_STRETCHDIB",
         0x001E => "META_SAVEDC",
         0x00F7 => "META_CREATEPALETTE",
-        _ => return format!("WMF record 0x{function:04X}"),
+        _ => return Cow::Owned(format!("WMF record 0x{function:04X}")),
     };
-    name.into()
+    Cow::Borrowed(name)
 }

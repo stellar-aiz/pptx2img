@@ -169,9 +169,7 @@ impl<'a> Dib<'a> {
         };
         let row = &self.bits[index * self.stride..];
         for (i, pixel) in out.chunks_exact_mut(4).enumerate() {
-            let x = x0 + i;
-            let [r, g, b, a] = self.pixel(row, x, alpha);
-            pixel.copy_from_slice(&[r, g, b, a]);
+            pixel.copy_from_slice(&self.pixel(row, x0 + i, alpha));
         }
         Ok(())
     }

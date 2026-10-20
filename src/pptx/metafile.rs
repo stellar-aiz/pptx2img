@@ -10,7 +10,7 @@
 //! caller omits the picture instead of drawing part of a corrupt file.
 use super::{Code, raster};
 use base64::{Engine, engine::general_purpose::STANDARD};
-use std::fmt::Write;
+use std::{collections::HashSet, fmt::Write};
 
 mod dib;
 mod emf;
@@ -28,6 +28,13 @@ const MAX_BITMAP_PIXELS: usize = 67_108_864;
 const MAX_SAVED: usize = 1_024;
 /// Most graphics objects alive at once.
 const MAX_OBJECTS: usize = 65_536;
+/// Longest chain of clip paths and masks; deeper clip records are not applied, as the
+/// renderer recurses once per link.
+const MAX_CLIP_DEPTH: usize = 32;
+/// Largest SVG written for one picture, in bytes (the gate's limit for generated SVG).
+const MAX_SVG_BYTES: usize = 32 * 1024 * 1024;
+/// Most distinct diagnostics kept for one picture; further ones are summarized once.
+const MAX_NOTES: usize = 64;
 
 /// Whether `data` starts like an EMF (`EMR_HEADER` with the `" EMF"` signature at offset
 /// 40) or a placeable WMF (key `0x9AC6CDD7`).
@@ -52,6 +59,30 @@ pub(super) fn translate(data: &[u8]) -> Result<Translated, String> {
     } else {
         Err("Not an EMF or placeable WMF picture".into())
     }
+}
+
+/// The omission reason for a structurally broken picture of `format` (`EMF`/`WMF`).
+fn malformed(format: &str, what: impl std::fmt::Display) -> String {
+    format!("Malformed {format} picture ({what})")
+}
+fn too_many_objects() -> String {
+    format!("Metafile picture exceeds {MAX_OBJECTS} graphics objects; not rendered")
+}
+/// Split `points` into consecutive figures of `counts` points (their sum is the length).
+fn figures<'p>(points: &'p [(f64, f64)], counts: &[usize]) -> Vec<&'p [(f64, f64)]> {
+    let mut rest = points;
+    counts
+        .iter()
+        .map(|&count| {
+            let (figure, tail) = rest.split_at(count);
+            rest = tail;
+            figure
+        })
+        .collect()
+}
+/// `value / extent`, or 1 when the extent is zero.
+fn ratio(value: f64, extent: f64) -> f64 {
+    if extent == 0.0 { 1.0 } else { value / extent }
 }
 
 /// Little-endian reads with bounds checks; `None` means the record is too short.
@@ -207,14 +238,15 @@ fn stock(index: u32) -> Option<Object> {
     })
 }
 
-/// Clip state: a chain of intersected clip paths and a mask that removes excluded areas.
+/// Clip state: chains of intersected clip paths and of masks that remove excluded areas.
 #[derive(Clone, Debug, Default)]
 struct Clip {
     /// Id of the innermost `clipPath`; each one clips the previous.
     intersect: Option<String>,
-    /// Path data of excluded areas, and the `mask` that removes them.
-    excludes: Vec<String>,
+    /// Id of the innermost `mask`; each one is masked by the previous.
     mask: Option<String>,
+    /// Length of the two chains together (the renderer recurses once per link).
+    depth: usize,
 }
 
 /// Device-context state that `SaveDC`/`RestoreDC` save and restore.
@@ -292,11 +324,13 @@ impl Outline {
             self.close();
         }
     }
-    fn rect(&mut self, (l, t, r, b): (f64, f64, f64, f64)) {
+    fn rect(&mut self, r: (f64, f64, f64, f64)) {
+        let (l, t, r, b) = normalized(r);
         self.polygon(&[(l, t), (r, t), (r, b), (l, b)], true);
     }
     /// An ellipse inscribed in the box, as four cubic arcs (counter-clockwise, as GDI).
-    fn ellipse(&mut self, (l, t, r, b): (f64, f64, f64, f64)) {
+    fn ellipse(&mut self, r: (f64, f64, f64, f64)) {
+        let (l, t, r, b) = normalized(r);
         let (cx, cy, rx, ry) = ((l + r) / 2.0, (t + b) / 2.0, (r - l) / 2.0, (b - t) / 2.0);
         let (kx, ky) = (rx * KAPPA, ry * KAPPA);
         self.move_to((cx + rx, cy));
@@ -307,7 +341,8 @@ impl Outline {
         self.close();
     }
     /// A rectangle whose corners are quarter ellipses of `w` x `h` (full ellipse size).
-    fn round_rect(&mut self, (l, t, r, b): (f64, f64, f64, f64), (w, h): (f64, f64)) {
+    fn round_rect(&mut self, r: (f64, f64, f64, f64), (w, h): (f64, f64)) {
+        let (l, t, r, b) = normalized(r);
         let rx = (w.abs() / 2.0).min((r - l) / 2.0);
         let ry = (h.abs() / 2.0).min((b - t) / 2.0);
         let (kx, ky) = (rx * KAPPA, ry * KAPPA);
@@ -327,7 +362,7 @@ impl Outline {
 const KAPPA: f64 = 0.552_284_749_830_793_4;
 
 /// A rectangle with `left <= right` and `top <= bottom`.
-fn normalized(l: f64, t: f64, r: f64, b: f64) -> (f64, f64, f64, f64) {
+fn normalized((l, t, r, b): (f64, f64, f64, f64)) -> (f64, f64, f64, f64) {
     (l.min(r), t.min(b), l.max(r), t.max(b))
 }
 
@@ -337,12 +372,23 @@ fn number(v: f64) -> f64 {
     if rounded == 0.0 { 0.0 } else { rounded }
 }
 
-/// A path being recorded between `BeginPath` and `EndPath`.
+/// A path recorded from `BeginPath`; `closed` after `EndPath`, until it is used.
 struct Recording {
     d: String,
     /// Whether a figure is open, so a following line continues it.
     open: bool,
     finite: bool,
+    closed: bool,
+}
+
+/// Append the attributes that apply `clip` to an element.
+fn write_clip(out: &mut String, clip: &Clip) {
+    if let Some(id) = &clip.intersect {
+        let _ = write!(out, " clip-path=\"url(#{id})\"");
+    }
+    if let Some(id) = &clip.mask {
+        let _ = write!(out, " mask=\"url(#{id})\"");
+    }
 }
 
 /// The source of a blit: the bitmap, the source rectangle (`x, y, width, height` in
@@ -366,14 +412,16 @@ struct Player {
     view: (f64, f64, f64, f64),
     /// `Some` while a path bracket is open or a closed path awaits use.
     path: Option<Recording>,
-    recording: bool,
     body: String,
     defs: String,
     elements: usize,
     points: usize,
     pixels: usize,
     ids: usize,
+    records: usize,
     notes: Vec<(Code, String)>,
+    /// Keys of the diagnostics already recorded.
+    noted: HashSet<String>,
 }
 impl Player {
     fn new(page: Page, hairline: f64, view: (f64, f64, f64, f64)) -> Self {
@@ -398,22 +446,99 @@ impl Player {
             hairline,
             view,
             path: None,
-            recording: false,
             body: String::new(),
             defs: String::new(),
             elements: 0,
             points: 0,
             pixels: 0,
             ids: 0,
+            records: 0,
             notes: Vec::new(),
+            noted: HashSet::new(),
+        }
+    }
+    /// Count one record against the picture limit.
+    fn count_record(&mut self) -> Result<(), String> {
+        self.records += 1;
+        if self.records > MAX_RECORDS {
+            return Err(format!(
+                "Metafile picture exceeds {MAX_RECORDS} records; not rendered"
+            ));
+        }
+        Ok(())
+    }
+    /// The path bracket being recorded, if one is open.
+    fn recording(&mut self) -> Option<&mut Recording> {
+        self.path.as_mut().filter(|path| !path.closed)
+    }
+    fn fill_rule(&self) -> &'static str {
+        if self.dc.even_odd {
+            "evenodd"
+        } else {
+            "nonzero"
         }
     }
 
-    /// Record one diagnostic; a repeated message is kept once.
+    /// Record one diagnostic; a repeated message is kept once, and at most `MAX_NOTES`
+    /// distinct ones are kept (the rest are summarized by one more).
     fn note(&mut self, code: Code, message: String) {
-        if !self.notes.iter().any(|(_, m)| *m == message) {
-            self.notes.push((code, message));
+        if self.noted.len() > MAX_NOTES || self.noted.contains(&message) {
+            return;
         }
+        if self.noted.len() == MAX_NOTES {
+            self.noted.insert(String::new());
+            self.notes.push((
+                Code::Unsupported,
+                format!("Further metafile diagnostics omitted after {MAX_NOTES}"),
+            ));
+            return;
+        }
+        self.noted.insert(message.clone());
+        self.notes.push((code, message));
+    }
+    fn pattern_brush(&mut self, record: &str) {
+        self.note(
+            Code::Unsupported,
+            format!("Pattern brushes in metafile pictures are not drawn ({record})"),
+        );
+    }
+    /// `SetROP2`: only `R2_COPYPEN` (13) is drawn as recorded.
+    fn mix_mode(&mut self, mode: u32, record: &str) {
+        if mode != 13 {
+            self.note(
+                Code::Approximation,
+                format!(
+                    "Metafile mix modes other than R2_COPYPEN are drawn as R2_COPYPEN ({record})"
+                ),
+            );
+        }
+    }
+    /// Read `count` points at `at` as 32-bit (`wide`) or 16-bit pairs, counted against
+    /// the point limit; `truncated` is the error when the record is shorter.
+    fn points(
+        &mut self,
+        bytes: Bytes<'_>,
+        at: usize,
+        count: usize,
+        wide: bool,
+        truncated: impl Fn() -> String,
+    ) -> Result<Vec<(f64, f64)>, String> {
+        let size = if wide { 8 } else { 4 };
+        if count > bytes.0.len().saturating_sub(at) / size {
+            return Err(truncated());
+        }
+        self.take_points(count)?;
+        (0..count)
+            .map(|i| {
+                let at = at + i * size;
+                if wide {
+                    Some((f64::from(bytes.i32(at)?), f64::from(bytes.i32(at + 4)?)))
+                } else {
+                    Some((f64::from(bytes.i16(at)?), f64::from(bytes.i16(at + 2)?)))
+                }
+            })
+            .collect::<Option<_>>()
+            .ok_or_else(truncated)
     }
     fn unsupported_record(&mut self, name: &str) {
         self.note(
@@ -445,6 +570,11 @@ impl Player {
                 "Metafile picture exceeds {MAX_ELEMENTS} drawing elements; not rendered"
             ));
         }
+        if self.body.len() + self.defs.len() > MAX_SVG_BYTES {
+            return Err(format!(
+                "Metafile picture exceeds {MAX_SVG_BYTES} bytes of SVG; not rendered"
+            ));
+        }
         Ok(())
     }
     fn id(&mut self) -> String {
@@ -466,7 +596,6 @@ impl Player {
                     5 => metric(1000.0 / 25.4),
                     6 => metric(1440.0 / 25.4),
                     7 | 8 => {
-                        let ratio = |v: f64, w: f64| if w == 0.0 { 1.0 } else { v / w };
                         let sx = ratio(dc.viewport_ext.0, dc.window_ext.0);
                         let sy = ratio(dc.viewport_ext.1, dc.window_ext.1);
                         if dc.map_mode == 7 {
@@ -489,7 +618,6 @@ impl Player {
             }
             Page::Wmf { bbox } => {
                 let (x, y, w, h) = bbox;
-                let ratio = |v: f64, ext: f64| if ext == 0.0 { 1.0 } else { v / ext };
                 let sx = ratio(w, dc.window_ext.0);
                 let sy = ratio(h, dc.window_ext.1);
                 Affine([
@@ -523,8 +651,8 @@ impl Player {
             i64::from(which) - 1
         };
         if (0..depth).contains(&index) {
-            self.dc = self.saved[index as usize].clone();
-            self.saved.truncate(index as usize);
+            self.saved.truncate(index as usize + 1);
+            self.dc = self.saved.pop().expect("index is within the stack");
         }
     }
 
@@ -542,10 +670,7 @@ impl Player {
                 Brush { color: Some(color) }
             }
             _ => {
-                self.note(
-                    Code::Unsupported,
-                    format!("Pattern brushes in metafile pictures are not drawn ({record})"),
-                );
+                self.pattern_brush(record);
                 Brush { color: None }
             }
         }
@@ -567,12 +692,10 @@ impl Player {
     }
     /// Draw (or record, inside a path bracket) a finished outline.
     fn finish(&mut self, outline: Outline, fill: bool, stroke: bool) -> Result<(), String> {
-        if self.recording {
-            if let Some(path) = &mut self.path {
-                path.d.push_str(&outline.d);
-                path.finite &= outline.finite;
-                path.open = !outline.d.ends_with('Z');
-            }
+        if let Some(path) = self.recording() {
+            path.d.push_str(&outline.d);
+            path.finite &= outline.finite;
+            path.open = !outline.d.ends_with('Z');
             return Ok(());
         }
         if !outline.finite || outline.d.is_empty() {
@@ -591,57 +714,40 @@ impl Player {
     /// Emit one `<path>` with the current brush and pen.
     fn paint(&mut self, d: &str, fill: bool, stroke: bool, width: f64) -> Result<(), String> {
         let fill = fill.then_some(self.dc.brush.color).flatten();
-        let pen = stroke
-            .then(|| self.dc.pen.clone())
-            .filter(|p| p.color.is_some());
-        if fill.is_none() && pen.is_none() {
+        let stroke = stroke.then_some(self.dc.pen.color).flatten();
+        if fill.is_none() && stroke.is_none() {
             return Ok(());
         }
         self.element()?;
-        let mut element = format!("<path d=\"{d}\"");
+        let rule = self.fill_rule();
+        let body = &mut self.body;
+        let _ = write!(body, "<path d=\"{d}\"");
         match fill {
             Some(color) => {
-                let rule = if self.dc.even_odd {
-                    "evenodd"
-                } else {
-                    "nonzero"
-                };
-                let _ = write!(element, " fill=\"#{color:06x}\" fill-rule=\"{rule}\"");
+                let _ = write!(body, " fill=\"#{color:06x}\" fill-rule=\"{rule}\"");
             }
-            None => element.push_str(" fill=\"none\""),
+            None => body.push_str(" fill=\"none\""),
         }
-        if let Some(pen) = pen {
+        if let Some(color) = stroke {
+            let pen = &self.dc.pen;
             let _ = write!(
-                element,
-                " stroke=\"#{:06x}\" stroke-width=\"{}\" stroke-linecap=\"{}\" stroke-linejoin=\"{}\"",
-                pen.color.unwrap_or_default(),
+                body,
+                " stroke=\"#{color:06x}\" stroke-width=\"{}\" stroke-linecap=\"{}\" stroke-linejoin=\"{}\"",
                 number(width),
                 pen.cap,
                 pen.join
             );
+            for (i, v) in pen.dash.iter().enumerate() {
+                let separator = if i == 0 { " stroke-dasharray=\"" } else { " " };
+                let _ = write!(body, "{separator}{}", number(v * width));
+            }
             if !pen.dash.is_empty() {
-                let dash: Vec<_> = pen
-                    .dash
-                    .iter()
-                    .map(|v| number(v * width).to_string())
-                    .collect();
-                let _ = write!(element, " stroke-dasharray=\"{}\"", dash.join(" "));
+                body.push('"');
             }
         }
-        element.push_str(&self.clip_attributes());
-        element.push_str("/>");
-        self.body.push_str(&element);
+        write_clip(body, &self.dc.clip);
+        body.push_str("/>");
         Ok(())
-    }
-    fn clip_attributes(&self) -> String {
-        let mut attributes = String::new();
-        if let Some(id) = &self.dc.clip.intersect {
-            let _ = write!(attributes, " clip-path=\"url(#{id})\"");
-        }
-        if let Some(id) = &self.dc.clip.mask {
-            let _ = write!(attributes, " mask=\"url(#{id})\"");
-        }
-        attributes
     }
 
     fn polygon(&mut self, points: &[(f64, f64)]) -> Result<(), String> {
@@ -655,14 +761,14 @@ impl Player {
         self.finish(outline, false, true)
     }
     /// Several closed figures drawn as one filled shape.
-    fn poly_polygon(&mut self, polygons: &[Vec<(f64, f64)>]) -> Result<(), String> {
+    fn poly_polygon(&mut self, polygons: &[&[(f64, f64)]]) -> Result<(), String> {
         let mut outline = self.outline();
         for points in polygons {
             outline.polygon(points, true);
         }
         self.finish(outline, true, true)
     }
-    fn poly_polyline(&mut self, lines: &[Vec<(f64, f64)>]) -> Result<(), String> {
+    fn poly_polyline(&mut self, lines: &[&[(f64, f64)]]) -> Result<(), String> {
         let mut outline = self.outline();
         for points in lines {
             outline.polygon(points, false);
@@ -688,7 +794,7 @@ impl Player {
             return Ok(());
         };
         let mut outline = self.outline();
-        let open = self.recording && self.path.as_ref().is_some_and(|p| p.open);
+        let open = self.recording().is_some_and(|p| p.open);
         if !open {
             outline.move_to(self.dc.position);
         }
@@ -702,41 +808,33 @@ impl Player {
             }
         }
         self.dc.position = last;
-        if self.recording {
-            if let Some(path) = &mut self.path {
-                path.d.push_str(&outline.d);
-                path.finite &= outline.finite;
-                path.open = true;
-            }
-            return Ok(());
-        }
         self.finish(outline, false, true)
     }
     fn move_to(&mut self, p: (f64, f64)) {
         self.dc.position = p;
-        if let (true, Some(path)) = (self.recording, &mut self.path) {
+        if let Some(path) = self.recording() {
             path.open = false;
         }
     }
     fn rectangle(&mut self, r: (f64, f64, f64, f64)) -> Result<(), String> {
         let mut outline = self.outline();
-        outline.rect(normalized(r.0, r.1, r.2, r.3));
+        outline.rect(r);
         self.finish(outline, true, true)
     }
     fn ellipse(&mut self, r: (f64, f64, f64, f64)) -> Result<(), String> {
         let mut outline = self.outline();
-        outline.ellipse(normalized(r.0, r.1, r.2, r.3));
+        outline.ellipse(r);
         self.finish(outline, true, true)
     }
     fn round_rect(&mut self, r: (f64, f64, f64, f64), corner: (f64, f64)) -> Result<(), String> {
         let mut outline = self.outline();
-        outline.round_rect(normalized(r.0, r.1, r.2, r.3), corner);
+        outline.round_rect(r, corner);
         self.finish(outline, true, true)
     }
     /// Fill a logical rectangle with the brush and no outline (`PatBlt`, bitmap-less blits).
     fn fill_rect(&mut self, r: (f64, f64, f64, f64), color: Option<u32>) -> Result<(), String> {
         let mut outline = self.outline();
-        outline.rect(normalized(r.0, r.1, r.2, r.3));
+        outline.rect(r);
         if !outline.finite {
             return Ok(());
         }
@@ -753,14 +851,16 @@ impl Player {
             d: String::new(),
             open: false,
             finite: true,
+            closed: false,
         });
-        self.recording = true;
     }
     fn end_path(&mut self) {
-        self.recording = false;
+        if let Some(path) = &mut self.path {
+            path.closed = true;
+        }
     }
     fn close_figure(&mut self) {
-        if let (true, Some(path)) = (self.recording, &mut self.path)
+        if let Some(path) = self.recording()
             && !path.d.is_empty()
             && !path.d.ends_with('Z')
         {
@@ -770,40 +870,32 @@ impl Player {
     }
     fn abort_path(&mut self) {
         self.path = None;
-        self.recording = false;
+    }
+    /// The closed path, taken for use; `None` inside an open bracket or without a path.
+    fn take_path(&mut self) -> Option<Recording> {
+        if !self.path.as_ref()?.closed {
+            return None;
+        }
+        self.path
+            .take()
+            .filter(|path| path.finite && !path.d.is_empty())
     }
     /// `FillPath`, `StrokePath`, `StrokeAndFillPath`: draw the closed path and discard it.
     fn draw_path(&mut self, fill: bool, stroke: bool) -> Result<(), String> {
-        if self.recording {
-            return Ok(());
-        }
-        let Some(path) = self.path.take() else {
+        let Some(path) = self.take_path() else {
             return Ok(());
         };
-        if !path.finite || path.d.is_empty() {
-            return Ok(());
-        }
         // Filling closes open figures implicitly, as SVG fills open subpaths.
         let width = self.stroke_width(&self.matrix());
         self.paint(&path.d, fill, stroke, width)
     }
     /// `SelectClipPath`: combine the path with the clip region and discard the path.
     fn clip_path(&mut self, mode: u32) -> Result<(), String> {
-        if self.recording {
-            return Ok(());
-        }
-        let Some(path) = self.path.take() else {
+        let Some(path) = self.take_path() else {
             return Ok(());
         };
-        if path.finite {
-            let rule = if self.dc.even_odd {
-                "evenodd"
-            } else {
-                "nonzero"
-            };
-            self.combine_clip(mode, &path.d, rule)?;
-        }
-        Ok(())
+        let rule = self.fill_rule();
+        self.combine_clip(mode, &path.d, rule)
     }
 
     // -- clipping ------------------------------------------------------------------
@@ -830,7 +922,22 @@ impl Player {
             }
         }
     }
+    /// Whether the clip chains can take one more link; reported once when they cannot.
+    fn clip_room(&mut self) -> bool {
+        if self.dc.clip.depth < MAX_CLIP_DEPTH {
+            self.dc.clip.depth += 1;
+            return true;
+        }
+        self.note(
+            Code::Approximation,
+            format!("Metafile clip regions nested deeper than {MAX_CLIP_DEPTH} are not applied"),
+        );
+        false
+    }
     fn intersect(&mut self, d: &str, rule: &str) -> Result<(), String> {
+        if !self.clip_room() {
+            return Ok(());
+        }
         self.element()?;
         let id = self.id();
         let parent = self
@@ -848,18 +955,25 @@ impl Player {
         Ok(())
     }
     fn exclude(&mut self, d: &str, rule: &str) -> Result<(), String> {
+        if !self.clip_room() {
+            return Ok(());
+        }
         self.element()?;
         let id = self.id();
-        self.dc.clip.excludes.push(format!(
-            "<path d=\"{d}\" fill=\"black\" fill-rule=\"{rule}\"/>"
-        ));
         // The mask spans three viewports per axis; nothing outside the viewport is shown.
+        // Its white area is masked by the previous exclusion, so the SVG grows linearly.
         let (x, y, w, h) = self.view;
         let (x, y, w, h) = (x - w, y - h, w * 3.0, h * 3.0);
+        let parent = self
+            .dc
+            .clip
+            .mask
+            .as_ref()
+            .map(|p| format!(" mask=\"url(#{p})\""))
+            .unwrap_or_default();
         let _ = write!(
             self.defs,
-            "<mask id=\"{id}\" maskUnits=\"userSpaceOnUse\" x=\"{x}\" y=\"{y}\" width=\"{w}\" height=\"{h}\"><rect x=\"{x}\" y=\"{y}\" width=\"{w}\" height=\"{h}\" fill=\"white\"/>{}</mask>",
-            self.dc.clip.excludes.concat()
+            "<mask id=\"{id}\" maskUnits=\"userSpaceOnUse\" x=\"{x}\" y=\"{y}\" width=\"{w}\" height=\"{h}\"><rect x=\"{x}\" y=\"{y}\" width=\"{w}\" height=\"{h}\" fill=\"white\"{parent}/><path d=\"{d}\" fill=\"black\" fill-rule=\"{rule}\"/></mask>"
         );
         self.dc.clip.mask = Some(id);
         Ok(())
@@ -867,7 +981,7 @@ impl Player {
     /// `IntersectClipRect` (`exclude == false`) or `ExcludeClipRect` in logical units.
     fn clip_rect(&mut self, r: (f64, f64, f64, f64), exclude: bool) -> Result<(), String> {
         let mut outline = self.outline();
-        outline.rect(normalized(r.0, r.1, r.2, r.3));
+        outline.rect(r);
         if !outline.finite {
             return Ok(());
         }
@@ -915,10 +1029,7 @@ impl Player {
         let (png, downscaled) =
             raster::encode_rows(w, h, |y, row| image.row(y0 + y, x0, row, alpha))?;
         if let Some((tw, th)) = downscaled {
-            self.note(
-                Code::Approximation,
-                format!("Downscaled oversized image from {w}x{h} to {tw}x{th} px"),
-            );
+            self.note(Code::Approximation, raster::downscaled((w, h), (tw, th)));
         }
         let matrix = self.matrix();
         let (x, y, dw, dh) = dest;
@@ -937,14 +1048,14 @@ impl Player {
             return Ok(());
         }
         self.element()?;
-        let values: Vec<_> = values.iter().map(|v| v.to_string()).collect();
         // The clip is set on a group: on the image it would be read in the image's
         // transformed user space.
+        let [a, b, c, d, e, f] = values;
+        self.body.push_str("<g");
+        write_clip(&mut self.body, &self.dc.clip);
         let _ = write!(
             self.body,
-            "<g{}><image width=\"1\" height=\"1\" preserveAspectRatio=\"none\" transform=\"matrix({})\" href=\"data:image/png;base64,{}\"/></g>",
-            self.clip_attributes(),
-            values.join(" "),
+            "><image width=\"1\" height=\"1\" preserveAspectRatio=\"none\" transform=\"matrix({a} {b} {c} {d} {e} {f})\" href=\"data:image/png;base64,{}\"/></g>",
             STANDARD.encode(png)
         );
         Ok(())
@@ -982,7 +1093,9 @@ impl Player {
             0xCC => {}
             _ => self.note(
                 Code::Approximation,
-                format!("Metafile raster operation 0x{rop:08X} is drawn as a source copy ({name})"),
+                format!(
+                    "Metafile raster operations other than copy are drawn as a source copy ({name})"
+                ),
             ),
         }
         let Some(source) = source else {
