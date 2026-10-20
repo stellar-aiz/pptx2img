@@ -64,11 +64,13 @@ pub(super) fn chain(parts: &Parts, slide: &str) -> Result<Vec<String>> {
     Ok(paths)
 }
 pub(super) fn has_fill(node: Node<'_, '_>) -> bool {
-    node.children().any(|n| {
-        n.tag_name().namespace() == Some(A)
-            && matches!(
-                n.tag_name().name(),
-                "noFill" | "solidFill" | "gradFill" | "pattFill" | "blipFill" | "grpFill"
-            )
-    })
+    node.children().any(is_fill)
+}
+/// Whether `node` is one of the DrawingML fill elements (`EG_FillProperties`).
+pub(super) fn is_fill(node: Node<'_, '_>) -> bool {
+    node.tag_name().namespace() == Some(A)
+        && matches!(
+            node.tag_name().name(),
+            "noFill" | "solidFill" | "gradFill" | "pattFill" | "blipFill" | "grpFill"
+        )
 }

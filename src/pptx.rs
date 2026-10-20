@@ -19,6 +19,7 @@ pub(crate) use fonts::Resolver as FontResolver;
 mod layout;
 mod lines;
 mod objects;
+mod patterns;
 mod picture_effects;
 mod raster;
 mod table_styles;
@@ -377,7 +378,7 @@ fn fill(node: Node<'_, '_>, default: &str, theme: &Theme, warnings: &mut Warning
     }
     default.into()
 }
-/// Like `fill`, but also paints `gradFill` by adding a gradient definition to `svg`.
+/// Like `fill`, but also paints `gradFill` and `pattFill` by adding a definition to `svg`.
 fn paint(
     node: Node<'_, '_>,
     default: &str,
@@ -387,10 +388,13 @@ fn paint(
     svg: &mut String,
     warnings: &mut Warnings,
 ) -> String {
-    match child(node, A, "gradFill") {
-        Some(gradient) => gradients::define(gradient, theme, size, rotated, svg, warnings)
-            .unwrap_or_else(|| default.into()),
-        None => fill(node, default, theme, warnings),
+    if let Some(gradient) = child(node, A, "gradFill") {
+        gradients::define(gradient, theme, size, rotated, svg, warnings)
+            .unwrap_or_else(|| default.into())
+    } else if let Some(pattern) = child(node, A, "pattFill") {
+        patterns::define(pattern, theme, svg, warnings)
+    } else {
+        fill(node, default, theme, warnings)
     }
 }
 fn render_slide(
@@ -432,26 +436,45 @@ fn render_slide(
         }
     }
     let theme = Theme::load(parts, name, &mut warnings)?;
-    let background_node = roots
-        .iter()
-        .find_map(|r| child(*r, P, "cSld").and_then(|n| child(n, P, "bg")));
+    // The nearest part (slide, layout, master) with a background supplies it.
+    let background_owner = roots.iter().enumerate().find_map(|(i, r)| {
+        child(*r, P, "cSld")
+            .and_then(|n| child(n, P, "bg"))
+            .map(|n| (i, n))
+    });
     let mut background_defs = String::new();
-    let background = background_node
-        .and_then(|n| child(n, P, "bgPr"))
-        .map(|n| {
-            paint(
-                n,
-                "#ffffff",
-                &theme,
-                (width, height),
-                false,
-                &mut background_defs,
-                &mut warnings,
-            )
-        })
-        .unwrap_or_else(|| "#ffffff".into());
-    if background_node.and_then(|n| child(n, P, "bgRef")).is_some() {
-        warn(&mut warnings, "Theme backgrounds are unsupported");
+    let mut background = "#ffffff".to_string();
+    if let Some((owner, node)) = background_owner {
+        if let Some(props) = child(node, P, "bgPr") {
+            background = if child(props, A, "blipFill").is_some() {
+                let rels = relationships(parts, &paths[owner])?;
+                picture_fill(
+                    props,
+                    parts,
+                    &rels,
+                    &theme,
+                    (width, height),
+                    &mut background_defs,
+                    &mut warnings,
+                )?
+            } else {
+                paint(
+                    props,
+                    "#ffffff",
+                    &theme,
+                    (width, height),
+                    false,
+                    &mut background_defs,
+                    &mut warnings,
+                )
+            };
+        } else if let Some(reference) = child(node, P, "bgRef") {
+            // `idx` 1001 and above select `bgFillStyleLst`; the reference supplies `phClr`.
+            background = theme.fill_reference(reference, &mut warnings);
+        }
+        if background == "none" {
+            background = "#ffffff".into();
+        }
     }
     let mut svg = format!(
         "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"{width}\" height=\"{height}\" viewBox=\"0 0 {width} {height}\">{background_defs}<rect width=\"100%\" height=\"100%\" fill=\"{background}\"/>"
@@ -480,6 +503,7 @@ fn render_slide(
                 .find(|n| n.has_tag_name((P, "sldMaster")))
                 .and_then(|n| child(*n, P, "txStyles")),
             mirrored: false,
+            group_fill: None,
         };
         for (position, node) in tree.children().filter(|n| n.is_element()).enumerate() {
             if index > 0 && layout::placeholder(node).is_some() {
@@ -655,23 +679,13 @@ fn render_shape(
         .filter(|n| n.is_element())
     {
         if attr.has_tag_name((A, "extLst")) {
-            for name in unsupported_extensions(attr) {
-                warn(
-                    warnings,
-                    format!("Unsupported shape property extension: {name}"),
-                );
-            }
-        } else if !matches!(
-            attr.tag_name().name(),
-            "xfrm"
-                | "prstGeom"
-                | "custGeom"
-                | "solidFill"
-                | "noFill"
-                | "gradFill"
-                | "ln"
-                | "effectLst"
-        ) {
+            warn_extensions(attr, warnings);
+        } else if !layout::is_fill(attr)
+            && !matches!(
+                attr.tag_name().name(),
+                "xfrm" | "prstGeom" | "custGeom" | "ln" | "effectLst"
+            )
+        {
             warn(
                 warnings,
                 format!("Unsupported shape property: {}", attr.tag_name().name()),
@@ -706,15 +720,27 @@ fn render_shape(
     } else {
         let explicit_fill = props_chain.iter().copied().find(|n| layout::has_fill(*n));
         let fill = if let Some(explicit) = explicit_fill {
-            paint(
-                explicit,
-                "none",
-                theme,
-                (w, h),
-                rotation != 0.0,
-                svg,
-                warnings,
-            )
+            // A shape's own `grpFill` takes the enclosing group's fill (or none).
+            let inherited = child(explicit, A, "grpFill").is_some();
+            match if inherited {
+                shape.group_fill
+            } else {
+                Some(explicit)
+            } {
+                Some(props) if child(props, A, "blipFill").is_some() => {
+                    picture_fill(props, parts, rels, theme, (w, h), svg, warnings)?
+                }
+                Some(props) => {
+                    if inherited && child(props, A, "gradFill").is_some() {
+                        warnings.push(
+                            Code::Approximation,
+                            "Group gradient fills are drawn per shape, not across the group",
+                        );
+                    }
+                    paint(props, "none", theme, (w, h), rotation != 0.0, svg, warnings)
+                }
+                None => "none".into(),
+            }
         } else if let Some(reference) = style_node.and_then(|n| child(n, A, "fillRef")) {
             theme.fill_reference(reference, warnings)
         } else {
@@ -847,6 +873,30 @@ fn fill_line(node: Node<'_, '_>, theme: &Theme, warnings: &mut Warnings) -> Stri
     }
     fill(node, "none", theme, warnings)
 }
+/// Paint the `a:blipFill` of `props` stretched over a `size` box, as an SVG pattern that the
+/// shape outline (or background rectangle) clips. Returns `none` if the picture is omitted.
+fn picture_fill(
+    props: Node<'_, '_>,
+    parts: &Parts,
+    rels: &Relationships,
+    theme: &Theme,
+    size: (f64, f64),
+    svg: &mut String,
+    warnings: &mut Warnings,
+) -> Result<String> {
+    // stellar:debt(perf) Each use embeds the picture data again (for example a background on every slide). upgrade: share one definition per part and size.
+    let (w, h) = size;
+    let mut picture = String::new();
+    let fill = child(props, A, "blipFill").context("Missing picture fill")?;
+    if !render_image(fill, parts, rels, theme, (w, h), &mut picture, warnings)? {
+        return Ok("none".into());
+    }
+    let id = format!("picture-{}", svg.len());
+    svg.push_str(&format!(
+        "<defs><pattern id=\"{id}\" patternUnits=\"userSpaceOnUse\" width=\"{w}\" height=\"{h}\">{picture}</pattern></defs>"
+    ));
+    Ok(format!("url(#{id})"))
+}
 /// An image part ready to embed: its `href`, natural size in px (raster only), and
 /// diagnostics to record if it is drawn.
 struct Picture {
@@ -930,6 +980,15 @@ fn svg_picture<'p>(id: &str, parts: &'p Parts, rels: &'p Relationships) -> Resul
         size: None,
         notes,
     })
+}
+/// Report each extension element of `list` that changes rendering.
+fn warn_extensions(list: Node<'_, '_>, warnings: &mut Warnings) {
+    for name in unsupported_extensions(list) {
+        warn(
+            warnings,
+            format!("Unsupported shape property extension: {name}"),
+        );
+    }
 }
 /// Elements of a shape-property `a:extLst` that change rendering, by qualified name.
 /// The Office 2010 `a14:hidden*` extensions keep the fill, line, effects, or 3-D settings

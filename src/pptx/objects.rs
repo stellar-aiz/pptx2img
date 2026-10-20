@@ -6,6 +6,8 @@ pub(super) struct Shape<'a> {
     pub master_style: Option<Node<'a, 'a>>,
     /// Whether ancestor groups mirror the coordinate system (an odd number of flips).
     pub mirrored: bool,
+    /// Group properties whose fill a child's `a:grpFill` uses (the nearest filled group).
+    pub group_fill: Option<Node<'a, 'a>>,
 }
 pub(super) struct Renderer<'a, 'd> {
     pub parts: &'a Parts,
@@ -19,6 +21,8 @@ pub(super) struct Renderer<'a, 'd> {
     pub master_style: Option<Node<'d, 'd>>,
     /// Whether ancestor groups mirror the coordinate system (an odd number of flips).
     pub mirrored: bool,
+    /// Properties of the enclosing group whose fill `a:grpFill` children use.
+    pub group_fill: Option<Node<'d, 'd>>,
 }
 /// Whether the element's non-visual properties (`cNvPr`) mark it as hidden.
 fn is_hidden(node: Node<'_, '_>) -> bool {
@@ -66,6 +70,7 @@ impl<'d> Renderer<'_, 'd> {
                         chain: layout::inherited(node, self.ancestors),
                         master_style: self.master_style,
                         mirrored: self.mirrored,
+                        group_fill: self.group_fill,
                     },
                     self.parts,
                     self.rels,
@@ -103,13 +108,22 @@ impl<'d> Renderer<'_, 'd> {
             bail!("Group child extents must be positive");
         }
         for prop in props.children().filter(|n| n.is_element()) {
-            if !prop.has_tag_name((A, "xfrm")) {
-                warn(
-                    self.warnings,
-                    "Group fill and effect inheritance is unsupported",
-                );
+            if prop.has_tag_name((A, "extLst")) {
+                warn_extensions(prop, self.warnings);
+            } else if !prop.has_tag_name((A, "xfrm")) && !layout::is_fill(prop) {
+                warn(self.warnings, "Group effect inheritance is unsupported");
             }
         }
+        // A group's fill is drawn only by children that ask for it with `a:grpFill`; a group
+        // that itself declares `a:grpFill` passes its parent's fill on.
+        let group_fill = if child(props, A, "grpFill").is_some() {
+            self.group_fill
+        } else if layout::has_fill(props) {
+            Some(props)
+        } else {
+            None
+        };
+        let outer_fill = std::mem::replace(&mut self.group_fill, group_fill);
         self.svg.push_str(&format!(
             "<g transform=\"scale({} {}) translate({} {})\">",
             w / cw,
@@ -123,6 +137,7 @@ impl<'d> Renderer<'_, 'd> {
             self.node(n, &format!("{location}/{i}"), depth + 1)?;
         }
         self.mirrored ^= mirrored;
+        self.group_fill = outer_fill;
         self.svg.push_str("</g></g>");
         Ok(())
     }
