@@ -17,7 +17,9 @@ Strict mode gates known warnings, not all incompatibilities.
   colors; selected [color transforms and theme fills](colors.md), including
   translucent (`alpha`) fills, lines, and text, and `tint`/`shade`/`satMod`;
   linear and radial [gradient fills](colors.md#gradient-fills) on shapes and
-  backgrounds.
+  backgrounds; theme background references (`bgRef`), approximate pattern fills,
+  stretched picture fills, and group fills
+  ([details](colors.md#theme-backgrounds-pattern-picture-and-group-fills)).
 - Slide -> layout -> master -> theme relationships, color mappings, and major/
   minor Latin and Japanese theme fonts, including the Jpan supplemental font.
 - Explicit font, size, color, bold/italic, and left/center/right paragraph alignment.
@@ -274,7 +276,7 @@ directly.
 - Full Japanese line-breaking rules, punctuation compression, all hanging symbols,
   complex shaping/ligatures/kerning, and dynamic autofit ratio calculation.
 - Identical baselines and fallback behavior across all fonts and Office renderers.
-- Charts, SmartArt, group-fill inheritance, freeform path fill modes other than
+- Charts, SmartArt, freeform path fill modes other than
   normal and none, and many presets.
 - Full table theme-style coverage, theme/line/table-cell/text gradients,
   inner shadows/glow, theme effects, and the picture effects listed as

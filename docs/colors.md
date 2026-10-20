@@ -99,3 +99,57 @@ Comparison at 1600px with LibreOffice 26.2.5.2 (2026-10-19, unchanged thresholds
 Most of page 1's remaining difference is in the two known-different shapes (scaled
 45° on a wide box, and the corner-focus radial gradient), which are kept in the
 fixture as reproduction material.
+
+## Theme backgrounds, pattern, picture, and group fills
+
+- **Theme background references** (`p:bg/p:bgRef`): `idx` 1001 and above select an entry
+  of the theme's `bgFillStyleLst` (`idx - 1001`), and the reference's color child
+  replaces `phClr`, exactly like shape `fillRef`. The nearest slide, layout, or master
+  with a `p:bg` supplies the background. Only solid `bgFillStyleLst` entries are
+  resolved; gradient or picture entries keep the default white and record
+  `Theme fill reference <idx> is unresolved or not a solid fill`.
+- **Pattern fills** (`a:pattFill`) on shapes and backgrounds become an SVG `<pattern>`
+  that repeats an 8x8 tile of `fgClr` over `bgClr` (defaults black over white). One
+  tile pixel is one slide unit (1/96 inch), in shape coordinates, so the pattern scales,
+  rotates, and flips with the shape. The tiles for `pct5`…`pct90` (ordered dither),
+  `horz`/`vert` and their `lt`/`dk`/`nar` variants, the `upDiag`/`dnDiag` families
+  (`lt`, `dk`, `wd`), `cross`, `smGrid`, `lgGrid`, `diagCross`, `trellis`, `smCheck`,
+  and `lgCheck` are this project's own drawings of what the names describe; they are
+  not verified against PowerPoint, so every pattern fill records an `approximation`
+  diagnostic. Other presets are drawn as `pct50` and record
+  `Unsupported pattern fill preset: <prst>; drawn as pct50`. Pattern lines, table cells,
+  and text are not covered.
+- **Picture fills on shapes and backgrounds** (`a:blipFill` in `p:spPr` or `p:bgPr`)
+  stretch the picture (after `srcRect` cropping) over the shape's box, and the shape
+  outline clips it. The picture goes through the same loading, size, and omission
+  rules as pictures; an omitted picture leaves the shape unfilled. Tiling (`a:tile`)
+  and non-empty `fillRect` still record `Image tiling, effects, and fill rectangles are
+  unsupported` and are drawn stretched.
+- **Group fills** (`a:grpFill`): a child uses the fill of the nearest enclosing group
+  that declares one; a group that itself says `a:grpFill` passes its parent's fill on,
+  and a group without a fill leaves such children unfilled. Fill elements on a group
+  no longer produce a diagnostic (the group itself draws nothing); other group
+  properties still record `Group effect inheritance is unsupported`. A gradient group
+  fill is drawn per child box rather than across the group and records an
+  `approximation` diagnostic.
+
+Fixture: `python tests/visual/make_fills.py examples/fills.pptx`. Page 1 has a master
+background `bgRef idx="1001"` with a tinted accent and six pattern presets (`dkUpDiag`,
+`trellis`, `ltUpDiag`, `horz`, `cross`, `pct50`); page 2 has a solid group whose
+children use `grpFill` (one through a nested `grpFill` group) and a stretched picture
+fill on an ellipse and a rounded rectangle.
+
+Comparison at 1600px with LibreOffice 26.2.5.2 (2026-10-20, unchanged thresholds):
+
+| Page | Before (`0f85650`) | After |
+|---|---|---|
+| 1 | MAE 0.172544, changed 72.095% (fail) | MAE 0.186010, changed 46.988% (fail, known difference) |
+| 2 | MAE 0.284853, changed 100.000% (fail) | MAE 0.000829, changed 0.406% |
+
+Page 1 is kept as a known difference. The background now matches; the remaining
+difference is the hatching. LibreOffice draws patterns at device resolution (a period
+of about 4 output pixels at 1600px) and draws `dkUpDiag`, `trellis`, and `ltUpDiag`
+with the same light hatch, so its mean tone differs from both the named weights and
+this renderer's tiles. Matching LibreOffice here would mean copying its choice rather
+than the preset names, so the tiles are left as described above, and the page stays
+a reproduction of the gap.

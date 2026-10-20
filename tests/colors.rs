@@ -184,3 +184,179 @@ fn tint_and_shade_fill_shapes_and_table_style_bands() {
         "{manifest}"
     );
 }
+
+const THEME_WITH_BACKGROUNDS: &str = r#"<a:themeElements><a:clrScheme><a:accent1><a:srgbClr val="00AA00"/></a:accent1><a:accent2><a:srgbClr val="0000FF"/></a:accent2></a:clrScheme><a:fmtScheme><a:fillStyleLst><a:solidFill><a:schemeClr val="phClr"/></a:solidFill></a:fillStyleLst><a:bgFillStyleLst><a:solidFill><a:schemeClr val="phClr"/></a:solidFill><a:solidFill><a:schemeClr val="phClr"><a:lumMod val="50000"/></a:schemeClr></a:solidFill></a:bgFillStyleLst></a:fmtScheme></a:themeElements>"#;
+/// Render `shapes` on a slide whose layout and master come from `layout_bg` and `master_bg`;
+/// the master links a theme with `bgFillStyleLst`. Extra parts (media) may be added.
+fn render_with_master(
+    slide_bg: &str,
+    layout_bg: &str,
+    master_bg: &str,
+    shapes: &str,
+    extra: Vec<(&str, Vec<u8>)>,
+    strict: bool,
+) -> (resvg::tiny_skia::Pixmap, serde_json::Value) {
+    let d = tempfile::tempdir().unwrap();
+    let input = d.path().join("fills.pptx");
+    let out = d.path().join("out");
+    let theme = format!(r#"<a:theme xmlns:a="{A}">{THEME_WITH_BACKGROUNDS}</a:theme>"#);
+    let mut parts = vec![
+        (
+            "ppt/slides/_rels/slide1.xml.rels",
+            rel("slideLayout", "../layouts/layout.xml").into_bytes(),
+        ),
+        (
+            "ppt/layouts/layout.xml",
+            page("sldLayout", "", layout_bg, "").into_bytes(),
+        ),
+        (
+            "ppt/layouts/_rels/layout.xml.rels",
+            rel("slideMaster", "../masters/master.xml").into_bytes(),
+        ),
+        (
+            "ppt/masters/master.xml",
+            page("sldMaster", "", master_bg, "").into_bytes(),
+        ),
+        (
+            "ppt/masters/_rels/master.xml.rels",
+            rel("theme", "../theme/theme.xml").into_bytes(),
+        ),
+        ("ppt/theme/theme.xml", theme.into_bytes()),
+    ];
+    parts.extend(extra);
+    write_deck(&input, page("sld", "", slide_bg, shapes), parts);
+    check(run(&input, &out, strict));
+    let manifest =
+        serde_json::from_slice(&std::fs::read(out.join("manifest.json")).unwrap()).unwrap();
+    (image(&out), manifest)
+}
+fn messages(manifest: &serde_json::Value) -> Vec<String> {
+    manifest["slides"][0]["diagnostics"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|d| d["message"].as_str().unwrap().to_string())
+        .collect()
+}
+#[test]
+fn theme_background_reference_paints_the_referenced_color() {
+    let master_bg = r#"<p:bg><p:bgRef idx="1001"><a:schemeClr val="accent1"/></p:bgRef></p:bg>"#;
+    let (pixels, manifest) = render_with_master("", "", master_bg, "", vec![], true);
+    assert_eq!(rgb(&pixels, 50, 50), (0, 170, 0));
+    assert!(messages(&manifest).is_empty());
+    // A layout reference overrides the master; idx 1002 applies the style's own transform.
+    let layout_bg = r#"<p:bg><p:bgRef idx="1002"><a:schemeClr val="accent2"/></p:bgRef></p:bg>"#;
+    let (pixels, _) = render_with_master("", layout_bg, master_bg, "", vec![], true);
+    let (r, g, b) = rgb(&pixels, 50, 50);
+    assert!(r == 0 && g == 0 && b > 0 && b < 255, "{:?}", (r, g, b));
+}
+#[test]
+fn pattern_fills_draw_both_colors_and_name_unknown_presets() {
+    let shape = |x: i32, preset: &str| {
+        format!(
+            r#"<p:sp><p:spPr>{}<a:prstGeom prst="rect"/><a:pattFill prst="{preset}"><a:fgClr><a:srgbClr val="FF0000"/></a:fgClr><a:bgClr><a:srgbClr val="FFFFFF"/></a:bgClr></a:pattFill></p:spPr></p:sp>"#,
+            transform(x, 10, 30, 80)
+        )
+    };
+    let shapes = shape(0, "dkUpDiag") + &shape(34, "trellis") + &shape(68, "zigZag");
+    let (pixels, manifest) = render_with_master("", "", "", &shapes, vec![], false);
+    for left in [2, 36, 70] {
+        let colors: std::collections::BTreeSet<_> = (left..left + 26)
+            .flat_map(|x| (12..88).map(move |y| (x, y)))
+            .map(|(x, y)| rgb(&pixels, x, y))
+            .collect();
+        assert!(
+            colors.contains(&(255, 0, 0)) && colors.contains(&(255, 255, 255)),
+            "shape at {left} is not a two-color pattern"
+        );
+    }
+    let diagnostics = manifest["slides"][0]["diagnostics"].as_array().unwrap();
+    let unsupported: Vec<_> = diagnostics
+        .iter()
+        .filter(|d| d["code"] == "unsupported")
+        .map(|d| d["message"].as_str().unwrap())
+        .collect();
+    assert_eq!(
+        unsupported,
+        ["Unsupported pattern fill preset: zigZag; drawn as pct50"]
+    );
+    // Every pattern, drawn or not, is flagged as approximate.
+    let approximate = diagnostics
+        .iter()
+        .filter(|d| d["code"] == "approximation")
+        .count();
+    assert_eq!(approximate, 3);
+}
+#[test]
+fn group_fill_reaches_children_including_nested_groups() {
+    let child = |x: i32, y: i32| {
+        format!(
+            r#"<p:sp><p:spPr>{}<a:prstGeom prst="rect"/><a:grpFill/></p:spPr></p:sp>"#,
+            transform(x, y, 20, 20)
+        )
+    };
+    let group = |props: &str, children: &str| {
+        format!(
+            r#"<p:grpSp><p:nvGrpSpPr><p:cNvPr id="9" name="group"/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr><p:grpSpPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="952500" cy="952500"/><a:chOff x="0" y="0"/><a:chExt cx="952500" cy="952500"/></a:xfrm>{props}</p:grpSpPr>{children}</p:grpSp>"#
+        )
+    };
+    let blue = r#"<a:solidFill><a:srgbClr val="0000FF"/></a:solidFill>"#;
+    let nested = group("<a:grpFill/>", &child(50, 10)) + &group("<a:noFill/>", &child(50, 50));
+    let shapes = group(blue, &(child(10, 10) + &nested)) + &child(10, 50);
+    let (pixels, manifest) = render_with_master("", "", "", &shapes, vec![], true);
+    assert_eq!(rgb(&pixels, 20, 20), (0, 0, 255));
+    assert_eq!(rgb(&pixels, 60, 20), (0, 0, 255));
+    // A group without a fill, and a shape outside any group, leave grpFill children unfilled.
+    assert_eq!(rgb(&pixels, 60, 60), (255, 255, 255));
+    assert_eq!(rgb(&pixels, 20, 60), (255, 255, 255));
+    assert!(messages(&manifest).is_empty());
+}
+fn red_png() -> Vec<u8> {
+    let mut pixmap = resvg::tiny_skia::Pixmap::new(4, 4).unwrap();
+    pixmap.fill(resvg::tiny_skia::Color::from_rgba8(255, 0, 0, 255));
+    pixmap.encode_png().unwrap()
+}
+#[test]
+fn picture_fill_is_stretched_and_clipped_to_the_shape_outline() {
+    let shape = format!(
+        r#"<p:sp><p:spPr>{}<a:prstGeom prst="ellipse"/><a:blipFill><a:blip r:embed="r2"/><a:stretch><a:fillRect/></a:stretch></a:blipFill></p:spPr></p:sp>"#,
+        transform(10, 10, 80, 80)
+    );
+    let rels = format!(
+        r#"<Relationships xmlns="{PR}"><Relationship Id="r1" Type="{R}/slideLayout" Target="../layouts/layout.xml"/><Relationship Id="r2" Type="{R}/image" Target="../media/red.png"/></Relationships>"#
+    );
+    let (pixels, manifest) = render_with_master(
+        "",
+        "",
+        "",
+        &shape,
+        vec![
+            ("ppt/slides/_rels/slide1.xml.rels", rels.into_bytes()),
+            ("ppt/media/red.png", red_png()),
+        ],
+        true,
+    );
+    assert_eq!(rgb(&pixels, 50, 50), (255, 0, 0));
+    assert_eq!(rgb(&pixels, 12, 12), (255, 255, 255));
+    assert!(messages(&manifest).is_empty());
+}
+#[test]
+fn picture_background_comes_from_the_part_that_declares_it() {
+    let layout_bg = r#"<p:bg><p:bgPr><a:blipFill><a:blip r:embed="r2"/><a:stretch><a:fillRect/></a:stretch></a:blipFill><a:effectLst/></p:bgPr></p:bg>"#;
+    let rels = format!(
+        r#"<Relationships xmlns="{PR}"><Relationship Id="r1" Type="{R}/slideMaster" Target="../masters/master.xml"/><Relationship Id="r2" Type="{R}/image" Target="../media/red.png"/></Relationships>"#
+    );
+    let (pixels, manifest) = render_with_master(
+        "",
+        layout_bg,
+        "",
+        "",
+        vec![
+            ("ppt/layouts/_rels/layout.xml.rels", rels.into_bytes()),
+            ("ppt/media/red.png", red_png()),
+        ],
+        true,
+    );
+    assert_eq!(rgb(&pixels, 50, 50), (255, 0, 0));
+    assert!(messages(&manifest).is_empty());
+}
