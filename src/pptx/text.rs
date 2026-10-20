@@ -812,16 +812,16 @@ fn layout(
             }
         }
         // The counter is advanced for every paragraph so numbering stays as before;
-        // the marker is drawn only when the paragraph has visible text.
+        // a text run, including a space-only run, makes the marker visible.
+        let first_run = paragraph
+            .children()
+            .find(|n| n.has_tag_name((A, "r")) || n.has_tag_name((A, "fld")));
         let marker = counters
             .label(&paragraph_props, level, warnings)
-            .filter(|_| all.iter().any(|g| !g.ch.is_whitespace()));
+            .filter(|_| first_run.is_some());
         let marker_glyphs = marker
             .as_deref()
             .map(|text| {
-                let first_run = paragraph
-                    .children()
-                    .find(|n| n.has_tag_name((A, "r")) || n.has_tag_name((A, "fld")));
                 let marker_nodes: Vec<_> = first_run
                     .and_then(|n| child(n, A, "rPr"))
                     .into_iter()
@@ -1886,7 +1886,7 @@ mod tests {
         }
     }
     #[test]
-    fn empty_or_whitespace_paragraphs_draw_no_bullet_marker() {
+    fn empty_paragraphs_hide_markers_but_space_runs_show_them() {
         let bullet = r#"<a:pPr marL="190500" indent="-190500"><a:buFont typeface="Pptx2img Metrics Test"/><a:buChar char="A"/></a:pPr>"#;
         let tail = r#"<a:p><a:r><a:t>B</a:t></a:r></a:p>"#;
         let marker_count = |svg: &str| {
@@ -1909,7 +1909,8 @@ mod tests {
         assert_eq!(markers, 0);
         let spaced = format!(r#"<a:p>{bullet}<a:r><a:t> </a:t></a:r></a:p>{tail}"#);
         let (svg, _) = inherited_fixture(&spaced, "900");
-        assert_eq!(marker_count(&svg).0, 0);
+        let (markers, y_spaced) = marker_count(&svg);
+        assert_eq!(markers, 1);
         let filled = format!(r#"<a:p>{bullet}<a:r><a:t>B</a:t></a:r></a:p>{tail}"#);
         let (svg, _) = inherited_fixture(&filled, "900");
         let (markers, y_filled) = marker_count(&svg);
@@ -1917,6 +1918,7 @@ mod tests {
         // The empty paragraph keeps its line height.
         assert!(y_empty.is_some());
         assert_eq!(y_empty, y_filled);
+        assert_eq!(y_spaced, y_filled);
     }
     #[test]
     fn non_bullet_indent_only_moves_first_line_and_keeps_hard_breaks() {

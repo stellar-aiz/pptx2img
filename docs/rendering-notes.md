@@ -253,3 +253,26 @@ were unchanged. PowerPoint reference-image comparison was not performed.
 
 Current capabilities that supersede older limitations are listed in
 [rendering support](rendering.md), including saved autofit, table styles, and shadows.
+
+## Empty bullet paragraphs (2026-10-20)
+
+PowerPoint for Mac 16.105.3 (26020123), macOS 27.0.1 (26A434), displayed
+`examples/empty-bullets.pptx` at 100% zoom. Paragraph 5 contains one space and
+shows a bullet both unselected and with the insertion caret in that paragraph.
+Paragraphs 3, 7, and 8 contain no runs and show no marker. The recorded
+LibreOffice 26.2.5.2 reference agrees on this fixture.
+
+The marker rule now checks for a text run (`a:r` or `a:fld`) rather than a
+non-whitespace glyph. Empty-line height and auto-numbering counters retain their
+existing behavior. Empty-text runs, break-only paragraphs, other whitespace, and
+auto-numbering across empty paragraphs were not independently checked in
+PowerPoint; this fixture does not establish full bullet compatibility.
+
+The independent fixture generator preserves the observed paragraph contents:
+
+```sh
+python tests/visual/make_empty_bullets.py examples/empty-bullets.pptx
+```
+
+The [Issue #53 observation](https://github.com/stellar-aiz/pptx2img/issues/53#issuecomment-6286206284)
+records the manual check. The original was neither edited nor saved.
