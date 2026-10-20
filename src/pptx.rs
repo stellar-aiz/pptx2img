@@ -18,6 +18,7 @@ mod gradients;
 pub(crate) use fonts::Resolver as FontResolver;
 mod layout;
 mod lines;
+mod metafile;
 mod objects;
 mod patterns;
 mod picture_effects;
@@ -976,6 +977,8 @@ fn raster_picture<'p>(
         "image/png"
     } else if data.starts_with(b"\xff\xd8\xff") {
         "image/jpeg"
+    } else if metafile::is_metafile(data) {
+        return metafile_picture(target, data);
     } else {
         return Err(format!("Only PNG/JPEG images are supported: {target}"));
     };
@@ -1005,6 +1008,25 @@ fn raster_picture<'p>(
         }),
         Err(reason) => Err(format!("{reason}: {target}")),
     }
+}
+/// An EMF or placeable WMF picture, translated to SVG and checked by the SVG picture gate.
+/// Its bitmaps were encoded under the PNG/JPEG size policy during translation.
+// stellar:debt(perf) a layout or master metafile is translated again on every slide. upgrade: cache by part like raster downscales.
+fn metafile_picture(target: &str, data: &[u8]) -> Result<Picture, String> {
+    let translated = metafile::translate(data).map_err(|reason| format!("{reason}: {target}"))?;
+    vector::check_generated(&translated.svg).map_err(|reason| format!("{reason}: {target}"))?;
+    Ok(Picture {
+        href: format!(
+            "data:image/svg+xml;base64,{}",
+            STANDARD.encode(&translated.svg)
+        ),
+        size: Some(translated.size),
+        notes: translated
+            .notes
+            .into_iter()
+            .map(|(code, message)| (code, format!("{message}: {target}")))
+            .collect(),
+    })
 }
 /// An SVG picture; vector data bypasses the PNG/JPEG pixel policy and uses its own gate.
 // stellar:debt(perf) a layout or master SVG is checked and encoded again on every slide. upgrade: cache by part like raster downscales.

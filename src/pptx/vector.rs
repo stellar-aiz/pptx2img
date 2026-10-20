@@ -3,6 +3,7 @@
 //! usvg parses the nested document again and silently draws nothing when it cannot, so
 //! every rejection here returns a reason the caller records. Vector data is bounded by
 //! bytes and XML node count; the PNG/JPEG pixel policy in `raster` does not apply.
+//! SVG translated from EMF/WMF pictures passes the same gate (see `check_generated`).
 use roxmltree::{Document, ParsingOptions};
 
 const SVG: &str = "http://www.w3.org/2000/svg";
@@ -11,12 +12,25 @@ const MAX_BYTES: usize = 4 * 1024 * 1024;
 /// Largest XML node count accepted (elements, text, and other nodes; attributes excluded).
 const MAX_NODES: u32 = 100_000;
 
+/// Largest translated metafile SVG accepted, in bytes. It may carry PNG bitmaps that
+/// already passed the PNG/JPEG size policy, so it is bounded like one package part.
+const MAX_GENERATED_BYTES: usize = 32 * 1024 * 1024;
+
 /// Accept a self-contained, bounded SVG document, or return why it is not rendered.
 /// `Ok(true)` means the document contains `<text>`, which may not render (see the caller).
 pub(super) fn check(data: &[u8]) -> Result<bool, String> {
-    if data.len() > MAX_BYTES {
+    gate(data, MAX_BYTES, false)
+}
+/// Gate for SVG that pptx2img translated from a metafile: the same node limit, reference
+/// rules, and render check, except that `<image>` may carry the PNG data URIs the
+/// translator encoded under the PNG/JPEG size policy.
+pub(super) fn check_generated(data: &[u8]) -> Result<bool, String> {
+    gate(data, MAX_GENERATED_BYTES, true)
+}
+fn gate(data: &[u8], max_bytes: usize, png_images: bool) -> Result<bool, String> {
+    if data.len() > max_bytes {
         return Err(format!(
-            "SVG picture exceeds {MAX_BYTES} bytes ({} bytes)",
+            "SVG picture exceeds {max_bytes} bytes ({} bytes)",
             data.len()
         ));
     }
@@ -36,7 +50,10 @@ pub(super) fn check(data: &[u8]) -> Result<bool, String> {
     for node in doc.descendants() {
         has_text |= node.has_tag_name((SVG, "text"));
         let foreign = node.attributes().any(|attr| {
-            (attr.name() == "href" && !attr.value().trim_start().starts_with('#'))
+            let embedded_png = png_images
+                && node.has_tag_name((SVG, "image"))
+                && attr.value().starts_with("data:image/png;base64,");
+            (attr.name() == "href" && !attr.value().trim_start().starts_with('#') && !embedded_png)
                 || references_outside(attr.value())
         }) || node.text().is_some_and(references_outside);
         if foreign {
