@@ -15,6 +15,8 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import zipfile
+from xml.etree import ElementTree
 from xml.sax.saxutils import escape
 
 from PIL import Image, ImageChops, ImageStat
@@ -161,6 +163,42 @@ def load_substitutions(path: Path) -> dict[str, str]:
     return dict(sorted(families.items()))
 
 
+DRAWINGML = "http://schemas.openxmlformats.org/drawingml/2006/main"
+FONT_PARTS = ("ppt/slides/", "ppt/slideLayouts/", "ppt/slideMasters/", "ppt/notesSlides/",
+              "ppt/notesMasters/", "ppt/handoutMasters/", "ppt/theme/", "ppt/charts/", "ppt/diagrams/")
+
+
+def requested_families(deck: Path) -> list[str]:
+    """Latin and East Asian typefaces the deck declares (`a:latin` / `a:ea`), sorted.
+
+    Theme references such as `+mn-lt` are skipped because the theme part declares the faces they
+    resolve to. Theme faces are listed even when no text uses them, so the list can be longer
+    than the set of families actually drawn. Unparsable parts are skipped.
+    """
+    names: set[str] = set()
+    with zipfile.ZipFile(deck) as archive:
+        for part in archive.namelist():
+            if not part.endswith(".xml") or not part.startswith(FONT_PARTS):
+                continue
+            try:
+                root = ElementTree.fromstring(archive.read(part))
+            except ElementTree.ParseError:
+                continue
+            for tag in ("latin", "ea"):
+                for element in root.iter(f"{{{DRAWINGML}}}{tag}"):
+                    typeface = element.get("typeface", "").strip()
+                    if typeface and not typeface.startswith("+"):
+                        names.add(typeface)
+    return sorted(names)
+
+
+def unpinned_families(requested: list[str], substitutions: dict[str, str]) -> list[str]:
+    """Requested families the replacement table does not list. LibreOffice matches family names
+    case-insensitively, so the comparison ignores case and nothing else."""
+    pinned = {family.casefold() for family in substitutions}
+    return [family for family in requested if family.casefold() not in pinned]
+
+
 def compression_profile(enabled: bool, substitutions: dict[str, str] | None = None) -> str:
     # Pin comparison settings without modifying the user's regular profile.
     mode = 1 if enabled else 0
@@ -232,6 +270,10 @@ def run(args: argparse.Namespace) -> bool:
         map_path = (getattr(args, "font_substitution_map", None) or default_substitution_map()).resolve()
         substitutions = load_substitutions(map_path)
         shutil.copyfile(map_path, out / "font-substitution.json")
+        requested = requested_families(fixture)
+        report["requested_families"] = requested
+        report["unpinned_families"] = unpinned_families(requested, substitutions)
+        report["font_pinning_strict"] = bool(getattr(args, "strict_font_pinning", False))
         soffice = find_soffice(args.soffice)
         env = os.environ.copy()
         if sys.platform == "darwin":
@@ -330,12 +372,22 @@ def run(args: argparse.Namespace) -> bool:
             slide["renderer_diagnostics"] is not None for slide in report["slides"]) else None)
         success = report["global_passed"] and report["regions_passed"] is not False
         report["status"] = "passed" if success else "difference_exceeded"
+        if report["font_pinning_strict"] and report["unpinned_families"]:
+            # Opt-in determinism gate: an unpinned family may fall back differently between runs.
+            report["status"] = "unpinned_families"
+            success = False
         return success
     except Exception as error:
         report["error"] = f"{type(error).__name__}: {error}"
         raise
     finally:
         (out / "report.json").write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        if report.get("unpinned_families"):
+            kind = "error (--strict-font-pinning)" if report.get("font_pinning_strict") else "warning"
+            print(f"Font pinning {kind}: {len(report['unpinned_families'])} requested "
+                  f"famil{'y' if len(report['unpinned_families']) == 1 else 'ies'} not in the substitution table, "
+                  f"so the LibreOffice reference may drift between runs: "
+                  f"{', '.join(report['unpinned_families'])}", file=sys.stderr, flush=True)
         print(f"Comparison report: {out / 'report.json'}", flush=True)
 
 
@@ -354,6 +406,7 @@ def main() -> int:
     parser.add_argument("--soffice")
     parser.add_argument("--regions", type=Path, help="JSON with normalized rectangles; compare regions using the whole-page thresholds")
     parser.add_argument("--font-substitution-map", type=Path, help="JSON {\"families\": {family: substitute}} pinned in the LibreOffice profile (default: $PPTX2IMG_FONT_SUBSTITUTION_MAP, else tests/visual/font-substitution.json)")
+    parser.add_argument("--strict-font-pinning", action="store_true", help="Fail (exit 1) when the deck requests a latin/ea family that the substitution table does not list; by default these are reported as unpinned_families only")
     parser.add_argument("--punctuation-compression", action="store_true", help="Enable automatic punctuation compression in both engines")
     parser.add_argument("--width", type=int, default=1200, choices=range(64, 4097), metavar="64..4096")
     parser.add_argument("--pixel-tolerance", type=int, default=16, choices=range(256), metavar="0..255")

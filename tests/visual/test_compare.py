@@ -11,7 +11,7 @@ import xml.etree.ElementTree as ET
 import pypdfium2 as pdfium
 from compare import (DEFAULT_SUBSTITUTION_MAP, SUBSTITUTION_MAP_ENV, default_substitution_map, compare_images, compare_regions, compression_profile,
                      diagnostic_summary, fraction, load_regions, load_substitutions, passes, pdf_fonts,
-                     visible_slides)
+                     requested_families, unpinned_families, visible_slides)
 
 
 class ComparisonTests(unittest.TestCase):
@@ -158,7 +158,9 @@ class FontSubstitutionTests(unittest.TestCase):
         for name, face in (("linux", "Noto Sans CJK JP"), ("windows", "Noto Sans CJK JP")):
             with self.subTest(os=name):
                 mapping = load_substitutions(DEFAULT_SUBSTITUTION_MAP.with_name(f"font-substitution.{name}.json"))
-                self.assertEqual(set(mapping), set(base))
+                # Entries that map a family to itself pin macOS-shipped faces and exist only in the macOS table.
+                shared = {family for family, face in base.items() if family != face}
+                self.assertEqual(set(mapping), shared)
                 self.assertEqual(set(mapping.values()), {face})
 
     def test_environment_selects_the_default_map(self):
@@ -183,6 +185,40 @@ class FontSubstitutionTests(unittest.TestCase):
             Image.new("RGB", (20, 20), "white").save(path)
             with pdfium.PdfDocument(path) as document:
                 self.assertEqual(pdf_fonts(document), [])
+
+
+class UnpinnedFamilyTests(unittest.TestCase):
+    PART = ('<p:sld xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" '
+            'xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main"><a:r><a:rPr>{}</a:rPr></a:r></p:sld>')
+
+    def deck(self, directory, parts):
+        import zipfile
+        path = Path(directory) / "deck.pptx"
+        with zipfile.ZipFile(path, "w") as archive:
+            for name, body in parts.items():
+                archive.writestr(name, body)
+        return path
+
+    def test_collects_latin_and_ea_and_skips_theme_references_and_bullet_fonts(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = self.deck(directory, {
+                "ppt/slides/slide1.xml": self.PART.format(
+                    '<a:latin typeface="Foo Sans"/><a:ea typeface="日本語体"/><a:cs typeface="Cs Only"/>'
+                    '<a:buFont typeface="Wingdings"/><a:latin typeface="+mn-lt"/><a:ea typeface=""/>'),
+                "ppt/theme/theme1.xml": self.PART.format('<a:latin typeface="Theme Face"/>'),
+                "ppt/slides/broken.xml": "<a:latin",
+                "docProps/app.xml": self.PART.format('<a:latin typeface="Ignored"/>'),
+            })
+            self.assertEqual(requested_families(path), sorted(["Foo Sans", "日本語体", "Theme Face"]))
+
+    def test_unpinned_ignores_case_only(self):
+        table = {"Meiryo UI": "X", "Calibri": "X"}
+        self.assertEqual(unpinned_families(["meiryo ui", "CALIBRI", "Georgia", "Meiryo"], table), ["Georgia", "Meiryo"])
+
+    def test_every_table_lists_the_families_observed_to_drift(self):
+        for name in ("font-substitution.json", "font-substitution.linux.json", "font-substitution.windows.json"):
+            mapping = load_substitutions(DEFAULT_SUBSTITUTION_MAP.with_name(name))
+            self.assertEqual(unpinned_families(["メイリオ", "游ゴシック Light", "Microsoft YaHei", "Century Gothic", "Aptos"], mapping), [], name)
 
 
 class HiddenSlideTests(unittest.TestCase):
