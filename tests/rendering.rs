@@ -1070,3 +1070,75 @@ fn unwrapped_shape_autofit_keeps_width_for_empty_and_vertical_bodies() {
         );
     }
 }
+
+#[test]
+fn autofit_in_a_small_inset_text_area_grows_only_by_the_needed_height() {
+    // A custom geometry with the `plus` preset's text rectangle: inset on every side
+    // by 47.769% of the shorter side, so the text area is under 1px of a 20px square.
+    // It does not scale with the shape, which used to drive the height to the limit.
+    let geometry = r#"<a:custGeom><a:avLst/><a:gdLst><a:gd name="x1" fmla="*/ ss 47769 100000"/><a:gd name="x2" fmla="+- r 0 x1"/><a:gd name="y2" fmla="+- b 0 x1"/></a:gdLst><a:rect l="x1" t="x1" r="x2" b="y2"/><a:pathLst><a:path w="100" h="100"><a:moveTo><a:pt x="0" y="0"/></a:moveTo><a:lnTo><a:pt x="100" y="0"/></a:lnTo><a:lnTo><a:pt x="100" y="100"/></a:lnTo><a:lnTo><a:pt x="0" y="100"/></a:lnTo><a:close/></a:path></a:pathLst></a:custGeom>"#;
+    for (paragraph, grows) in [
+        ("<a:p><a:endParaRPr sz=\"600\"/></a:p>", false),
+        (
+            r#"<a:p><a:pPr><a:defRPr sz="600"><a:latin typeface="Pptx2img Metrics Test"/></a:defRPr></a:pPr><a:r><a:t>A</a:t></a:r></a:p>"#,
+            true,
+        ),
+    ] {
+        let dir = tempfile::tempdir().unwrap();
+        let input = dir.path().join("inset.pptx");
+        let out = dir.path().join("out");
+        let shape = format!(
+            r#"<p:sp><p:spPr>{}{geometry}<a:solidFill><a:srgbClr val="00FF00"/></a:solidFill><a:ln w="0"><a:noFill/></a:ln></p:spPr><p:txBody><a:bodyPr wrap="square" lIns="54000" tIns="54000" rIns="54000" bIns="54000" anchor="ctr"><a:spAutoFit/></a:bodyPr>{paragraph}</p:txBody></p:sp>"#,
+            transform(40, 40, 20, 20)
+        );
+        write_deck(&input, page("sld", "", "", &shape), vec![]);
+        check(run(&input, &out, false));
+        let img = image(&out);
+        let filled: Vec<u32> = (0..100)
+            .filter(|&y| rgb(&img, 41, y) == (0, 255, 0))
+            .collect();
+        let (top, bottom) = (filled[0], *filled.last().unwrap());
+        if grows {
+            // About 20px of text area are needed (8px line plus two 5.7px insets),
+            // so the square grows to roughly 39px around its centre, not to the limit.
+            assert!(top < 38 && bottom > 61, "{top}..{bottom}");
+            assert!(top > 25 && bottom < 75, "{top}..{bottom}");
+        } else {
+            assert_eq!((top, bottom), (40, 59));
+        }
+        let records = diagnostics(&out);
+        assert!(
+            !records.iter().any(|d| d["message"]
+                .as_str()
+                .unwrap()
+                .contains("autofit reached its limit")),
+            "{records:?}"
+        );
+    }
+    // Unwrapped text sizes the width through the same small text area: "AAAA" needs
+    // 16px plus two 5.7px insets, so the left-aligned square grows to about 46px.
+    let dir = tempfile::tempdir().unwrap();
+    let input = dir.path().join("inset-width.pptx");
+    let out = dir.path().join("out");
+    let shape = format!(
+        r#"<p:sp><p:spPr>{}{geometry}<a:solidFill><a:srgbClr val="00FF00"/></a:solidFill><a:ln w="0"><a:noFill/></a:ln></p:spPr><p:txBody><a:bodyPr wrap="none" lIns="54000" tIns="54000" rIns="54000" bIns="54000" anchor="ctr"><a:spAutoFit/></a:bodyPr><a:p><a:pPr><a:defRPr sz="600"><a:latin typeface="Pptx2img Metrics Test"/></a:defRPr></a:pPr><a:r><a:t>AAAA</a:t></a:r></a:p></p:txBody></p:sp>"#,
+        transform(40, 40, 20, 20)
+    );
+    write_deck(&input, page("sld", "", "", &shape), vec![]);
+    check(run(&input, &out, false));
+    let img = image(&out);
+    let filled: Vec<u32> = (0..100)
+        .filter(|&x| rgb(&img, x, 50) == (0, 255, 0))
+        .collect();
+    let (left, right) = (filled[0], *filled.last().unwrap());
+    assert_eq!(left, 40);
+    assert!(right > 80 && right < 92, "{left}..{right}");
+    // Once the square is wider than tall, the inset follows the height, so the text
+    // area cannot catch up: the growth stops after one step and says so.
+    assert!(diagnostics(&out).iter().any(|d| {
+        d["message"]
+            .as_str()
+            .unwrap()
+            .contains("autofit reached its limit")
+    }));
+}

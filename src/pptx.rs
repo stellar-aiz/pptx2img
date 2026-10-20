@@ -343,6 +343,27 @@ fn is_media(kind: &str) -> bool {
         .any(|suffix| kind.ends_with(suffix))
 }
 
+/// Next shape size along one axis when its text area must change by `delta`, or
+/// `None` when growing the shape no longer helps. A preset's text area need not
+/// scale with the shape (it is often inset by a fraction of the shorter side), so the
+/// first step changes the shape by `delta` itself, and later steps divide by the rate
+/// the text area actually followed over the previous step. When the text area
+/// follows at less than half the shape's change (or shrinks), the step stops
+/// instead of driving the shape towards the size limit.
+fn autofit_step(size: f64, area: f64, delta: f64, trail: &mut Option<(f64, f64)>) -> Option<f64> {
+    let rate = match *trail {
+        Some((previous_size, previous_area)) => {
+            let rate = (area - previous_area) / (size - previous_size);
+            if !rate.is_finite() || rate < 0.5 {
+                return None;
+            }
+            rate.min(1.0)
+        }
+        None => 1.0,
+    };
+    *trail = Some((size, area));
+    Some((size + delta / rate).clamp(0.0, 100_000.0))
+}
 /// Cancel a net mirror for text. Flips mirror the geometry, never the glyphs: when the net
 /// transform (the element and its ancestor groups) is a mirror, mirror the text once more
 /// around the vertical line `center` (the centre of its final text rectangle, in the
@@ -607,6 +628,8 @@ fn render_shape(
         // Measure within the shape's text area. Height changes may also change its width,
         // so measure again at the final size. Do not search for a new saved fontScale.
         let geometry_node = props_chain.iter().find_map(|n| geometry_of(*n));
+        // Previous (shape size, text area size) per axis, for the autofit step rate.
+        let (mut height_trail, mut width_trail) = (None, None);
         for attempt in 0..16 {
             let mut measured_warnings = Warnings::default();
             measured_warnings.target = warnings.target.clone();
@@ -644,25 +667,18 @@ fn render_shape(
             let widening = extent.width - rect.2;
             let grow_height = growth > 0.01 && (rect.3 > 0.0 || h == 0.0) && h < 100_000.0;
             let resize_width = widening.abs() > 0.01 && (rect.2 > 0.0 || w == 0.0) && w < 100_000.0;
-            if (grow_height || resize_width) && attempt < 15 {
-                if grow_height {
-                    let ratio = if rect.3 > 0.0 {
-                        (h / rect.3).max(1.0)
-                    } else {
-                        1.0
-                    };
-                    let new_height = (h + growth * ratio).min(100_000.0);
+            let new_height = grow_height
+                .then(|| autofit_step(h, rect.3, growth, &mut height_trail))
+                .flatten();
+            let new_width = resize_width
+                .then(|| autofit_step(w, rect.2, widening, &mut width_trail))
+                .flatten();
+            if (new_height.is_some() || new_width.is_some()) && attempt < 15 {
+                if let Some(new_height) = new_height {
                     y += extent.offset_y / growth * (new_height - h);
                     h = new_height;
                 }
-                if resize_width {
-                    // The fitted width is exact, so map it from the text area to the shape.
-                    let new_width = if rect.2 > 0.0 {
-                        w * extent.width / rect.2
-                    } else {
-                        extent.width
-                    }
-                    .min(100_000.0);
+                if let Some(new_width) = new_width {
                     let change = new_width - w;
                     // Move the box centre along the text's own horizontal axis so the
                     // alignment-side edge stays put, through the text's flips and rotation.

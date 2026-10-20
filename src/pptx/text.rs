@@ -743,7 +743,7 @@ pub(super) fn render<'a>(
         if first_alignment.is_none() {
             first_alignment = Some(attr(&paragraph_props, "algn").unwrap_or("l"));
         }
-        has_visible_text |= fit_width && all.iter().any(|g| !g.ch.is_whitespace());
+        has_visible_text |= autofit.expand && all.iter().any(|g| !g.ch.is_whitespace());
         if fit_width && !marker_glyphs.is_empty() {
             natural_width = natural_width.max(margin_left + indent + text_width(&marker_glyphs));
         }
@@ -906,7 +906,9 @@ pub(super) fn render<'a>(
     } else {
         w
     };
-    let expanded_height = if can_expand {
+    // A body without visible text keeps its saved size: the saved box is what Office
+    // displays, and an inset text area can be far smaller than the shape.
+    let expanded_height = if can_expand && has_visible_text {
         h.max(top + content_height + bottom)
     } else {
         h
