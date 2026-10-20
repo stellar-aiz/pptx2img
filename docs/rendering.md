@@ -467,8 +467,24 @@ records, invalid record sizes, a missing end-of-file record, invalid header size
 non-finite world transforms omit the picture as malformed.
 
 Comparison with LibreOffice (`make_metafile_pictures.py OUT --pptx`, then
-`compare.py --width 1600` with the default thresholds), macOS, LibreOffice
-COMPARE_RESULTS_PLACEHOLDER
+`compare.py --width 1600` with the default thresholds), macOS, LibreOffice 26.2.5.2,
+2026-10-20. All nine pages are within the unchanged thresholds; before this step every
+page but `emf-text` and `wmf-clip-bitmap` exceeded them (MAE 0.030 to 0.081).
+
+| Page | MAE | Changed pixels | Remaining difference |
+|---|---|---|---|
+| `emf-shapes` (88-byte header) | 0.009299 | 1.614% | antialiasing along outlines |
+| `emf-shapes` (108-byte header) | 0.006214 | 1.182% | antialiasing along outlines |
+| `emf-path` | 0.006753 | 1.095% | antialiasing along outlines |
+| `emf-transform` | 0.007286 | 1.186% | antialiasing along outlines |
+| `emf-clip` | 0.010538 | 2.014% | pptx2img draws the `ExcludeClipRect` hole MS-EMF specifies; LibreOffice does not, so this part rests on the specification, not on the reference |
+| `emf-bitmap` | 0.005600 | 1.058% | edges of the stretched pixels |
+| `emf-text` | 0.006773 | 1.127% | LibreOffice draws the text; pptx2img reports it as `unsupported` |
+| `wmf-shapes` | 0.003045 | 0.594% | antialiasing along outlines |
+| `wmf-clip-bitmap` | 0.005641 | 0.877% | LibreOffice draws the `TextOut` text; pptx2img reports it |
+
+The text pages pass only because the text is small; passing does not mean text is
+supported.
 
 ## Known limitations
 
