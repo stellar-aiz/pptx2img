@@ -428,7 +428,7 @@ are ignored there. Non-placeable WMF is not detected and stays
 | Paths | `BeginPath`, `EndPath`, `CloseFigure`, `AbortPath`, `FillPath`, `StrokePath`, `StrokeAndFillPath`, `SelectClipPath` |
 | Coordinates | `SetMapMode` (all eight modes), window and viewport origin/extent, their scale records, `SetWorldTransform`, `ModifyWorldTransform`, `SaveDC`, `RestoreDC` |
 | Clipping | `IntersectClipRect` (chained SVG clip paths), `ExcludeClipRect` (SVG mask), `ExtSelectClipRgn` with rectangle regions; region modes copy, and, and diff |
-| Bitmaps | `StretchDIBits`, `BitBlt`, `StretchBlt`, `AlphaBlend`; WMF `META_STRETCHDIB`, `META_DIBSTRETCHBLT`, `META_DIBBITBLT`. 1/4/8/16/24/32-bit DIBs, uncompressed or bit fields, stretched or mirrored onto the destination |
+| Bitmaps | `StretchDIBits`, `BitBlt`, `StretchBlt`, `AlphaBlend`; WMF `META_STRETCHDIB`, `META_DIBSTRETCHBLT`, `META_DIBBITBLT`. 1/4/8/16/24/32-bit DIBs, uncompressed or bit fields, stretched or mirrored onto the destination; pixels are picked as GDI's default stretch modes do, and smoothed after `SetStretchBltMode(HALFTONE)` or a downscale |
 
 Diagnostics, each suffixed with the part name and recorded once per message:
 

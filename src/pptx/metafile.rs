@@ -261,6 +261,8 @@ struct Dc {
     pen: Pen,
     brush: Brush,
     even_odd: bool,
+    /// `SetStretchBltMode(HALFTONE)`: bitmaps are smoothed; other modes pick pixels.
+    halftone: bool,
     /// Current position in logical units.
     position: (f64, f64),
     clip: Clip,
@@ -438,6 +440,7 @@ impl Player {
                     color: Some(0xFFFFFF),
                 },
                 even_odd: true,
+                halftone: false,
                 position: (0.0, 0.0),
                 clip: Clip::default(),
             },
@@ -1051,11 +1054,16 @@ impl Player {
         // The clip is set on a group: on the image it would be read in the image's
         // transformed user space.
         let [a, b, c, d, e, f] = values;
+        let rendering = if self.dc.halftone || downscaled.is_some() {
+            ""
+        } else {
+            " image-rendering=\"optimizeSpeed\""
+        };
         self.body.push_str("<g");
         write_clip(&mut self.body, &self.dc.clip);
         let _ = write!(
             self.body,
-            "><image width=\"1\" height=\"1\" preserveAspectRatio=\"none\" transform=\"matrix({a} {b} {c} {d} {e} {f})\" href=\"data:image/png;base64,{}\"/></g>",
+            "><image width=\"1\" height=\"1\" preserveAspectRatio=\"none\"{rendering} transform=\"matrix({a} {b} {c} {d} {e} {f})\" href=\"data:image/png;base64,{}\"/></g>",
             STANDARD.encode(png)
         );
         Ok(())

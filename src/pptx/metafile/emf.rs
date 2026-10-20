@@ -179,6 +179,7 @@ impl Emf {
             }
             17 => p.dc.map_mode = u32_at(8)?,
             19 => p.dc.even_odd = u32_at(8)? != 2,
+            21 => p.dc.halftone = u32_at(8)? == 4,
             20 => p.mix_mode(u32_at(8)?, name),
             27 => p.move_to(point(8)?),
             54 => {
@@ -360,7 +361,7 @@ impl Emf {
             13
             | 16
             | 18
-            | 21..=26
+            | 22..=26
             | 28
             | 48
             | 50..=52

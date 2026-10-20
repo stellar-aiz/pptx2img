@@ -105,6 +105,7 @@ impl Wmf {
             }
             0x0103 => p.dc.map_mode = u32::from(word(0)?),
             0x0106 => p.dc.even_odd = word(0)? != 2,
+            0x0107 => p.dc.halftone = word(0)? == 4,
             0x0104 => p.mix_mode(u32::from(word(0)?), name),
             0x02FA => {
                 let style = u32::from(word(0)?);
@@ -229,9 +230,9 @@ impl Wmf {
             0x0521 | 0x0A32 => p.text_record(name),
             // State with no visible effect on the drawn subset, viewport records (see the
             // module comment), and escapes.
-            0x0102 | 0x0201 | 0x0209 | 0x012E | 0x0107 | 0x0105 | 0x0108 | 0x020A | 0x0231
-            | 0x0234 | 0x0035 | 0x0037 | 0x0139 | 0x0436 | 0x0149 | 0x0626 | 0x020D | 0x020E
-            | 0x0211 | 0x0412 => {}
+            0x0102 | 0x0201 | 0x0209 | 0x012E | 0x0105 | 0x0108 | 0x020A | 0x0231 | 0x0234
+            | 0x0035 | 0x0037 | 0x0139 | 0x0436 | 0x0149 | 0x0626 | 0x020D | 0x020E | 0x0211
+            | 0x0412 => {}
             _ => p.unsupported_record(name),
         }
         Ok(())
