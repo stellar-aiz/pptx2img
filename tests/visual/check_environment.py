@@ -13,10 +13,14 @@ EXPECTED_FONTS = {
 
 def check():
     fonts = {unicodedata.normalize("NFC", p.name): p for p in Path("/System/Library/Fonts").glob("*.ttc")}
+    differences = []
     for name, expected in EXPECTED_FONTS.items():
         path = fonts.get(name)
-        if path is None or hashlib.sha256(path.read_bytes()).hexdigest() != expected:
-            raise RuntimeError(f"Comparison font differs from the baseline: {name}. Check the environment")
+        actual = "missing" if path is None else hashlib.sha256(path.read_bytes()).hexdigest()
+        if actual != expected:
+            differences.append(f"{name}: expected {expected}, found {actual}")
+    if differences:
+        raise RuntimeError("Comparison font differs from the baseline. Check the environment:\n" + "\n".join(differences))
     soffice = os.environ.get("SOFFICE", "/Applications/LibreOffice.app/Contents/MacOS/soffice")
     version = subprocess.check_output([soffice, "--version"], text=True).strip()
     if not version.startswith("LibreOffice 26.2.5.2 "):
