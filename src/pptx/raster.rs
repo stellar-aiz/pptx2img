@@ -241,6 +241,54 @@ impl Shrink {
     }
 }
 
+/// Natural size in px at 96 dpi, from the PNG `pHYs` or JPEG JFIF density (96 dpi otherwise).
+// stellar:debt(scope) EXIF resolution in JPEG is ignored. upgrade: read EXIF XResolution/YResolution.
+pub(super) fn natural_size(data: &[u8], width: f64, height: f64) -> (f64, f64) {
+    let (dx, dy) = density(data).unwrap_or((96.0, 96.0));
+    (width * 96.0 / dx, height * 96.0 / dy)
+}
+fn density(data: &[u8]) -> Option<(f64, f64)> {
+    let be32 = |at: usize| {
+        data.get(at..at + 4)
+            .map(|b| u32::from_be_bytes([b[0], b[1], b[2], b[3]]))
+    };
+    let be16 = |at: usize| {
+        data.get(at..at + 2)
+            .map(|b| u16::from_be_bytes([b[0], b[1]]))
+    };
+    // Densities below 1 dpi are treated as absent (they would inflate the natural size).
+    let valid = |dx: f64, dy: f64| (dx >= 1.0 && dy >= 1.0).then_some((dx, dy));
+    if data.starts_with(b"\x89PNG\r\n\x1a\n") {
+        let mut at = 8;
+        while let Some(length) = be32(at) {
+            let kind = data.get(at + 4..at + 8)?;
+            if kind == b"pHYs" {
+                // Unit 1 is pixels per metre; unit 0 gives only the aspect ratio.
+                if data.get(at + 16) != Some(&1) {
+                    return None;
+                }
+                let per_inch = |v: u32| f64::from(v) * 0.0254;
+                return valid(per_inch(be32(at + 8)?), per_inch(be32(at + 12)?));
+            }
+            if kind == b"IDAT" {
+                return None;
+            }
+            at = at.checked_add(12 + length as usize)?;
+        }
+        return None;
+    }
+    // JFIF APP0 directly after SOI: units 1 = per inch, 2 = per centimetre.
+    if data.get(2..4) == Some(b"\xff\xe0") && data.get(6..11) == Some(b"JFIF\0") {
+        let scale = match data.get(13)? {
+            1 => 1.0,
+            2 => 2.54,
+            _ => return None,
+        };
+        return valid(f64::from(be16(14)?) * scale, f64::from(be16(16)?) * scale);
+    }
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -290,5 +338,22 @@ mod tests {
         assert!(matches!(fit(32_768, 2048), Fit::Downscale));
         assert!(matches!(fit(32_769, 1), Fit::Omit));
         assert!(matches!(fit(8193, 8193), Fit::Omit));
+    }
+    #[test]
+    fn density_comes_from_png_phys_and_jfif() {
+        let mut png = b"\x89PNG\r\n\x1a\n".to_vec();
+        png.extend(9u32.to_be_bytes());
+        png.extend(b"pHYs");
+        png.extend(2835u32.to_be_bytes()); // 72 dpi
+        png.extend(2835u32.to_be_bytes());
+        png.push(1);
+        png.extend([0; 4]);
+        let (w, _) = natural_size(&png, 72.0, 72.0);
+        assert!((w - 96.0).abs() < 0.1, "{w}");
+        let jfif = b"\xff\xd8\xff\xe0\x00\x10JFIF\0\x01\x01\x01\x00\x30\x00\x30";
+        assert_eq!(natural_size(jfif, 48.0, 48.0), (96.0, 96.0));
+        assert_eq!(natural_size(b"\xff\xd8\xff\xdb", 10.0, 10.0), (10.0, 10.0));
+        let tiny = b"\xff\xd8\xff\xe0\x00\x10JFIF\0\x01\x01\x01\x00\x00\x00\x00";
+        assert_eq!(natural_size(tiny, 10.0, 10.0), (10.0, 10.0));
     }
 }
