@@ -4,6 +4,12 @@ project_common_language: en
 
 # pptx2img Development Guidelines
 
+## Software design charter
+
+At the start of every session, read [docs/constitution.md](docs/constitution.md)
+before making design decisions. It is the single source of the software design
+principles: lightweightness, fidelity, transparency, and observability.
+
 ## Language policy
 
 - English is the language of public project artifacts: documentation (including
