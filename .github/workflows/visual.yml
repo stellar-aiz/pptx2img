@@ -41,8 +41,8 @@ jobs:
       NOTO_SANS_CJK_TAG: Sans2.004
       PYTHONUTF8: '1'
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: '3.14'
       - name: Prepare validation tools
@@ -154,7 +154,7 @@ jobs:
           exit $status
       - name: Save images, differences, and environment details even on failure
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: rendering-comparison-evidence-${{ matrix.name }}
           path: target/visual-tests/
