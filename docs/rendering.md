@@ -4,6 +4,46 @@ This is an early, approximate renderer, not a complete PowerPoint implementation
 Unsupported content is reported where detected; detection itself is incomplete.
 Strict mode gates known warnings, not all incompatibilities.
 
+## PDF output
+
+`--format pdf` uses the existing usvg scene, selected font faces, and glyph
+positions. No PDF library, new direct/transitive dependency, or external runtime
+is added. The backend writes PDF 1.4 with Type 3 outline fonts, ToUnicode maps,
+and ActualText for logical text. This is real PDF text, not a full-page bitmap
+or an embedded OpenType subset. Font hinting is not preserved. Extraction order,
+whitespace, and punctuation can still differ across readers.
+
+The initial PDF subset supports opaque solid fills and strokes, curves, ordinary
+line caps/joins/dashes, transforms, single-path clipping, static outline text,
+and opaque PNG/JPEG images. Tables are represented by their rendered paths and
+text. JPEGs are decoded through the existing decoder into RGB image objects.
+
+The following stop conversion with a slide-level error, before any final PDF is
+published: gradients/patterns, masks/filters, group blending/isolation/opacity,
+translucent fills/strokes/text/images, nested/multiple clipping paths, miter-clip
+joins, text strokes/decorations, variable/color/bitmap fonts, non-outline glyphs,
+unhandled glyph clusters, and embedded SVG/GIF/WebP image nodes. PNG rendering
+support remains broader. There is no silent PDF raster fallback or omission.
+
+Fonts with restricted-license embedding, no-subsetting, or bitmap-only OS/2
+flags are rejected; missing embedding metadata also fails. Supply an appropriate
+alternative using the existing font options. These checks do not replace the
+user's responsibility to have permission to use the supplied fonts.
+
+Limits: 200-inch page dimensions, 16,777,216 decoded pixels per image, 100,000
+PDF objects, and 128 MiB of accumulated content. Streams are currently
+uncompressed; a cached font resource is used per face/glyph/Unicode combination.
+Large decks can therefore reach the limit. Each slide is converted sequentially,
+but PDF resources and final bytes are held in memory. Failures identify the
+affected slide and tree node/feature; complete PPTX-to-PDF object provenance is
+not implemented.
+
+`tests/visual/pdf_output.py` generates a representative Japanese/text/table/
+PNG/JPEG deck and compares PDFium rasterization with production PNG output using
+the unchanged global and regional thresholds. It records multiple extractors'
+results but gates expected text on PDFium. This does not validate PowerPoint
+compatibility or gatecheck-ai's actual ingestion behavior.
+
 ## Supported subset
 
 - Transitional OOXML PPTX, using presentation-defined slide order.

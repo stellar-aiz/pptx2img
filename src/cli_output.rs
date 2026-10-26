@@ -60,6 +60,19 @@ pub fn completed(folder: &Path, slides: &[SlideReport]) -> String {
     result
 }
 
+pub fn completed_pdf(report: &pptx2img::PdfConversionReport) -> String {
+    let details = serde_json::to_string(report)
+        .expect("report serialization")
+        .replace('\u{0085}', "\\u0085")
+        .replace('\u{2028}', "\\u2028")
+        .replace('\u{2029}', "\\u2029");
+    format!(
+        "status: completed\noutput:\n  created: true\n  file: {}\n  pages: {}\nreport: {details}\n",
+        quoted(&report.file.to_string_lossy()),
+        report.pages
+    )
+}
+
 pub fn failed(error: &anyhow::Error, folder: Option<&Path>, created: bool) -> String {
     let mut result = format!("status: failed\noutput:\n  created: {created}\n");
     if created && let Some(folder) = folder {

@@ -1,24 +1,34 @@
 //! CLI for the PPTX-to-PNG conversion library.
 mod cli_output;
-use clap::Parser;
-use pptx2img::{ConvertOptions, SlideReport, convert};
+use clap::{Parser, ValueEnum};
+use pptx2img::{ConvertOptions, SlideReport, convert, convert_pdf};
 use std::path::PathBuf;
+
+#[derive(Clone, Copy, Debug, Default, ValueEnum)]
+enum Format {
+    #[default]
+    Png,
+    Pdf,
+}
 
 #[derive(Parser)]
 #[command(
     version,
-    about = "Convert PPTX to PNG without Office (early release)",
+    about = "Convert PPTX to PNG or PDF without Office (early release)",
     after_help = "Fonts: system fonts are loaded by default; application bundles and inaccessible paths may not be searched. Add available font files with --font-file.
 Individual missing glyphs use available fallback fonts with warnings; unrenderable glyphs fail. Family substitution requires --font-fallback.
-Results: YAML on stdout for success, stderr for failure. Detailed diagnostics are saved in manifest.json on success."
+Results: YAML on stdout for success, stderr for failure. PNG diagnostics are saved in manifest.json; PDF diagnostics are included in the result document."
 )]
 struct Args {
     /// Input PPTX
     input: PathBuf,
-    /// Output directory (default: <input>.pptx2img beside the input; never overwritten)
+    /// Output format
+    #[arg(long, value_enum, default_value_t = Format::Png)]
+    format: Format,
+    /// PNG directory or PDF file (default: <input>.pptx2img or <input>.pdf; never overwritten)
     #[arg(long)]
     out: Option<PathBuf>,
-    /// Output image width
+    /// PNG image width; ignored for PDF page size
     #[arg(long, default_value_t = 1600, value_parser = clap::value_parser!(u32).range(64..=4096))]
     width: u32,
     /// Fail on warnings without writing images
@@ -95,24 +105,34 @@ fn main() {
             std::process::exit(2);
         }
     };
-    let out = args
-        .out
-        .unwrap_or_else(|| args.input.with_extension("pptx2img"));
+    let out = args.out.unwrap_or_else(|| {
+        args.input.with_extension(match args.format {
+            Format::Png => "pptx2img",
+            Format::Pdf => "pdf",
+        })
+    });
     let existed = out.exists();
-    match convert(
-        &args.input,
-        &out,
-        &ConvertOptions {
-            width: args.width,
-            strict: args.strict,
-            font_fallback: args.font_fallback,
-            punctuation_compression: args.punctuation_compression,
-            font_file: args.font_file,
-            no_system_fonts: args.no_system_fonts,
-            font_mapping: args.font_map.into_iter().collect(),
-            include_hidden: args.include_hidden,
-        },
-    ) {
+    let settings = ConvertOptions {
+        width: args.width,
+        strict: args.strict,
+        font_fallback: args.font_fallback,
+        punctuation_compression: args.punctuation_compression,
+        font_file: args.font_file,
+        no_system_fonts: args.no_system_fonts,
+        font_mapping: args.font_map.into_iter().collect(),
+        include_hidden: args.include_hidden,
+    };
+    if matches!(args.format, Format::Pdf) {
+        match convert_pdf(&args.input, &out, &settings) {
+            Ok(report) => print!("{}", cli_output::completed_pdf(&report)),
+            Err(error) => {
+                eprint!("{}", cli_output::failed(&error, Some(&out), false));
+                std::process::exit(1);
+            }
+        }
+        return;
+    }
+    match convert(&args.input, &out, &settings) {
         Ok(report) => {
             print_warnings(&report.slides);
             print!("{}", cli_output::completed(&out, &report.slides));
