@@ -20,6 +20,49 @@ the manifest is written only after successful completion.
 
 Output width must be 64–4096 pixels. See `pptx2img --help` for all arguments.
 
+## PDF output
+
+```sh
+pptx2img slides.pptx --format pdf --out slides.pdf
+pptx2img slides.pptx --format pdf --font-file /path/to/font.ttf
+```
+
+PNG remains the default. PDF mode writes one file, with one page per rendered
+slide, in presentation order. Without `--out`, `slides.pptx` becomes `slides.pdf`
+beside the input. Pages retain the original physical slide dimensions; `--width`
+is ignored for PDF output (the CLI still validates its numeric range).
+`--include-hidden`, font selection, and `--strict` retain their existing meanings.
+
+The output is published only after it is complete. Existing files and symlinks
+are never replaced, even if another process creates the destination during
+conversion. Publication requires a filesystem supporting same-directory hard
+links (including typical NTFS, APFS, and ext4 filesystems); otherwise it fails
+explicitly. Ordinary errors clean up the temporary file. A killed process may
+leave a `.pptx2img-<pid>-<counter>.tmp` file, but no partial final PDF.
+
+Success YAML includes `output.file`, `output.pages`, and `report`, a JSON flow
+mapping valid in YAML 1.2. `report` contains `fonts`, per-slide `warnings` and
+`diagnostics`, physical page dimensions, and skipped hidden slide numbers.
+`report.slides[].slide` identifies the original deck slide and `.page` the PDF
+page. Save stdout if you need these diagnostics; no sidecar manifest is written.
+PDF-specific failures identify the slide and relevant unsupported feature/font.
+
+The library exposes `convert_pdf(input, out, &ConvertOptions)`, returning
+`PdfConversionReport`. It ignores `ConvertOptions.width`, has no stdout/stderr
+side effects, and does not change the existing `convert` API or PNG report.
+
+```rust,no_run
+use pptx2img::{ConvertOptions, convert_pdf};
+let report = convert_pdf("slides.pptx", "slides.pdf", &ConvertOptions::default())?;
+assert_eq!(report.pages, report.slides.len());
+# Ok::<(), anyhow::Error>(())
+```
+
+PDF support is deliberately limited initially; see
+[PDF rendering limits](rendering.md#pdf-output). A successfully displayed PDF
+does not guarantee identical text extraction in every reader or downstream AI
+service. Check representative text, numbers, and tables in the consuming service.
+
 ## Hidden slides
 
 Slides marked hidden in PowerPoint (`p:sld/@show="0"`) are skipped by default, like

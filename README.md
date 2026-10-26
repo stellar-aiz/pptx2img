@@ -1,6 +1,6 @@
 # pptx2img
 
-Convert PPTX slides to PNG with a standalone CLI or Rust library.
+Convert PPTX slides to PNG or searchable PDF with a standalone CLI or Rust library.
 
 **😎 No Office, LibreOffice, browser, Python, or Node runtime required.**
 
@@ -19,16 +19,22 @@ pptx2img --help
 Writes `slides.pptx2img/slide-001.png`, etc., and `manifest.json`.
 Use `--out images` to choose a destination; existing directories are never overwritten.
 
+For one PDF per deck, use `pptx2img slides.pptx --format pdf --out slides.pdf`.
+PDF output preserves text and supported vector shapes using the existing rendering
+dependencies. Its initial [supported subset](docs/rendering.md#pdf-output) is narrower
+than PNG; unsupported PDF features fail explicitly. Existing files are never replaced.
+
 ## Fonts and warnings
 
 - Supply missing fonts with `--font-file /path/to/font.ttf` (repeatable).
 - Font-family substitution requires `--font-fallback`.
 - Individual missing glyphs use available fallback fonts and produce warnings.
   If no font can render a character, conversion fails.
-- `--strict` stops on any warning before writing images.
+- `--strict` stops on any warning before writing output.
 
 Success returns YAML on stdout; failures return YAML on stderr.
-Warnings and rendering diagnostics are retained in the manifest.
+Warnings and rendering diagnostics are retained in the PNG manifest or PDF result
+document on stdout.
 
 [CLI, fonts, and Rust API](docs/usage.md) ·
 [Supported features and limitations](docs/rendering.md) ·

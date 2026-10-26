@@ -1,4 +1,4 @@
-//! Convert PPTX to PNG and manifest.json without an Office runtime dependency.
+//! Convert PPTX to PNG or PDF without an Office runtime dependency.
 //!
 //! ```no_run
 //! use pptx2img::{convert, ConvertOptions};
@@ -6,7 +6,10 @@
 //! println!("Rendered {} slides", report.slides.len());
 //! # Ok::<(), anyhow::Error>(())
 //! ```
+mod pdf;
+mod pdf_output;
 mod pptx;
+pub use pdf_output::{PdfConversionReport, PdfSlideReport, convert_pdf};
 
 use anyhow::{Context, Result, bail};
 pub use pptx::{Diagnostic, DiagnosticCode, FontResolution};
@@ -188,6 +191,66 @@ fn convert_inner(
     if out.exists() {
         bail!("Output already exists: {}", out.display());
     }
+    let (deck, options, height) = prepare(&input, &settings, false)?;
+    let has_warnings = deck.slides.iter().any(|s| !s.warnings.is_empty());
+    // Validate all slides before creating the destination; do not leave a completion manifest on failure.
+    let trees: Vec<_> = deck
+        .slides
+        .iter()
+        .map(|slide| resvg::usvg::Tree::from_str(&slide.svg, &options))
+        .collect::<Result<_, _>>()?;
+    fs::create_dir(&out).context("Cannot create output directory")?;
+    let mut reports = Vec::new();
+    for (slide, tree) in deck.slides.iter().zip(trees) {
+        let name = format!("slide-{:03}.png", slide.number);
+        let mut pixmap = resvg::tiny_skia::Pixmap::new(settings.width, height)
+            .context("Cannot allocate rendering buffer")?;
+        resvg::render(
+            &tree,
+            resvg::tiny_skia::Transform::from_scale(
+                settings.width as f32 / deck.width as f32,
+                height as f32 / deck.height as f32,
+            ),
+            &mut pixmap.as_mut(),
+        );
+        pixmap.save_png(out.join(&name))?;
+        reports.push(SlideReport {
+            slide: slide.number,
+            hidden: slide.hidden,
+            image: name,
+            warnings: slide.warnings.clone(),
+            diagnostics: slide.diagnostics.clone(),
+        });
+    }
+    let manifest = ConversionReport {
+        schema_version: 3,
+        version: env!("CARGO_PKG_VERSION"),
+        status: if has_warnings {
+            "preview_with_warnings"
+        } else {
+            "rendered"
+        },
+        width: settings.width,
+        height,
+        punctuation_compression: settings.punctuation_compression,
+        include_hidden: settings.include_hidden,
+        skipped_hidden_slides: deck.skipped_hidden.clone(),
+        system_fonts: !settings.no_system_fonts,
+        fonts: report_fonts(&deck, &options),
+        slides: reports,
+    };
+    fs::write(
+        out.join("manifest.json"),
+        serde_json::to_vec_pretty(&manifest)?,
+    )?;
+    Ok(manifest)
+}
+
+fn prepare(
+    input: &Path,
+    settings: &ConvertOptions,
+    pdf: bool,
+) -> Result<(pptx::Deck, resvg::usvg::Options<'static>, u32)> {
     let mut options = resvg::usvg::Options::default();
     if !settings.no_system_fonts {
         options.fontdb_mut().load_system_fonts();
@@ -213,7 +276,7 @@ fn convert_inner(
     // Resolve fallback during measurement; do not substitute only at rendering time.
     options.font_resolver.select_fallback = Box::new(|_, _, _| None);
     let deck = pptx::read(
-        &input,
+        input,
         &pptx::RenderOptions {
             fonts: pptx::FontResolver::new(&options.fontdb, &settings.font_mapping),
             punctuation_compression: settings.punctuation_compression,
@@ -221,14 +284,19 @@ fn convert_inner(
         },
         settings.include_hidden,
     )?;
-    let height = (f64::from(settings.width) * deck.height / deck.width).round();
-    if !(1.0..=8192.0).contains(&height) {
-        bail!("Output image height exceeds the limit");
-    }
-    let height = height as u32;
-    if u64::from(settings.width) * u64::from(height) > 16_777_216 {
-        bail!("Output image pixel count exceeds the limit");
-    }
+    let height = if pdf {
+        0
+    } else {
+        let height = (f64::from(settings.width) * deck.height / deck.width).round();
+        if !(1.0..=8192.0).contains(&height) {
+            bail!("Output image height exceeds the limit");
+        }
+        let height = height as u32;
+        if u64::from(settings.width) * u64::from(height) > 16_777_216 {
+            bail!("Output image pixel count exceeds the limit");
+        }
+        height
+    };
     // Always stop for unrenderable glyphs. Successful glyph fallback is a normal warning.
     let blocks = |d: &Diagnostic| {
         d.code == DiagnosticCode::MissingGlyph
@@ -284,69 +352,23 @@ fn convert_inner(
         }
         .into());
     }
-    // Validate all slides before creating the destination; do not leave a completion manifest on failure.
-    let trees: Vec<_> = deck
-        .slides
-        .iter()
-        .map(|slide| resvg::usvg::Tree::from_str(&slide.svg, &options))
-        .collect::<Result<_, _>>()?;
-    fs::create_dir(&out).context("Cannot create output directory")?;
-    let mut reports = Vec::new();
-    for (slide, tree) in deck.slides.iter().zip(trees) {
-        let name = format!("slide-{:03}.png", slide.number);
-        let mut pixmap = resvg::tiny_skia::Pixmap::new(settings.width, height)
-            .context("Cannot allocate rendering buffer")?;
-        resvg::render(
-            &tree,
-            resvg::tiny_skia::Transform::from_scale(
-                settings.width as f32 / deck.width as f32,
-                height as f32 / deck.height as f32,
-            ),
-            &mut pixmap.as_mut(),
-        );
-        pixmap.save_png(out.join(&name))?;
-        reports.push(SlideReport {
-            slide: slide.number,
-            hidden: slide.hidden,
-            image: name,
-            warnings: slide.warnings.clone(),
-            diagnostics: slide.diagnostics.clone(),
-        });
-    }
-    let manifest = ConversionReport {
-        schema_version: 3,
-        version: env!("CARGO_PKG_VERSION"),
-        status: if has_warnings {
-            "preview_with_warnings"
-        } else {
-            "rendered"
-        },
-        width: settings.width,
-        height,
-        punctuation_compression: settings.punctuation_compression,
-        include_hidden: settings.include_hidden,
-        skipped_hidden_slides: deck.skipped_hidden.clone(),
-        system_fonts: !settings.no_system_fonts,
-        fonts: options
-            .fontdb
-            .faces()
-            .filter(|f| {
-                deck.slides.iter().any(|s| {
-                    s.svg
-                        .contains(&format!("font-family=\"pptx2img-face-{}\"", f.id))
-                })
+    Ok((deck, options, height))
+}
+
+fn report_fonts(deck: &pptx::Deck, options: &resvg::usvg::Options<'_>) -> Vec<FontReport> {
+    options
+        .fontdb
+        .faces()
+        .filter(|f| {
+            deck.slides.iter().any(|s| {
+                s.svg
+                    .contains(&format!("font-family=\"pptx2img-face-{}\"", f.id))
             })
-            .map(|f| FontReport {
-                family: f.families.first().map(|f| f.0.clone()).unwrap_or_default(),
-                post_script_name: f.post_script_name.clone(),
-                face_index: f.index,
-            })
-            .collect(),
-        slides: reports,
-    };
-    fs::write(
-        out.join("manifest.json"),
-        serde_json::to_vec_pretty(&manifest)?,
-    )?;
-    Ok(manifest)
+        })
+        .map(|f| FontReport {
+            family: f.families.first().map(|f| f.0.clone()).unwrap_or_default(),
+            post_script_name: f.post_script_name.clone(),
+            face_index: f.index,
+        })
+        .collect()
 }

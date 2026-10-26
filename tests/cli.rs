@@ -401,7 +401,7 @@ fn invalid_arguments_are_yaml_but_help_and_version_remain_available() {
         .output()
         .unwrap();
     let help = String::from_utf8(help.stdout).unwrap();
-    assert!(help.contains("Convert PPTX to PNG without Office"));
+    assert!(help.contains("Convert PPTX to PNG or PDF without Office"));
     assert!(help.contains("application bundles and inaccessible paths"));
     assert!(help.contains("Individual missing glyphs"));
     assert!(!help.chars().any(|c| ('\u{3040}'..='\u{30ff}').contains(&c)));
