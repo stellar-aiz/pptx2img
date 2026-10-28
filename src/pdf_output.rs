@@ -40,7 +40,7 @@ pub struct PdfConversionReport {
 /// Convert to one PDF with real Type 3 text, without an external runtime.
 /// `settings.width` is ignored. Unsupported PDF features fail before publication.
 /// Existing destinations (including symlinks) are never replaced. The returned
-/// report contains diagnostics; no sidecar is written. See rendering.md for limits.
+/// report contains diagnostics; no sidecar is written. See docs/rendering.md for limits.
 pub fn convert_pdf(
     input: impl AsRef<Path>,
     out: impl AsRef<Path>,

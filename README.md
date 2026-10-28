@@ -36,13 +36,8 @@ than PNG; unsupported PDF features fail explicitly. Existing files are never rep
 rhodopsin book.xlsx --format pdf
 ```
 
-The spreadsheet renderer lives in the `rhodopsin-xlsx` crate under `crates/xlsx`,
-imported from the former xlsx2pdf project. Its conversion path is not connected end
-to end yet: unsupported content is reported with its own reason code, and a workbook
-that passes validation stops with `UNSUPPORTED_FEATURE` / `rendering_not_implemented`.
-XLSX input always stops on
-unsupported content, as with `--strict`.
-See [XLSX input](docs/usage.md#xlsx-input) and [docs/xlsx](docs/xlsx/).
+The spreadsheet renderer (`crates/xlsx`) is not connected end to end yet, so every workbook currently stops with a diagnostic instead of a PDF.
+See [XLSX input](docs/usage.md#xlsx-input) and [docs/xlsx.md](docs/xlsx.md).
 
 ## Fonts and warnings
 
@@ -59,4 +54,5 @@ document on stdout.
 [CLI, fonts, and Rust API](docs/usage.md) ·
 [Supported features and limitations](docs/rendering.md) ·
 [Development and provenance](docs/development.md) ·
-[Rendering comparison notes](docs/rendering-notes.md)
+[Design charter](docs/constitution.md) ·
+[Decision records](docs/history/)

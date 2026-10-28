@@ -1,59 +1,41 @@
+---
+kind: guide
+---
+
 # Development and provenance
 
 ## Architecture
 
+The workspace has two crates. The root package `rhodopsin` converts PPTX; `crates/xlsx` holds `rhodopsin-xlsx`, the spreadsheet library ([XLSX](xlsx.md)).
+
 ```text
 PPTX (ZIP/XML)
-  -> OOXML parsing, slide order, and transforms (src/pptx.rs)
-  -> internal SVG
-  -> resvg / usvg / tiny-skia
-  -> PNG + manifest (src/lib.rs)
-  ^ CLI argument parsing and messages (src/main.rs)
+  -> OOXML parsing, slide order, transforms, text layout   src/pptx.rs, src/pptx/
+  -> internal SVG scene                                    resvg / usvg (via resvg) / skrifa
+  -> PNG + manifest.json                                   src/lib.rs
+  -> or PDF (Type 3 text, same scene)                      src/pdf.rs, src/pdf_output.rs
+CLI: argument parsing src/main.rs; YAML result documents src/cli_output.rs; .xlsx routing src/cli_xlsx.rs
 ```
 
-[ibis-office](https://github.com/ibisjp/ibis-office) inspired the idea of an
-Office-independent renderer. Its public README and crate entry points were
-consulted, but its code, tests, and assets were not copied, ported, or translated
-into this project. OOXML interpretation and layout were implemented independently
-using specifications, public APIs, independently generated fixtures, and rendering
-comparisons with LibreOffice.
+The rendering and font dependencies are `resvg` (which brings usvg and tiny-skia) and `skrifa` on the PPTX side, and pdf-writer, subsetter, rustybuzz (which brings ttf-parser), and image in the xlsx crate; `Cargo.toml` lists the rest. Independent implementation does not mean avoiding libraries; their licences and attribution apply. The project's public licence has not yet been selected (the root `Cargo.toml` has no `license` field; the xlsx crate declares MIT); choose one before release.
 
-resvg, usvg, tiny-skia, and skrifa are third-party rendering and font dependencies.
-Independent implementation does not mean avoiding third-party libraries. Their
-licenses and attribution requirements apply. The project's public license has not
-yet been selected; choose one before release.
-
-Follow [AGENTS.md](../AGENTS.md) for language and implementation policies.
-Keep private inputs and experimental output in ignored `playground/`.
+[ibis-office](https://github.com/ibisjp/ibis-office) inspired the idea of an Office-independent renderer; its public README and crate entry points were consulted, and its code, tests, and assets were not copied, ported, or translated. The rules for this are in [AGENTS.md](../AGENTS.md). Keep private inputs and experimental output in the ignored `playground/`.
 
 ## Tests
 
 ```sh
-cargo test --locked
-cargo clippy --locked --all-targets -- -D warnings
 cargo fmt --check
+cargo clippy --workspace --locked --all-targets -- -D warnings
+cargo test --workspace --locked
 ```
 
-Tests use ZIP/XML inputs, PNG pixels, and generated fonts to check slide order,
-images, output protection, malformed archives, strict-mode behavior, inheritance,
-font selection, layout, and diagnostics. `examples/basic.pptx` is synthetic.
-Generated rectangle fonts are structural test fixtures, not evidence of Japanese
-glyph fidelity. No Office or Python runtime is needed for ordinary Rust tests.
+Without `--workspace`, `cargo test` and `cargo clippy` cover the root package only and skip the xlsx crate. Tests use ZIP/XML inputs, PNG pixels, and generated fonts to check slide order, images, output protection, malformed archives, strict mode, inheritance, font selection, layout, and diagnostics. `examples/basic.pptx` and the other `examples/*.pptx` are synthetic. Generated rectangle fonts (`tests/fixtures/metrics.ttf`, `crates/xlsx/tests/support/`) are structural fixtures, not evidence of glyph fidelity. No Office or Python runtime is needed for ordinary Rust tests.
 
-CI runs Rust checks and Python comparator tests on Windows, Linux, and macOS,
-once per change: on pull requests and on pushes to `main`, skipping Markdown-only
-changes. A new push to a pull-request branch cancels the superseded run; runs on
-`main` are never cancelled. Cargo and pip dependencies are cached between runs.
-Scheduled/manual visual CI uses LibreOffice 26.2.5.2 with a verified download
-SHA-256 and checks Hiragino Sans W3/W6 hashes before comparison. Host OS images are
-not fully pinned; environment information is retained in reports. Do not compensate
-for environment differences by relaxing thresholds.
+CI (`.github/workflows/ci.yml`) runs on ubuntu-24.04, macos-15, and windows-2025 with a pinned Rust 1.97.0 toolchain: the three commands above, a release build with `cargo test --release --locked --test pdf`, and the Python unit tests in `tests/visual` and `crates/xlsx/tools`. It runs once per change: on pull requests and on pushes to `main`, skipping Markdown-only changes; a new push to a pull-request branch cancels the superseded run, and runs on `main` are never cancelled. Cargo and pip dependencies are cached. The scheduled/manual visual workflow (`.github/workflows/visual.yml`, Sundays and `workflow_dispatch`) uses LibreOffice 26.2.5.2 with a verified download SHA-256 and checks the Hiragino Sans W3/W6 hashes before comparing; host OS images are labels, not pins, so environment information is retained in reports. Do not compensate for environment differences by relaxing thresholds.
 
 ## Visual comparisons
 
-LibreOffice is a development reference only, never a CLI runtime dependency.
-Comparison tests are ignored by default and fail if explicitly requested without
-their dependencies.
+LibreOffice is a development reference only, never a CLI runtime dependency. Comparison tests are `#[ignore]` by default.
 
 ```sh
 python3 -m venv .venv-visual
@@ -64,13 +46,7 @@ RHODOPSIN_TEST_PYTHON="$PWD/.venv-visual/bin/python" \
 .venv-visual/bin/python -m unittest discover -s tests/visual -p 'test_*.py'
 ```
 
-On Windows, use `.venv-visual/Scripts/python.exe` and your shell's environment
-variable syntax. Recorded LibreOffice comparisons were performed on macOS;
-Windows/Linux visual equivalence has not been established.
-
-Each comparison uses a new temporary LibreOffice profile to produce PDF, then
-PDFium rasterizes PNG. On macOS, `SAL_USE_VCLPLUGIN=osx` retains CoreText font
-resolution. No regular user profile or Office automation service is used.
+On Windows use `.venv-visual/Scripts/python.exe`. Recorded comparisons were performed on macOS; Windows/Linux visual equivalence has not been established. Each comparison uses a new temporary LibreOffice profile to produce a PDF, which PDFium rasterizes; on macOS `SAL_USE_VCLPLUGIN=osx` keeps CoreText font resolution. No user profile or Office automation is used.
 
 ```sh
 cargo build --release --locked
@@ -79,38 +55,11 @@ cargo build --release --locked
   --out target/visual-tests/basic-001
 ```
 
-Artifacts include input PPTX, commands, stdout/stderr, `actual/`, `reference/`
-(PDF and PNG), `diff/` (red differences on black), and `report.json`. Failures
-retain evidence. Use a new output directory per run.
-
-Default thresholds are normalized RGB MAE <= 0.02 and changed-pixel ratio <= 0.05,
-with a changed pixel defined by any channel differing by more than 16. Default
-width is 1200px. Only a 1px rasterization-rounding discrepancy is corrected;
-page count and aspect ratio mismatches fail. Exit codes: 0 within thresholds,
-1 exceeded, 2 execution error. Threshold overrides are recorded in the report;
-never relax them to hide a mismatch.
-
-Reports record LibreOffice, OS, PDFium/Pillow versions and input, executable,
-and font hashes. Recording an environment does not pin it: reproduce with the
-same binaries, fonts, settings, and dependencies. Whole-page metrics can miss
-small omissions, so inspect local regions and diagnostics as described in the
-[comparator guide](../tests/visual/README.md).
-
-LibreOffice can differ from PowerPoint too. Matching the generating tool's own
-preview or passing comparison thresholds is not proof of display compatibility.
-Same-font PowerPoint reference regression tests remain future work.
+Artifacts: input PPTX, commands, stdout/stderr, `actual/`, `reference/` (PDF and PNG), `diff/` (red differences on black), and `report.json`; failures retain evidence, and each run needs a new output directory. Default thresholds: normalized RGB MAE <= 0.02 and changed-pixel ratio <= 0.05, where a changed pixel differs in any channel by more than 16; default width 1200 px. Only a 1 px rasterization-rounding discrepancy is corrected; page-count and aspect-ratio mismatches fail. Exit codes: 0 within thresholds, 1 exceeded, 2 execution error. Threshold overrides are recorded in the report and never used to hide a mismatch. Regions, font pinning, the per-OS CI legs, and every fixture generator are described in the [visual comparison guide](visual-comparison.md). LibreOffice can differ from PowerPoint too; passing thresholds is not proof of display compatibility, and same-font PowerPoint reference comparisons remain future work.
 
 ## Spreadsheet crate
 
-`crates/xlsx` holds `rhodopsin-xlsx`, the XLSX-to-PDF library and CLI imported from
-the former xlsx2pdf repository as a snapshot of commit fa55270 (2026-10-22), without
-history. It has no binary of its own: the root CLI routes `.xlsx` input to it through
-`src/cli_xlsx.rs` (`rhodopsin book.xlsx --format pdf`) and renders its diagnostics as
-the usual YAML result documents. Its design notes live in [docs/xlsx](xlsx/) and are still
-written in Japanese. Paths mentioned there (`src/`, `tests/`, `tools/`, `examples/`)
-are relative to `crates/xlsx`, and `cargo run --example` needs `-p rhodopsin-xlsx`.
-
-Run its checks from the repository root:
+`crates/xlsx` was imported from the former xlsx2pdf repository as a snapshot without history ([record](history/20261022_xlsx-import.md)). It has no binary; the root CLI routes `.xlsx` input to it, and its state, design rules, and open items are in [xlsx.md](xlsx.md). Run its checks from the repository root:
 
 ```sh
 cargo test --locked -p rhodopsin-xlsx
@@ -118,11 +67,7 @@ cargo test --locked --test xlsx_cli
 python3 -m unittest discover -s crates/xlsx/tools -p 'test_*.py'
 ```
 
-XLSX input currently always behaves as `--strict`, because the renderer only has a
-stop-on-unsupported path. Planned convergence, in order: approximate rendering with
-warnings for individual unsupported elements, shared font discovery and loading, then
-the PDF writer (the PPTX PDF backend is expected to move to the CID-font subset
-embedding used by `rhodopsin-xlsx`).
+`cargo run --example` for its probes and comparators needs `-p rhodopsin-xlsx`.
 
 ## Implementation references
 
@@ -131,5 +76,4 @@ embedding used by `rhodopsin-xlsx`).
 - [usvg 0.48.1 FontResolver](https://docs.rs/usvg/0.48.1/usvg/struct.FontResolver.html)
 - [GitHub-hosted runners](https://docs.github.com/en/actions/reference/runners/github-hosted-runners)
 
-Historical results and remaining differences are preserved in
-[rendering notes](rendering-notes.md) and the feature-specific documents.
+Decisions and their reasons, and the measurements that motivated them, are in [docs/history](history/).

@@ -2,7 +2,7 @@
 //!
 //! The spreadsheet renderer currently behaves as if `--strict` were always set:
 //! unsupported content stops the conversion instead of being approximated with a
-//! warning. Per-element approximate rendering is planned; see docs/usage.md.
+//! warning. Per-element approximate rendering is planned; see docs/xlsx.md.
 use crate::cli_output::quoted;
 use rhodopsin_xlsx::{
     ConversionOptions,
@@ -89,7 +89,7 @@ fn failed(failure: &Failure) -> String {
         ),
         Category::UnsupportedFeature => (
             "UNSUPPORTED_FEATURE",
-            "The workbook uses a feature the XLSX renderer does not support. XLSX input always stops on unsupported content; see docs/xlsx/readiness.md.",
+            "The workbook uses a feature the XLSX renderer does not support. XLSX input always stops on unsupported content; see docs/xlsx.md.",
         ),
         Category::MissingFont => (
             "FONT_NOT_FOUND",

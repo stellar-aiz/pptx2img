@@ -1,340 +1,109 @@
+---
+kind: guide
+---
+
 # Rendering support and limitations
 
-This is an early, approximate renderer, not a complete PowerPoint implementation.
-Unsupported content is reported where detected; detection itself is incomplete.
-Strict mode gates known warnings, not all incompatibilities.
+This is an early, approximate renderer, not a complete PowerPoint implementation. Unsupported content is reported where detected; detection itself is incomplete. Strict mode gates known warnings, not all incompatibilities. Measurements against LibreOffice that motivated individual rules are kept in git history and in [docs/history](history/); this page states the rules as they stand.
 
 ## PDF output
 
-`--format pdf` uses the existing usvg scene, selected font faces, and glyph
-positions. No PDF library, new direct/transitive dependency, or external runtime
-is added. The backend writes PDF 1.4 with Type 3 outline fonts, ToUnicode maps,
-and ActualText for logical text. This is real PDF text, not a full-page bitmap
-or an embedded OpenType subset. Font hinting is not preserved. Extraction order,
-whitespace, and punctuation can still differ across readers.
+`--format pdf` uses the same usvg scene, font faces, and glyph positions as PNG output (`src/pdf.rs`, `src/pdf_output.rs`). No PDF library is used. The backend writes PDF 1.4 with Type 3 outline fonts, ToUnicode maps, and ActualText, so the text is real PDF text rather than a bitmap or an embedded OpenType subset. Font hinting is not preserved, and extraction order, whitespace, and punctuation can differ across readers.
 
-The initial PDF subset supports opaque solid fills and strokes, curves, ordinary
-line caps/joins/dashes, transforms, single-path clipping, static outline text,
-and opaque PNG/JPEG images. Tables are represented by their rendered paths and
-text. JPEGs are decoded through the existing decoder into RGB image objects.
+Supported: opaque solid fills and strokes, curves, ordinary caps/joins/dashes, transforms, single-path clipping, static outline text, and opaque PNG/JPEG images. Tables are their rendered paths and text.
 
-The following stop conversion with a slide-level error, before any final PDF is
-published: gradients/patterns, masks/filters, group blending/isolation/opacity,
-translucent fills/strokes/text/images, nested/multiple clipping paths, miter-clip
-joins, text strokes/decorations, variable/color/bitmap fonts, non-outline glyphs,
-unhandled glyph clusters, and embedded SVG/GIF/WebP image nodes. PNG rendering
-support remains broader. There is no silent PDF raster fallback or omission.
+The following stop conversion with a slide-level error before any PDF is published: gradients and patterns, masks and filters, group blending/isolation/opacity, translucent fills/strokes/text/images, nested or multiple clipping paths, miter-clip joins, text strokes and decorations, variable/color/bitmap fonts, non-outline glyphs, unhandled glyph clusters, and embedded SVG/GIF/WebP image nodes. There is no silent raster fallback or omission. Fonts whose OS/2 flags forbid embedding or subsetting, or that are bitmap-only, are rejected, as are fonts without embedding metadata. These checks do not replace the user's responsibility to hold a licence for the supplied fonts.
 
-Fonts with restricted-license embedding, no-subsetting, or bitmap-only OS/2
-flags are rejected; missing embedding metadata also fails. Supply an appropriate
-alternative using the existing font options. These checks do not replace the
-user's responsibility to have permission to use the supplied fonts.
+Limits: 200-inch page dimensions, 16,777,216 decoded pixels per image, 100,000 PDF objects, and 128 MiB of accumulated content. Streams are uncompressed and a font resource is cached per face/glyph/Unicode combination, so large decks can reach the limit. Slides are converted sequentially, but PDF resources and final bytes are held in memory. Failures name the affected slide and tree node or feature.
 
-Limits: 200-inch page dimensions, 16,777,216 decoded pixels per image, 100,000
-PDF objects, and 128 MiB of accumulated content. Streams are currently
-uncompressed; a cached font resource is used per face/glyph/Unicode combination.
-Large decks can therefore reach the limit. Each slide is converted sequentially,
-but PDF resources and final bytes are held in memory. Failures identify the
-affected slide and tree node/feature; complete PPTX-to-PDF object provenance is
-not implemented.
-
-`tests/visual/pdf_output.py` generates a representative Japanese/text/table/
-PNG/JPEG deck and compares PDFium rasterization with production PNG output using
-the unchanged global and regional thresholds. It records multiple extractors'
-results but gates expected text on PDFium. This does not validate PowerPoint
-compatibility or gatecheck-ai's actual ingestion behavior.
+`tests/visual/pdf_output.py` generates a Japanese text/table/PNG/JPEG deck and compares PDFium rasterization with the PNG output under the unchanged thresholds. It does not validate PowerPoint compatibility or any particular consumer's text extraction.
 
 ## Supported subset
 
 - Transitional OOXML PPTX, using presentation-defined slide order.
-- Explicit positions, sizes, rotation, and flips for basic shapes and selected
-  [presets and connectors](preset-shapes.md), including chevrons, triangles,
-  arrows, pie, star5, cloud, callouts, brackets and braces, flowchart shapes, and
-  bent/curved connectors
-  evaluated from DrawingML shape guides, and [freeform shapes](#freeform-shapes)
-  (`a:custGeom`).
-- Solid backgrounds, fills, and lines using RGB, system `lastClr`, and theme
-  colors; selected [color transforms and theme fills](colors.md), including
-  translucent (`alpha`) fills, lines, and text, and `tint`/`shade`/`satMod`;
-  linear and radial [gradient fills](colors.md#gradient-fills) on shapes and
-  backgrounds; theme background references (`bgRef`), approximate pattern fills,
-  stretched picture fills, and group fills
-  ([details](colors.md#theme-backgrounds-pattern-picture-and-group-fills)).
-- Slide -> layout -> master -> theme relationships, color mappings, and major/
-  minor Latin and Japanese theme fonts, including the Jpan supplemental font.
+- Explicit positions, sizes, rotation, and flips for basic shapes and the [presets and connectors](preset-shapes.md) evaluated from DrawingML shape guides, and [freeform shapes](#freeform-shapes) (`a:custGeom`).
+- Solid backgrounds, fills, and lines using RGB, system `lastClr`, and theme colors; the [color transforms and theme fills](colors.md) listed there, including translucent (`alpha`) fills, lines, and text; linear and radial [gradient fills](colors.md#gradient-fills); theme background references, approximate pattern fills, stretched and tiled picture fills, and group fills ([details](colors.md#theme-backgrounds-pattern-picture-and-group-fills)).
+- Slide -> layout -> master -> theme relationships, color mappings, and major/minor Latin and Japanese theme fonts, including the Jpan supplemental font.
 - Explicit font, size, color, bold/italic, and left/center/right paragraph alignment.
 - Rotated [vertical text](#vertical-text) (`vert`, `vert270`).
-- Nominal font-advance wrapping, basic Japanese prohibited breaks, explicit line
-  breaks and empty lines, paragraph spacing, point/percentage line spacing, and
-  top/center/bottom vertical anchoring with overflow warnings.
-- `hangingPunct` inherited from paragraph, list, master, and presentation defaults;
-  one trailing punctuation character (`、。，．`) may hang outside the box.
-- Explicit character spacing `spc`, including negative values, positive values,
-  inherited defaults, and explicit zero; optional automatic punctuation compression.
+- Nominal font-advance wrapping, basic Japanese prohibited breaks, explicit line breaks and empty lines, paragraph spacing, point/percentage line spacing, and top/center/bottom vertical anchoring with overflow warnings.
+- `hangingPunct` inherited from paragraph, list, master, and presentation defaults; one trailing punctuation character (`、。，．`) may hang outside the box.
+- Explicit character spacing `spc` (negative, positive, inherited, explicit zero) and optional automatic punctuation compression (`--punctuation-compression`, experimental; see [text measurement](history/20261015_text-measurement.md)).
 - Property-by-property inheritance from runs, paragraph defaults, and list levels.
-- Embedded PNG/JPEG placement and `srcRect` cropping, and EMF and placeable WMF
-  pictures translated to SVG ([subset and limits](#emf-and-wmf-pictures)).
+- Embedded PNG/JPEG placement and `srcRect` cropping, and EMF and placeable WMF pictures translated to SVG ([subset and limits](#emf-and-wmf-pictures)).
 - Basic placeholder inheritance and shared master/layout shapes and solid backgrounds.
-- Nested group transforms, explicit table cell formatting, rectangular merged
-  cells, selected [table styles](table-styles.md), [outer shadows](shadows.md), and
-  [static OLE previews](ole-preview.md).
+- Nested group transforms, explicit table cell formatting, rectangular merged cells, [table styles](table-styles.md), [outer shadows](shadows.md), and [static OLE previews](ole-preview.md).
 
-Connectors use their saved geometry and transforms, even with connection-site
-references. Live rerouting is not evaluated; one `approximation` note per slide
-retains the first affected connector target. A paired PowerPoint save/move check
-supports this policy for `bentConnector2`; it does not verify all presets or stale
-saved routes. See [the observation and known reference differences](preset-shapes.md#saved-bent-routes-and-connection-sites).
+Connectors use their saved geometry and transforms even when `stCxn`/`endCxn` references are present. Live rerouting is not evaluated; one `approximation` note per slide retains the first affected connector target. See [saved bent routes](preset-shapes.md#saved-bent-routes-and-connection-sites) for the policy and its evidence.
 
 ## Inheritance
 
-Placeholders match by `idx` from slide to layout and by type from layout to master.
-Template sample text is not rendered; inherited properties supplement slide text.
-Explicit slide properties win. `showMasterSp="0"` hides shared ancestor shapes.
-This covers transforms, solid fills, and basic text styles, not every property.
+Placeholders match by `idx` from slide to layout and by type from layout to master. Template sample text is not rendered; inherited properties supplement slide text, and explicit slide properties win. `showMasterSp="0"` hides shared ancestor shapes. This covers transforms, solid fills, and basic text styles, not every property.
 
-Ordinary text boxes (`txBox=1`) use `presentation/defaultTextStyle`. Placeholders
-inherit layout/master styles, while text inside shapes uses `otherStyle`.
-Run, paragraph, and list values override defaults. Empty paragraphs use the size
-and font metrics in `endParaRPr`.
-
-The independently generated `examples/text-inheritance.pptx` compares explicit
-and inherited 18pt Arial. Both resolve to 18pt in LibreOffice, but vertical position
-and line-spacing differences exceed existing image thresholds. Overflow is
-reported rather than silently discarded.
-[Specification entry point](https://learn.microsoft.com/en-us/office/open-xml/presentation/working-with-presentations).
+Ordinary text boxes (`txBox=1`) use `presentation/defaultTextStyle`; placeholders inherit layout/master styles; text inside shapes uses `otherStyle`. Run, paragraph, and list values override defaults. Empty paragraphs use the size and font metrics in `endParaRPr`. Fixture: `examples/text-inheritance.pptx`.
 
 ## Saved autofit
 
-`normAutofit/fontScale` (default 100%) applies to measurement, wrapping, and drawing
-of all runs. `lnSpcReduction` (default 0%) subtracts from percentage line spacing:
-120%-20%=100%. Fixed-point line spacing is unchanged. Child `noAutofit` cancels
-inherited autofit. The renderer does not search for a new shrink ratio.
+`normAutofit/fontScale` (default 100%) applies to measurement, wrapping, and drawing of all runs. `lnSpcReduction` (default 0%) subtracts from percentage line spacing (120% - 20% = 100%); fixed-point line spacing is unchanged. Child `noAutofit` cancels inherited autofit. The renderer never searches for a new shrink ratio.
 
-`spAutoFit` expands height for fixed-width horizontal text, preserving anchoring
-and margins. Table-cell/vertical autofit is unsupported and warned about. Shape
-text areas are remeasured at their final size, with diagnostics for expansion limits.
-
-When the body also has `wrap="none"`, the shape width is set to the widest line plus
-the left and right insets (and paragraph margins), so the outline, fill, and effects
-follow the text; a saved width that is too wide shrinks as well. The edge on the
-first paragraph's alignment side stays fixed: the left edge for left-aligned (and
-justified) text, the centre for `algn="ctr"`, the right edge for `algn="r"`. Bodies
-without visible text keep their saved width. The edge is taken along the text's own
-direction, so rotation and flips that turn the text (for example `rot="10800000"` or
-`flipV`) keep the edge that is on the alignment side as the text reads.
-
-Fixture: `examples/text-autofit.pptx`; generator:
-`tests/visual/make_text_autofit.py`. LibreOffice 26.2.5.2 recalculates this fixture's
-saved shrink ratios and does not expand its saved boxes, so pixel differences
-remain. Thresholds have not been relaxed.
-
-Page 5 holds left, centred, and right-aligned `wrap="none"` + `spAutoFit` labels
-whose saved widths are too narrow (top row) and too wide (bottom row). Measured at
-`--width 1600` on macOS, LibreOffice 26.2.5.2 keeps every saved width and wraps the
-narrow labels inside their boxes despite `wrap="none"`, so this page passed before
-(MAE 0.0159, changed 0.0273) and now exceeds the thresholds (MAE 0.0250, changed
-0.1057). The difference is the width rule itself, not a measurement error; the
-alignment-side anchoring follows the Office interpretation and is not confirmed by
-LibreOffice. PowerPoint was not compared directly.
+`spAutoFit` expands height for fixed-width horizontal text, preserving anchoring and margins. Table-cell and vertical autofit are unsupported and warned about. When the body also has `wrap="none"`, the shape width becomes the widest line plus insets and paragraph margins, so outline, fill, and effects follow the text; an oversized saved width shrinks too. The edge on the first paragraph's alignment side stays fixed (left for left/justified, centre for `ctr`, right for `r`), measured along the text's own direction so rotation and flips keep the edge on the alignment side as the text reads. Bodies without visible text keep their saved width. This follows the Office interpretation of `spAutoFit`; LibreOffice keeps saved widths and wraps instead, so the fixture page for this rule is a known difference. Fixture: `examples/text-autofit.pptx` (`tests/visual/make_text_autofit.py`).
 
 - [NormalAutoFit](https://learn.microsoft.com/en-us/dotnet/api/documentformat.openxml.drawing.normalautofit)
 - [Office spAutoFit interpretation](https://learn.microsoft.com/en-us/openspecs/office_standards/ms-oe376/19d31037-28bf-4693-85be-3a37bfe82d51)
 
 ## Vertical text
 
-`a:bodyPr@vert="vert"` and `"vert270"` are rotated horizontal text: the lines are
-laid out in the box with its width and height swapped, then turned 90 degrees
-clockwise (`vert`) or counter-clockwise (`vert270`) about the box. Wrapping,
-alignment, anchoring, and spacing therefore work along the turned lines, so
-`algn="l"` starts at the top for `vert` and at the bottom for `vert270`, and
-`anchor="t"` puts the first line on the right for `vert` and on the left for
-`vert270`. The insets turn with the lines: for `vert` the shape's top, bottom,
-right, and left insets act as the lines' left, right, top, and bottom insets; for
-`vert270` the bottom, top, left, and right insets do. Shape autofit stays
-unsupported for vertical bodies and is reported.
+`a:bodyPr@vert="vert"` and `"vert270"` are rotated horizontal text: lines are laid out with the box's width and height swapped, then turned 90 degrees clockwise (`vert`) or counter-clockwise (`vert270`). Wrapping, alignment, anchoring, spacing, and insets follow the turned lines, so `algn="l"` starts at the top for `vert` and at the bottom for `vert270`. Shape autofit is unsupported for vertical bodies and reported.
 
-`eaVert` (upright East Asian columns), `wordArtVert`, `wordArtVertRtl`, and
-`mongolianVert` are still laid out horizontally with a `Vertical text is
-unsupported` diagnostic.
-
-Fixture: `examples/vertical-text.pptx`; generator `tests/visual/make_vertical_text.py`.
-Measured at `--width 1600` on macOS against LibreOffice 26.2.5.2 with default
-thresholds: page 1 (`vert270` labels with three anchors and a `vert` label) moves
-from MAE 0.0145, changed 0.0237 to MAE 0.0063, changed 0.0149 and passes. Page 2
-(`eaVert` bodies) is unchanged (MAE 0.0603, changed 0.0855) and fails, because
-`eaVert` is not laid out as columns yet.
-
-An `eaVert` column layout (clockwise lines with upright CJK glyphs centred in an
-ideographic em box, advances from `vmtx`, sideways brackets and dashes) reached
-MAE 0.0287, changed 0.0515 on page 2 and was not landed, because it stays above the
-default thresholds. The same text laid out horizontally measures MAE 0.0401,
-changed 0.0636 against LibreOffice, so the remainder is not specific to vertical
-layout. It comes from two differences shared with horizontal Japanese text: the
-line pitch (Windows cell metrics, 1.26 em for Hiragino Sans W4, against about
-1.19 em in LibreOffice) and the face (W4 resolved here, W3 in LibreOffice). With
-the W3 face forced, the attempt measured MAE 0.0217, changed 0.0430. LibreOffice
-also adds space between Japanese and Latin runs, which this renderer does not.
-Thresholds have not been relaxed.
+`eaVert` (upright East Asian columns), `wordArtVert`, `wordArtVertRtl`, and `mongolianVert` are laid out horizontally with a `Vertical text is unsupported` diagnostic. An `eaVert` column layout was attempted and not landed: its residual against LibreOffice came from line pitch and face-weight differences shared with horizontal Japanese text, and the thresholds were not relaxed to admit it. Fixture: `examples/vertical-text.pptx` (`tests/visual/make_vertical_text.py`).
 
 ## Table row heights
 
-`a:tr/@h` is a minimum row height. Each cell's text is laid out first, at its merged
-width and with its cell margins (`marT`/`marB`, default 0.05in), and a row grows to
-the tallest cell it holds: `max(stored h, margins + content)`. Rows that fit keep
-their stored height, including `h="0"` rows, which grow to their text. A row-spanning
-cell adds any remaining shortfall to its last spanned row. Rows are stacked from
-the top of the frame; the graphicFrame height does not stretch or squash them, so a
-grown table can extend below its frame (LibreOffice 26.2.5.2 also ignores the frame
-height). Columns still scale to the frame width. Cells without text keep their stored
-height. Measurement uses the same approximate text layout as drawing, so grown
-heights inherit its line-height differences. A zero-height row is ordinary input and
-emits no diagnostic: it is not given a share of the frame height, and the earlier
-"Table rows with zero height" approximation warning no longer exists.
-
-Fixtures: `examples/table-row-growth.pptx` (generator
-`tests/visual/make_table_row_growth.py`) and `examples/table-zero-row-height.pptx`
-(generator `tests/visual/make_table_zero_row_height.py`). At width 1600, the
-zero-height fixture and the frame-height page pass the default thresholds; the
-wrapped-text page still exceeds them (MAE 0.0237, changed 6.7%) because LibreOffice
-uses taller Arial line spacing and draws default white cell borders from the
-unresolved table style. Thresholds have not been relaxed.
+`a:tr/@h` is a minimum. Each cell's text is laid out at its merged width with its margins (`marT`/`marB`, default 0.05in), and a row grows to `max(stored h, margins + content)`. A row-spanning cell adds any shortfall to its last spanned row. Rows stack from the top of the frame; the frame height does not stretch or squash them, so a grown table can extend below its frame (LibreOffice does the same). Columns still scale to the frame width. A zero-height row is ordinary input: it grows to its text and emits no diagnostic. Fixtures: `examples/table-row-growth.pptx`, `examples/table-zero-row-height.pptx`.
 
 ## Bullets and indentation
 
-`buChar` and `buAutoNum` are placed separately from text. Bullet position is
-`marL+indent`; body and wrapped lines start at `marL`; `marR` defines the right
-margin. Paragraph/list/master settings, bullet font/size/color, and `buNone`
-overrides are supported. Bullet fonts use the same resolution rules as body text.
+`buChar` and `buAutoNum` are placed separately from text at `marL+indent`; body and wrapped lines start at `marL`; `marR` sets the right margin. Paragraph/list/master settings, bullet font/size/color, and `buNone` are supported, and bullet fonts resolve like body text. Automatic numbering supports Arabic, alphabetic, and Roman sequences with period, closing parenthesis, paired parentheses, or no decoration; counters are per level; a direct `startAt` restarts, an inherited one applies only at the first entry. Picture bullets are unsupported; other numbering formats and non-left bullet positions produce `approximation` warnings.
 
-Automatic numbering supports Arabic, alphabetic, and Roman sequences with periods,
-closing parentheses, paired parentheses, or no decoration. Counters are per level.
-A direct paragraph `startAt` restarts numbering; an inherited start applies only
-at the first entry. Picture bullets are unsupported. Other numbering formats and
-non-left-aligned bullet positions produce approximation warnings.
-
-Fixture: `examples/text-bullets.pptx`; generator: `tests/visual/make_text_bullets.py`.
-Numbers, levels, and wrapping were checked against LibreOffice, but vertical
-position and line-spacing differences still exceed existing image thresholds.
-
-A paragraph with no visible text (no runs, or only whitespace runs) draws no bullet
-marker, because Office shows none; the empty line keeps its height and the paragraph
-still advances the automatic-numbering counter, so numbering of later items is
-unchanged. This is normal input and emits no diagnostic. Fixture:
-`examples/empty-bullets.pptx` (generator `tests/visual/make_empty_bullets.py`).
+A paragraph without a text run (`a:r` or `a:fld`) draws no bullet marker, because Office shows none; the empty line keeps its height and still advances the numbering counter. This is normal input and emits no diagnostic (PowerPoint observation recorded in issue #53). Fixtures: `examples/text-bullets.pptx`, `examples/empty-bullets.pptx`.
 
 ## Hidden slides
 
-`p:sld/@show` is read for every slide. Hidden slides (`0` or `false`) are not rendered
-unless `--include-hidden` is passed, and the manifest records them (`hidden`,
-`skipped_hidden_slides`). This matches LibreOffice's PDF export, which also skips them,
-so the comparator pairs pages one to one. See [usage](usage.md#hidden-slides).
+`p:sld/@show` is read for every slide. Hidden slides are not rendered unless `--include-hidden` is passed, and the manifest records them (`hidden`, `skipped_hidden_slides`). LibreOffice's PDF export also skips them, so comparison pages pair one to one. See [usage](usage.md#hidden-slides).
 
 ## Text fields
 
-`a:fld` runs are resolved by `@type` while text is laid out, including text boxes that a
-layout or master draws onto a slide.
+`a:fld` runs are resolved by `@type` during layout, including text boxes that a layout or master draws onto a slide.
 
 | Field type | Drawn text | Diagnostic |
 |---|---|---|
-| `slidenum` | The slide's number as an Arabic numeral: its 1-based position in `p:sldIdLst` plus `p:presentation/@firstSlideNum` minus 1 (default 1). Hidden slides are counted even when they are skipped, so later slides keep their number | none |
-| `datetime*` | The saved text, so output stays deterministic; the conversion date is never substituted | one `approximation` per slide ("Date and time fields ...") |
-| `title`, `footer`, other or missing `@type` | The saved text | one `approximation` per slide and type ("Field type ... is not resolved") |
+| `slidenum` | The slide's 1-based position in `p:sldIdLst` plus `firstSlideNum` minus 1; hidden slides count even when skipped | none |
+| `datetime*` | The saved text, so output is deterministic | one `approximation` per slide |
+| `title`, `footer`, other or missing `@type` | The saved text | one `approximation` per slide and type |
 
-PowerPoint saves the slide-number field in layouts and masters as `‹#›`; before this
-handling that placeholder was drawn on every slide and widened the line it sat on.
-Numbers are never formatted as roman numerals or letters, since `a:fld` carries no
-number-format information.
-
-Generator: `tests/visual/make_fields.py` (`--first-slide-num N` sets `firstSlideNum`).
-Comparison against LibreOffice (`compare.py --width 1600`, default thresholds): the
-whole-page results are within thresholds both before and after the change (MAE about
-0.012, changed pixels about 1.5%), which is why the placeholder was not caught. With
-`--regions` on the footer number and the slide text, the digit is the right one after
-the change, and the footer region of slide 1 passes. The footer regions of slides 2 and 3
-and the slide-text regions still exceed the thresholds because of an existing vertical
-offset of about 4 px at 1600 px width between this renderer's and LibreOffice's text
-baseline, which also affects text without fields; the thresholds are not relaxed.
+Numbers are never formatted as roman numerals or letters, since `a:fld` carries no number format. Generator: `tests/visual/make_fields.py`.
 
 ## Hidden elements
 
-Shapes, pictures, connectors, groups, and non-OLE graphic frames marked hidden
-(`p:cNvPr/@hidden`) are not drawn, on slides, layouts, and masters. A hidden group hides
-all of its children, and a hidden child inside a visible group hides only itself. This
-is silent: hiding is normal in real decks, so no diagnostic is emitted. A hidden OLE
-object is the exception and keeps its `omitted` diagnostic; see
-[OLE previews](ole-preview.md). Generator: `tests/visual/make_hidden.py`.
+Shapes, pictures, connectors, groups, and non-OLE graphic frames with `p:cNvPr/@hidden` are not drawn, on slides, layouts, and masters. A hidden group hides its children; a hidden child inside a visible group hides only itself. This is silent, because hiding is normal in real decks. A hidden OLE object is the exception and keeps its `omitted` diagnostic; see [OLE previews](ole-preview.md).
 
 ## Shape property extensions
 
-An `a:extLst` in shape properties is inspected element by element. The Office 2010
-extensions `a14:hiddenFill`, `a14:hiddenLine`, `a14:hiddenEffects`,
-`a14:hiddenScene3d`, and `a14:hiddenSp3d` only remember the fill, line, effects, or 3-D
-settings a shape had before they were switched off (for example by `a:noFill`), so they
-are ignored by design and emit no diagnostic. Any other extension element is reported
-once per shape as `Unsupported shape property extension: <prefix:name>`.
+`a:extLst` in shape properties is inspected element by element. The Office 2010 extensions `a14:hiddenFill`, `a14:hiddenLine`, `a14:hiddenEffects`, `a14:hiddenScene3d`, and `a14:hiddenSp3d` only remember settings a shape had before they were switched off, so they are ignored by design without a diagnostic. Any other extension is reported once per shape as `Unsupported shape property extension: <prefix:name>`.
 
 ## Flipped shapes and groups
 
-`flipH`/`flipV` on a shape or on any ancestor group mirror the geometry (outline,
-fill, preset text rectangle, pictures) but never the text. Each flip along the
-chain toggles a mirror; when the net transform is a mirror, the text is mirrored
-once more around the centre of its final text rectangle. As a result `flipH`
-text reads normally inside the mirrored text rectangle (for example the body of a
-flipped arrow), `flipV` text is turned 180 degrees, and `flipH`+`flipV` (or a
-flipped child inside a group flipped the same way) is a plain 180-degree or
-0-degree rotation. This matches LibreOffice on the fixture below; PowerPoint was
-not compared directly. Table cell text follows the same rule: a table inside a flipped
-group (or with a flipped frame) has its grid mirrored while each cell's text is mirrored
-once more around the centre of the cell, so it stays readable (`flipV` turns it 180
-degrees). LibreOffice does not mirror such a table at all (it keeps the grid upright and
-offsets it), so this case has no matching reference; it is covered by `tests/flips.rs`,
-which compares against the unflipped table.
-
-Fixture: `examples/flipped-text.pptx` with per-cell regions
-`examples/flipped-text.json`; generator: `tests/visual/make_flipped_text.py`.
-At `--width 1600` on macOS the page passes (MAE 0.0089, changed 0.0237). The
-flipH, flipV, and unflipped cells pass locally; the other cells keep a
-small vertical text offset and outline anti-aliasing difference that the unflipped
-cell also shows (MAE 0.0198-0.0254, changed 0.047-0.059), so they still exceed
-the unchanged local thresholds. Slide 2 holds the table cells; its group-flipped tables
-exceed the thresholds against LibreOffice for the reason above (the unflipped table cell
-stays close, MAE 0.0408, changed 0.0655).
+`flipH`/`flipV` on a shape or any ancestor group mirror the geometry (outline, fill, text rectangle, pictures) but never the text. When the net transform is a mirror, the text is mirrored once more around the centre of its final text rectangle, so `flipH` text reads normally, `flipV` text is turned 180 degrees, and `flipH`+`flipV` is a plain rotation. Table cells follow the same rule, so a table inside a flipped group stays readable. LibreOffice does not mirror such a table at all, so that case has no matching reference and is covered by `tests/flips.rs` instead. Fixture: `examples/flipped-text.pptx` with regions `examples/flipped-text.json`.
 
 ## Freeform shapes
 
-Custom geometry (`a:custGeom`) is drawn with the same guide evaluator as the presets.
-Guides in `a:avLst` and `a:gdLst` are evaluated in document order in the shape
-coordinate space (EMU), so formulas may use the built-in guides (`w`, `h`, `ss`,
-`hc`, `vc`, `wd2`, `cd4`, ...) and earlier guides. Each `a:path` in `a:pathLst` is
-scaled from its own `w`/`h` coordinate space to the shape extent; when `w` or `h` is
-omitted or zero, the path uses shape coordinates (EMU) on that axis. Supported path
-commands are `moveTo`, `lnTo`, `cubicBezTo`, `quadBezTo`, `arcTo` (ellipse arc
-from the current point with `wR`/`hR`/`stAng`/`swAng`), and `close`; a path that does
-not start with `moveTo` starts at the origin. `fill="none"` leaves a path unfilled
-and `stroke="0"` leaves it unstroked; the shape fill and outline apply to the other
-paths. An open path with fill is filled as if closed. Line-end arrowheads are kept
-on open paths only. `extrusionOk`, `a:ahLst`, and `a:cxnLst` do not affect the
-image. The text area is `a:rect` (evaluated through the same guides) or the whole
-shape when it is absent.
+Custom geometry (`a:custGeom`) uses the same guide evaluator as the presets. Guides in `a:avLst` and `a:gdLst` are evaluated in document order in shape coordinates (EMU) and may use built-in guides and earlier guides. Each `a:path` is scaled from its own `w`/`h` space to the shape extent; a missing or zero `w`/`h` means shape coordinates on that axis. Supported commands: `moveTo`, `lnTo`, `cubicBezTo`, `quadBezTo`, `arcTo`, `close`; a path not starting with `moveTo` starts at the origin. `fill="none"` and `stroke="0"` are honoured per path; an open filled path is filled as if closed; line-end arrowheads are kept on open paths only. `extrusionOk`, `a:ahLst`, and `a:cxnLst` do not affect the image. The text area is `a:rect` or the whole shape when absent.
 
-Approximations are reported: the `lighten`, `lightenLess`, `darken`, and
-`darkenLess` path fill modes are drawn as a normal fill (`approximation`), and an
-unknown path command is skipped (`unsupported`). If a guide cannot be resolved (an
-unknown name or operator) and a path or the text area becomes non-finite, the
-outline is omitted with an `unsupported` diagnostic and the text uses the whole shape.
-
-Fixture: `examples/custom-geometry.pptx` with per-cell regions
-`examples/custom-geometry.json`; generator: `tests/visual/make_custom_geometry.py`.
-It covers a python-pptx freeform builder polygon, a cubic Bezier edge, `arcTo`
-corners, an open `fill="none"` quadratic curve, a `gdLst` bracket whose path has no
-`w`/`h`, and a `stroke="0"` fill path under a `fill="none"` outline path. At
-`--width 1600` on macOS the page passes against LibreOffice (MAE 0.0011, changed
-0.0074; every cell MAE <= 0.0023, changed <= 0.017). Before this support the same
-page measured MAE 0.1644, changed 0.4060. PowerPoint was not compared directly.
+Reported approximations: `lighten`/`lightenLess`/`darken`/`darkenLess` fill modes draw as a normal fill (`approximation`); an unknown command is skipped (`unsupported`); an unresolvable guide that makes a path or text area non-finite omits the outline (`unsupported`) and the text uses the whole shape. Fixture: `examples/custom-geometry.pptx` with regions `examples/custom-geometry.json`.
 
 ## Picture effects and fills
 
-Children of a picture's `a:blip` are applied as one SVG filter, in document order:
+Children of a picture's `a:blip` are applied as one SVG filter in document order:
 
 | Element | Rendering | Diagnostic |
 |---|---|---|
@@ -343,324 +112,65 @@ Children of a picture's `a:blip` are applied as one SVG filter, in document orde
 | `a:biLevel` | Black or white by luma against `thresh` | none |
 | `a:lum` | Linear brightness/contrast around mid-grey | `approximation` |
 | `a:duotone` | Luma mapped between the two colors | `approximation` |
-| `a:clrChange` | Pixels exactly equal to `clrFrom` become `clrTo` (with its alpha); no tolerance | `approximation` |
+| `a:clrChange` | Pixels exactly equal to `clrFrom` become `clrTo`; no tolerance | `approximation` |
 | `a14:saturation` (in `a14:imgProps`) | Saturation scaled by `sat` | none |
-| `a14:brightnessContrast` (in `a14:imgProps`) | Same mapping as `a:lum` | `approximation` |
-| `a14:backgroundRemoval`, `a14:sharpenSoften`, other `a14:imgEffect` children | Picture drawn unchanged | `unsupported`, `Unsupported picture effect: <name>` |
-| Other `a:blip` children (for example `a:alphaBiLevel`, `a:hsl`, `a:tint`) | Ignored | `unsupported`, `Unsupported picture effect: <name>` |
+| `a14:brightnessContrast` | Same mapping as `a:lum` | `approximation` |
+| `a14:backgroundRemoval`, `a14:sharpenSoften`, other `a14:imgEffect` | Picture drawn unchanged | `unsupported`, `Unsupported picture effect: <name>` |
+| Other `a:blip` children (`a:alphaBiLevel`, `a:hsl`, `a:tint`, ...) | Ignored | `unsupported`, `Unsupported picture effect: <name>` |
 
-Extensions that do not change pixels produce no diagnostic: `asvg:svgBlip` (handled
-above) and `a14:useLocalDpi`. Background removal stores only marks; the removed area
-is not in the package, so it is not reproduced. Any other extension element is named
-in an `unsupported` diagnostic (`Unsupported picture extension: <name>`). Effects that
-leave pixels unchanged (`alphaModFix` without `amt`, an empty `lum`) add no filter.
+`asvg:svgBlip` and `a14:useLocalDpi` produce no diagnostic; any other extension is named in `Unsupported picture extension: <name>`. Effects that leave pixels unchanged add no filter.
 
-`a:tile` repeats the picture (after `srcRect` cropping) over the picture frame. The
-tile size is the picture's natural size scaled by `sx`/`sy`; the natural size uses the
-PNG `pHYs` or JPEG JFIF density, and 96 dpi when neither is present (EXIF resolution is
-not read). `algn` places the first tile, `tx`/`ty` offset it, and `flip` mirrors every
-other tile along x, y, or both. A tiled SVG picture has no natural size and uses the
-frame as the tile (`approximation`). A tile so small that more than 256 tiles fall
-along one axis of the frame, or a pattern cell (with flips) larger than 16 times the
-frame area, is not tiled: the picture is drawn stretched with an `approximation`
-diagnostic (`Picture tile size is out of range; drawn stretched: <part>`), and image
-densities below 1 dpi are ignored, so a deck cannot inflate the rasterized pattern.
-`a:stretch/a:fillRect` insets (`l`, `t`, `r`,
-`b`) shrink or, when negative, extend the stretched picture inside the frame; the frame
-still clips it, and an inset that leaves no area omits the picture (`Image fill
-rectangle leaves no visible area: <part>`). These apply to `p:pic` pictures (and OLE
-previews). Picture fills of shapes and backgrounds (`a:blipFill` in `p:spPr` or `p:bgPr`)
-go through the same code, so `a:tile` on them repeats the picture over the shape's box
-with the same tile-size rules and bounds, and records no tiling diagnostic.
-
-### Tile density observation (2026-10-20)
-
-`python tests/visual/make_shape_tile.py /tmp/shape-tile.pptx` generates an 11-inch
-right-triangle base filled with a 64x64-pixel PNG without `pHYs`, at 50% X/Y tile
-scale, zero offsets, top-left alignment, and no mirroring. PowerPoint for Mac
-16.105.3 (26020123), macOS 27.0.1 (26A434), showed these settings at 100% normal-view
-zoom. The base spans about 1584 screenshot pixels (144 screenshot pixels/inch,
-Retina); one complete red/blue source tile repeats every 32 screenshot pixels.
-The individual 8-pixel color/white runs are not complete tiles.
-
-| Renderer | Complete tiles over the 11-inch base | Physical tile width |
-|---|---|---|
-| PowerPoint (observed screenshot) | about 49.5 | about 0.2222 inch |
-| rhodopsin (96 dpi fallback) | about 33 | about 0.3333 inch |
-| LibreOffice 26.2.5.2 (supplied reference) | about 43 | about 0.26 inch |
-
-At 50% scale, `64 * 0.5 / 0.2222` corresponds to an effective 144 dpi in this
-PNG/shape fixture. The earlier rough 7/9-column estimates did not count complete
-source tiles and are superseded by these measurements. See the
-[PowerPoint measurement record](https://github.com/stellar-aiz/rhodopsin/issues/88#issuecomment-6286206605).
-
-This is a known rendering difference. The 96 dpi fallback remains unchanged:
-one PNG/shape observation does not establish a universal density for PNG/JPEG,
-picture objects, backgrounds, or other Office versions. Explicit PNG `pHYs` and
-JPEG JFIF density handling is unchanged. Repetition is supported, but matching
-PowerPoint's physical tile size in this fixture remains a known difference.
-
-Fixture: `examples/image-effects.pptx` with per-picture regions
-`examples/image-effects.json`; generator: `tests/visual/make_image_effects.py`. Each
-of its 13 slides shows the original picture on the left and the effect on the right,
-over a checkerboard. At `--width 1600` on macOS against LibreOffice 26.2:
-
-| Slide | Before (main 0f85650): page MAE / changed, effect region | After: page MAE / changed, effect region |
-|---|---|---|
-| 1 alphaModFix | 0.0408 / 0.1672 fail, 0.2014 / 0.8877 | 0.0086 / 0.0262 pass, 0.0147 / 0.0718 fail |
-| 2 grayscl | 0.0326 / 0.1471 fail, 0.1693 / 0.7929 | 0.0093 / 0.0384 pass, 0.0346 / 0.1640 fail |
-| 3 biLevel | 0.0528 / 0.1486 fail, 0.2802 / 0.7929 | 0.0102 / 0.0179 pass, 0.0337 / 0.0364 fail |
-| 4 lum | 0.0286 / 0.1548 fail, 0.1158 / 0.7958 | 0.0143 / 0.0278 pass, 0.0333 / 0.0614 fail |
-| 5 a14 saturation | 0.0065 / 0.0185 pass, 0.0083 / 0.0343 | 0.0350 / 0.1502 fail, 0.1733 / 0.7967 fail |
-| 6 a14 brightnessContrast | 0.0109 / 0.0245 pass, 0.0083 / 0.0343 | 0.0291 / 0.1557 fail, 0.1139 / 0.7934 fail |
-| 7 duotone | 0.0417 / 0.1879 fail, 0.2019 / 0.9995 | 0.0111 / 0.0359 pass, 0.0247 / 0.1203 fail |
-| 8 clrChange | 0.0246 / 0.0464 fail, 0.0756 / 0.1430 | 0.0137 / 0.0292 pass, 0.0121 / 0.0436 pass |
-| 9-11 tile (9a-9c) | pass (picture stretched once, as LibreOffice draws it) | 0.0761-0.0777 / 0.178-0.182 fail, region MAE 0.40-0.42 |
-| 12 fillRect (10) | pass (as LibreOffice) | 0.0609 / 0.1648 fail, 0.3090 / 0.8633 fail |
-| 13 metadata + backgroundRemoval (11) | 0.0160 / 0.0311 pass | unchanged |
-
-LibreOffice 26.2 draws `p:pic` tiles and fill rectangles as one stretched picture and
-ignores `a14:imgProps` corrections, so slides 5, 6, and 9-12 differ from it by design;
-the remaining region failures on slides 1-4 and 7 are edge resampling and the differing
-effect curves, and are kept at the unchanged thresholds. PowerPoint was not compared
-directly.
-
-## EMF and WMF pictures survey
-
-At the time of this survey rhodopsin did not render EMF or WMF: such a picture was
-omitted with `Only PNG/JPEG images are supported: <part>`. This section records the
-step 1 survey of issue #78 (2026-10-20), made before any implementation; step 2 is
-described in [EMF and WMF pictures](#emf-and-wmf-pictures).
-
-Fixtures: `tests/visual/make_metafile_pictures.py OUT_DIR [--pptx]` writes nine
-metafiles with the standard library only, from MS-EMF and MS-WMF, plus a deck with one
-picture per slide. Each file isolates a record group: `emf-shapes` (also with an 88-byte
-and a 108-byte header), `emf-path`, `emf-transform`, `emf-clip`, `emf-bitmap`,
-`emf-text`, and the placeable WMFs `wmf-shapes` and `wmf-clip-bitmap`. All nine pass
-`emfsdk`'s strict validator, which was used only as a conformance check on the fixtures.
-The reference drawing is LibreOffice's rendering of the same files, a comparison
-reference and not PowerPoint ground truth.
-
-### Candidates
-
-Versions and dates are from crates.io and GitHub on 2026-10-20. No other crate for EMF
-or WMF turned up in a search of crates.io (`emf`, `wmf`, `metafile`, `windows metafile`).
-
-| | `emf-core` 0.1.1 (+ `wmf-core` 0.1.2) | `emfsdk` 0.2.0 |
-|---|---|---|
-| Maintenance | First release 2026-08-03, latest 2026-09-05; repository pushed 2026-10-03 (EMF) and 2026-09-20 (WMF); 4 and 3 open issues, 4 and 6 stars; the README says some records are not yet implemented | First release 2026-07-20, no release since; repository pushed 2026-10-07; no open issues, no stars; "pre-1.0, API may change" |
-| Licence | MIT (`emf-core`, `wmf-core`); the crate ships a `LICENSE` file | `MIT OR Apache-2.0`; the published package carries no licence file |
-| Transitive dependencies | `snafu`, `strum`, `embedded-io`, `tracing`, `encoding_rs`, `codepage`, `unicode-*`, `base64`; all permissive | Parsing only: `bitflags`, `encoding_rs`, `thiserror`. With `render`: also `image`, `fontdb`, `ttf-parser`; all permissive |
-| Output | SVG string (`converter::convert_to_svg`); WMF input falls back to `wmf-core` automatically; `Player` trait for other outputs | Typed records for parse/edit/write; the optional `render` feature produces a PNG (`decode_metafile_as_raster`), not vector data |
-| SVG or pixels | SVG, but with `viewBox` only (no `width`/`height`) and bitmaps as `data:image/bmp;base64` | Pixels only; a PNG would bypass the SVG pipeline but would pass through the existing PNG/JPEG size policy |
-
-Attribution fits the project's policy for either licence (a notice for the MIT text and
-copyright is enough); licences are not what separates the candidates.
-
-### Record coverage on the fixtures
-
-`ok` means the drawing matches the expected shapes, `partial` means drawn with a visible
-defect, `no` means the record had no effect, and `error` means the whole file failed.
-
-| Record group (fixture) | `emf-core` / `wmf-core` (SVG) | `emfsdk` `render` (PNG) |
-|---|---|---|
-| Rectangle, ellipse, polygon, polyline, MoveToEx/LineTo, pens, brushes (`emf-shapes`, `wmf-shapes`) | `ok`, except `EMR_ROUNDRECT` is not drawn | `ok`, but only when the header is 108 bytes: with the 88-byte (or 100-byte) header, which MS-EMF allows, the call returns `None` without a message |
-| Curves, `FillPath`, `StrokePath` (`emf-path`) | `ok` (fill and stroke) | `partial`: stroke only, `STROKEANDFILLPATH` is not filled |
-| `SelectClipPath` and shapes inside a path bracket (`emf-path`) | `no`: the clip is ignored and the ellipse inside the bracket is drawn immediately | `no`: same |
-| Map mode, window/viewport, `SetWorldTransform`, `ModifyWorldTransform` (`emf-transform`) | `no`: only the untransformed square is drawn | `ok` |
-| `IntersectClipRect` (`emf-clip`, `wmf-clip-bitmap`) | `no`: the clip is ignored | `ok` |
-| `ExcludeClipRect` (`emf-clip`) | `no` | `no` (LibreOffice does not draw the hole either, so the expectation is unverified) |
-| `StretchDIBits`, `BitBlt`, WMF `StretchDIB` (`emf-bitmap`, `wmf-clip-bitmap`) | `partial`: drawn at the source size, not stretched to the destination | `ok` |
-| Text: `ExtCreateFontIndirectW`, `ExtTextOutW`, WMF `TextOut` (`emf-text`, `wmf-clip-bitmap`) | EMF `error`: a conformant 92-byte `LogFontW` makes the whole file fail to parse (`elw` must be at least 320 bytes); WMF text is drawn | `ok` |
-| WMF placeable header (`wmf-shapes`, `wmf-clip-bitmap`) | `ok` | `ok` |
-
-### Recommendation
-
-Implement the subset independently from MS-EMF and MS-WMF in step 2; do not adopt either
-crate.
-
-- Neither crate covers the subset the issue names. `emf-core` ignores clipping and world
-  transforms and rejects the whole file on a common text record, while step 2 requires
-  text records to be reported as `unsupported` and the rest to render. `emfsdk` is
-  raster-only, does not fill paths, and silently declines two of the three header sizes.
-- The output form matters as much as coverage. `emf-core` SVG carries bitmaps as `data:`
-  URIs, which the SVG picture loader rejects by design (they would bypass the PNG/JPEG
-  size policy), and has no intrinsic size. `emfsdk` PNG fixes the resolution before the
-  slide scale is known. An independent decoder can emit paths and run bitmaps through
-  the existing size policy.
-- Both crates are weeks old, pre-1.0, with one maintainer and almost no issue history,
-  so a defect found later would be ours to fix either way.
-
-`emfsdk`'s strict validator is useful during development as a check that generated
-fixtures are conformant; that would be a development-time tool, not a dependency of the
-CLI. Text records stay `unsupported` in step 1 and step 2 either way, and OLE previews
-stored as WMF/EMF go through the same decoder.
+`a:tile` repeats the cropped picture over the frame. The tile size is the natural size (PNG `pHYs` or JPEG JFIF density, else 96 dpi; EXIF is not read) scaled by `sx`/`sy`; `algn` places the first tile, `tx`/`ty` offset it, and `flip` mirrors alternate tiles. A tiled SVG picture uses the frame as the tile (`approximation`). More than 256 tiles along an axis, or a pattern cell above 16 times the frame area, is not tiled: the picture is drawn stretched with `Picture tile size is out of range; drawn stretched: <part>`, and densities below 1 dpi are ignored, so a deck cannot inflate the rasterized pattern. The 96 dpi fallback is a known difference from PowerPoint, which showed an effective 144 dpi on a `pHYs`-less PNG in one measurement (issue #88); one observation does not establish a universal density, so the fallback is unchanged. `a:stretch/a:fillRect` insets shrink or, when negative, extend the stretched picture inside the frame; an inset that leaves no area omits the picture. Picture fills of shapes and backgrounds go through the same code and record no tiling diagnostic. LibreOffice draws `p:pic` tiles and fill rectangles as one stretched picture and ignores `a14:imgProps`, so those fixture slides differ from it by design. Fixture: `examples/image-effects.pptx` with regions `examples/image-effects.json`; tile generator `tests/visual/make_shape_tile.py`.
 
 ## EMF and WMF pictures
 
-Step 2 of issue #78 implements the subset independently from MS-EMF and MS-WMF, with
-no new dependency. A picture part (or OLE preview) is read as a metafile when it starts
-with `EMR_HEADER` and the `" EMF"` signature at byte 40, or with the placeable WMF key
-`0x9AC6CDD7`. The records are translated to an SVG document that goes through the same
-gate as SVG pictures (node limit, no external references, a render check), and the
-picture is then cropped, stretched, and placed like any other picture. A metafile that
-cannot be drawn is omitted once, naming the part, and the rest of the slide renders.
+EMF and placeable WMF are decoded independently from MS-EMF and MS-WMF with no new dependency (`src/pptx/metafile.rs`). The two crates surveyed before implementation were not adopted; the reasons are recorded in [the survey](history/20261020_emf-wmf-survey.md). A picture part or OLE preview is a metafile when it starts with `EMR_HEADER` and the `" EMF"` signature at byte 40, or with the placeable WMF key `0x9AC6CDD7`. Records are translated to an SVG document that passes the same gate as SVG pictures (node limit, no external references, render check), then cropped, stretched, and placed like any other picture. A metafile that cannot be drawn is omitted once, naming the part.
 
-Coordinates are mapped when each record is played: the world transform, then the
-window/viewport mapping of the map mode, onto the reference device. The EMF picture is
-the header frame (`rclFrame`, 0.01 mm) converted with the reference device size
-(`szlDevice` / `szlMillimeters`; `szlMicrometers` is not used); when the frame is empty
-the bounds (`rclBounds`) are used. All three EMF header sizes (88, 100, 108 bytes) are
-read. A placeable WMF is its bounding box, onto which the window maps; viewport records
-are ignored there. Non-placeable WMF is not detected and stays
-`Only PNG/JPEG images are supported`.
+Coordinates are mapped per record: world transform, then the map mode's window/viewport mapping, onto the reference device. The EMF picture is `rclFrame` converted with `szlDevice`/`szlMillimeters`, or `rclBounds` when the frame is empty; all three header sizes are read. A placeable WMF is its bounding box; viewport records are ignored there. Non-placeable WMF is not detected and stays `Only PNG/JPEG images are supported`.
 
 | Record group | Translated |
 |---|---|
-| Shapes | `Rectangle`, `RoundRect`, `Ellipse`, `Polygon`, `Polyline`, `PolyPolygon`, `PolyPolyline`, `PolyBezier`, `PolyBezierTo`, `PolylineTo`, `MoveToEx`, `LineTo` (32- and 16-bit point forms); WMF `META_RECTANGLE`, `META_ROUNDRECT`, `META_ELLIPSE`, `META_POLYGON`, `META_POLYLINE`, `META_POLYPOLYGON`, `META_MOVETO`, `META_LINETO`, `META_PATBLT` |
-| Objects | `CreatePen`, `ExtCreatePen` (dash styles, user styles, caps, joins), `CreateBrushIndirect`, stock objects, `SelectObject`, `DeleteObject`; WMF object table with lowest-free-slot indices; `SetPolyFillMode` |
+| Shapes | `Rectangle`, `RoundRect`, `Ellipse`, `Polygon`, `Polyline`, `PolyPolygon`, `PolyPolyline`, `PolyBezier`, `PolyBezierTo`, `PolylineTo`, `MoveToEx`, `LineTo` (32- and 16-bit); WMF `META_RECTANGLE`, `META_ROUNDRECT`, `META_ELLIPSE`, `META_POLYGON`, `META_POLYLINE`, `META_POLYPOLYGON`, `META_MOVETO`, `META_LINETO`, `META_PATBLT` |
+| Objects | `CreatePen`, `ExtCreatePen` (dashes, caps, joins), `CreateBrushIndirect`, stock objects, `SelectObject`, `DeleteObject`; WMF object table; `SetPolyFillMode` |
 | Paths | `BeginPath`, `EndPath`, `CloseFigure`, `AbortPath`, `FillPath`, `StrokePath`, `StrokeAndFillPath`, `SelectClipPath` |
-| Coordinates | `SetMapMode` (all eight modes), window and viewport origin/extent, their scale records, `SetWorldTransform`, `ModifyWorldTransform`, `SaveDC`, `RestoreDC` |
-| Clipping | `IntersectClipRect` (chained SVG clip paths), `ExcludeClipRect` (SVG mask), `ExtSelectClipRgn` with rectangle regions; region modes copy, and, and diff |
-| Bitmaps | `StretchDIBits`, `BitBlt`, `StretchBlt`, `AlphaBlend`; WMF `META_STRETCHDIB`, `META_DIBSTRETCHBLT`, `META_DIBBITBLT`. 1/4/8/16/24/32-bit DIBs, uncompressed or bit fields, stretched or mirrored onto the destination; pixels are picked as GDI's default stretch modes do, and smoothed after `SetStretchBltMode(HALFTONE)` or a downscale |
+| Coordinates | `SetMapMode` (all eight), window/viewport origin, extent and scale records, `SetWorldTransform`, `ModifyWorldTransform`, `SaveDC`, `RestoreDC` |
+| Clipping | `IntersectClipRect` (chained clip paths), `ExcludeClipRect` (mask), `ExtSelectClipRgn` with rectangle regions; modes copy, and, diff |
+| Bitmaps | `StretchDIBits`, `BitBlt`, `StretchBlt`, `AlphaBlend`; WMF `META_STRETCHDIB`, `META_DIBSTRETCHBLT`, `META_DIBBITBLT`; 1/4/8/16/24/32-bit uncompressed or bit-field DIBs, stretched or mirrored, picked like GDI's default stretch modes and smoothed after `HALFTONE` or a downscale |
 
-Diagnostics, each suffixed with the part name and recorded once per message:
+Diagnostics, suffixed with the part name and recorded once per message:
 
-- `unsupported` `Text in metafile pictures is not rendered (<record>)` for
-  `EMR_EXTTEXTOUTW`, `EMR_EXTTEXTOUTA`, `EMR_POLYTEXTOUTW/A`, `EMR_SMALLTEXTOUT`,
-  `META_TEXTOUT`, and `META_EXTTEXTOUT`; the text is not drawn (the first step of the
-  decision on issue #78).
-- `unsupported` `Unsupported metafile record ignored (<record>)` once per record type
-  outside the subset (for example `EMR_ARC`, `EMR_POLYDRAW`, `EMR_FILLRGN`,
-  `EMR_SETDIBITSTODEVICE`); unknown types are named by number. Records that only set
-  state the subset does not draw (text colour, background mode, palettes, comments) are
-  skipped silently.
-- `unsupported` for pattern brushes, RLE/JPEG/PNG-compressed DIBs, and DIBs with
-  palette-index colours; `approximation` for hatched brushes (drawn solid), raster
-  operations other than copy, mix modes other than `R2_COPYPEN`, the clip modes or and
-  xor (not applied), `WidenPath` (unsupported; the path is drawn unwidened), and EMF+
-  comments (EMF+ records are not interpreted; a dual EMF+ picture is drawn from its EMF
-  records, an EMF+ only picture is reported as `unsupported`).
-- `omitted` `Malformed bitmap in metafile record omitted (...)` for one unreadable DIB;
-  the rest of the picture renders.
+- `unsupported` `Text in metafile pictures is not rendered (<record>)` for the `ExtTextOut`, `PolyTextOut`, `SmallTextOut`, `META_TEXTOUT`, and `META_EXTTEXTOUT` families; the text is not drawn (issue #78).
+- `unsupported` `Unsupported metafile record ignored (<record>)` once per record type outside the subset; state-only records the subset does not draw are skipped silently.
+- `unsupported` for pattern brushes, compressed DIBs, and palette-index DIBs; `approximation` for hatched brushes (drawn solid), raster operations other than copy, mix modes other than `R2_COPYPEN`, clip modes or/xor, `WidenPath`, and EMF+ comments (a dual picture is drawn from its EMF records; EMF+ only is `unsupported`).
+- `omitted` `Malformed bitmap in metafile record omitted (...)` for one unreadable DIB; the rest renders.
 
-Bitmaps go through the PNG/JPEG size policy under [resource limits](#resource-limits):
-they are decoded row by row only after the size check, encoded as PNG (never embedded
-as BMP), downscaled with the same `approximation` diagnostic, or the picture is omitted
-with the same ceiling message. A cosmetic pen is one reference-device pixel wide, and a
-geometric pen at least that. Limits per picture, each omitting the picture with a
-diagnostic: 500,000 records, 2,000,000 points (a clip region rectangle counts as four),
-50,000 SVG elements, 67,108,864 decoded bitmap pixels, `SaveDC` nesting of 1,024, and
-65,536 live objects; the translated SVG may be at most 32 MiB (it carries the PNG
-bitmaps; writing stops as soon as it passes the limit) and 100,000 XML nodes. Clip
-records are chained as SVG clip paths and masks, which the renderer follows
-recursively, so a chain is at most 32 links long: further clip records are not applied
-and reported once as `approximation`. At most 64 distinct diagnostics are kept per
-picture; the rest are summarized by one `unsupported` diagnostic. Truncated
-records, invalid record sizes, a missing end-of-file record, invalid header sizes, and
-non-finite world transforms omit the picture as malformed.
-
-Comparison with LibreOffice (`make_metafile_pictures.py OUT --pptx`, then
-`compare.py --width 1600` with the default thresholds), macOS, LibreOffice 26.2.5.2,
-2026-10-20. All nine pages are within the unchanged thresholds; before this step every
-page but `emf-text` and `wmf-clip-bitmap` exceeded them (MAE 0.030 to 0.081).
-
-| Page | MAE | Changed pixels | Remaining difference |
-|---|---|---|---|
-| `emf-shapes` (88-byte header) | 0.009299 | 1.614% | antialiasing along outlines |
-| `emf-shapes` (108-byte header) | 0.006214 | 1.182% | antialiasing along outlines |
-| `emf-path` | 0.006753 | 1.095% | antialiasing along outlines |
-| `emf-transform` | 0.007286 | 1.186% | antialiasing along outlines |
-| `emf-clip` | 0.010538 | 2.014% | rhodopsin draws the `ExcludeClipRect` hole MS-EMF specifies; LibreOffice does not, so this part rests on the specification, not on the reference |
-| `emf-bitmap` | 0.005600 | 1.058% | edges of the stretched pixels |
-| `emf-text` | 0.006773 | 1.127% | LibreOffice draws the text; rhodopsin reports it as `unsupported` |
-| `wmf-shapes` | 0.003045 | 0.594% | antialiasing along outlines |
-| `wmf-clip-bitmap` | 0.005641 | 0.877% | LibreOffice draws the `TextOut` text; rhodopsin reports it |
-
-The text pages pass only because the text is small; passing does not mean text is
-supported.
+Bitmaps go through the PNG/JPEG size policy under [resource limits](#resource-limits), encoded as PNG, never embedded as BMP. A cosmetic pen is one reference-device pixel wide. Per-picture limits, each omitting the picture: 500,000 records, 2,000,000 points, 50,000 SVG elements, 67,108,864 decoded bitmap pixels, `SaveDC` nesting 1,024, 65,536 live objects, 32 MiB translated SVG, 100,000 XML nodes, and 32 chained clip links (further clip records are reported once as `approximation`). At most 64 distinct diagnostics are kept per picture. Truncated or malformed records, a missing end-of-file record, and non-finite world transforms omit the picture. `ExcludeClipRect` holes follow MS-EMF; LibreOffice does not draw them, so that fixture rests on the specification, not the reference. Fixtures: `tests/visual/make_metafile_pictures.py OUT_DIR [--pptx]` (nine metafiles under `tests/fixtures/metafile/`).
 
 ## Known limitations
 
-- Complete layout/master property and text-style inheritance; `themeOverride` and
-  full theme style matrices (individual fill/line references have partial support).
-- Full Japanese line-breaking rules, punctuation compression, all hanging symbols,
-  complex shaping/ligatures/kerning, and dynamic autofit ratio calculation.
+- Complete layout/master property and text-style inheritance; `themeOverride` and full theme style matrices (individual fill/line references have partial support).
+- Full Japanese line-breaking rules, punctuation compression, all hanging symbols, complex shaping/ligatures/kerning, and dynamic autofit ratio calculation.
 - Identical baselines and fallback behavior across all fonts and Office renderers.
-- Charts, SmartArt, freeform path fill modes other than
-  normal and none, and many presets.
-- Full table theme-style coverage, theme/line/table-cell/text gradients,
-  inner shadows/glow, theme effects, and the picture effects listed as
-  unsupported under [picture effects and fills](#picture-effects-and-fills).
-  Selected color alpha and outer shadows are supported; see the feature-specific
-  notes for their limits.
-- Text, arcs, regions, and EMF+ records inside EMF/WMF pictures (see
-  [EMF and WMF pictures](#emf-and-wmf-pictures)), non-placeable WMF, SVG data
-  referenced directly from `a:blip/@r:embed`, text inside SVG pictures, external links, animations, Strict OOXML, legacy `.ppt`, and
-  encrypted files.
+- Charts, SmartArt, freeform path fill modes other than normal and none, and many presets.
+- Full table theme-style coverage, theme/line/table-cell/text gradients, inner shadows/glow, theme effects, and the picture effects listed as unsupported under [picture effects and fills](#picture-effects-and-fills).
+- Text, arcs, regions, and EMF+ records inside EMF/WMF pictures, non-placeable WMF, SVG referenced directly from `a:blip/@r:embed`, text inside SVG pictures, external links, animations, Strict OOXML, legacy `.ppt`, and encrypted files.
 
-SVG pictures stored the Office 2016 way (`a:blip/a:extLst/a:ext/asvg:svgBlip/@r:embed`,
-as inserted icons are) are rendered as vector data, stretched to the picture frame and
-cropped like other pictures. When `a:blip/@r:embed` also names a PNG/JPEG fallback,
-the fallback is drawn first, so pictures that already rendered are unchanged; the SVG
-is used when there is no fallback or the fallback cannot be drawn. If neither can be
-drawn, the picture is omitted once with both reasons. An SVG picture is rendered only
-when it is at most 4 MiB, has at most 100,000 XML nodes, parses as SVG, and references
-nothing outside itself: any `href` other than a local `#id`, any `url(...)` other than
-`url(#id)`, and CSS `@import` are rejected, including `data:` images, which would
-otherwise bypass the PNG/JPEG size policy below. `<text>` inside an SVG picture is
-reported as `unsupported` because document fonts are not resolved for it. A picture
-whose `a:blip` has no `r:embed` of either kind is omitted with `Missing image
-reference`; `Externally linked images are not loaded` is reserved for `r:link` and
-`TargetMode="External"` relationships.
+SVG pictures stored the Office 2016 way (`asvg:svgBlip`) are rendered as vector data, stretched and cropped like other pictures. When `a:blip/@r:embed` also names a PNG/JPEG fallback, the fallback is drawn first; the SVG is used when there is no fallback or it cannot be drawn; if neither can, the picture is omitted once with both reasons. An SVG picture is rendered only when it is at most 4 MiB, has at most 100,000 XML nodes, parses, and references nothing outside itself (`href` other than `#id`, `url()` other than `url(#id)`, CSS `@import`, and `data:` images are rejected because they would bypass the size policy). `<text>` inside an SVG picture is `unsupported` because document fonts are not resolved for it. A blip with no `r:embed` is omitted with `Missing image reference`; `Externally linked images are not loaded` is reserved for `r:link` and external relationships.
 
-Audio and video are never played or rendered. A slide, layout, or master that has a
-relationship of type `video`, `audio`, or `media` gets one `unsupported` diagnostic
-per slide, `Audio and video playback is unsupported`. Media parts are not loaded, so
-they do not count toward the size limits below, and a media payload larger than the
-32 MiB per-part limit does not fail the deck; the poster frame, being an ordinary
-picture, renders. Generator: `tests/visual/make_embedded_media.py` (writes a deck of
-about 40 MiB uncompressed, so write it outside the repository).
+Audio and video are never played. A slide, layout, or master with a `video`, `audio`, or `media` relationship gets one `unsupported` diagnostic (`Audio and video playback is unsupported`); media parts are not loaded and do not count toward the size limits, so an oversized media payload does not fail the deck, and the poster frame renders as an ordinary picture. Generator: `tests/visual/make_embedded_media.py` (writes about 40 MiB; keep it outside the repository).
 
-Pictures that are not PNG/JPEG, EMF, or placeable WMF (for example SVG referenced
-from `a:blip/@r:embed`, or WDP), malformed metafiles, or pictures whose dimensions
-cannot be read, are omitted with an `omitted` diagnostic naming the
-media part; the rest of the slide, layout, and master still renders.
-The same applies to a picture whose `r:embed` names no relationship
-(`Missing image relationship: <id>`), whose relationship target is absent from the
-package (`Missing image part: <part>`), or whose crop (`srcRect`) leaves no visible
-area (`Image crop leaves no visible area: <part>`). A part that a picture's `a:blip`
-or `asvg:svgBlip` references is loaded even when its relationship type is one the
-loader otherwise skips (for example `oleObject` or `hdphoto` written by third-party
-tools), so the picture is rendered or omitted on its own; such parts count toward the
-size limits below.
+Pictures that are not PNG/JPEG, EMF, or placeable WMF, malformed metafiles, or pictures whose dimensions cannot be read are omitted with a diagnostic naming the part, and the rest of the slide renders. The same applies to a missing relationship (`Missing image relationship: <id>`), a missing part (`Missing image part: <part>`), or a crop that leaves no area (`Image crop leaves no visible area: <part>`). A part referenced by `a:blip` or `asvg:svgBlip` is loaded even when its relationship type is one the loader otherwise skips (`oleObject`, `hdphoto`), and counts toward the size limits.
 
-Visual output depends on available fonts. Ordinary CI covers Windows/Linux/macOS;
-recorded visual comparison measurements are from macOS.
+Visual output depends on available fonts. Ordinary CI covers Windows, Linux, and macOS; recorded visual comparisons are from macOS.
 
 ## Resource limits
 
-Input size: 128 MiB. Total uncompressed data: 256 MiB. Per part: 32 MiB.
-Maximum slides: 200. Group nesting: 64 levels. Tables: 100000 cells.
-Output images have pixel-count limits. Embedded PNG/JPEG pictures are handled per
-picture and never abort the deck:
+Input size 128 MiB; total uncompressed data 256 MiB; per part 32 MiB; 200 slides; group nesting 64 levels; tables 100,000 cells (`src/pptx.rs`, `src/pptx/objects.rs`). Embedded PNG/JPEG pictures are handled per picture and never abort the deck (`src/pptx/raster.rs`):
 
 - Up to 8192 px per side and 16,777,216 pixels: embedded unchanged.
-- Above that, up to 32768 px per side and 67,108,864 pixels (64 Mpx): decoded and
-  box-filtered so the longest side is at most 2048 px, then embedded with an
-  `approximation` diagnostic that records the original and downscaled sizes. The
-  2048 px target bounds memory; it is not derived from the output width, so a
-  picture shown large or heavily cropped can look softer than in Office.
-  Non-interlaced PNG is decoded row by row; JPEG is decoded at full size first.
-- Above the ceiling, interlaced (Adam7) PNG above the first limit, or data that
-  fails to decode: omitted with an `omitted` diagnostic naming the media part.
+- Above that, up to 32768 px per side and 67,108,864 pixels: decoded and box-filtered so the longest side is at most 2048 px, then embedded with an `approximation` diagnostic recording both sizes. The target bounds memory and is not derived from the output width, so a large or heavily cropped picture can look softer than in Office. Non-interlaced PNG is decoded row by row; JPEG is decoded at full size first.
+- Above the ceiling, interlaced PNG above the first limit, or undecodable data: omitted with a diagnostic naming the part.
 
-ZIP entries are read without extracting files to the filesystem. External images
-are not fetched. Recursive conversion uses an 8 MiB thread stack so OS main-stack
-size differences do not cause parser failures. Tests require a normal error exit
-and no output for groups deeper than 64, rather than accepting a crash as rejection.
-Additional robustness validation is needed before exposing a service to arbitrary
-untrusted input.
+ZIP entries are read without extracting to the filesystem, and external images are never fetched. Conversion runs on an 8 MiB thread stack so OS main-stack differences do not cause parser failures; tests require a normal error exit, not a crash, for groups deeper than 64. Additional robustness validation is needed before exposing a service to arbitrary untrusted input.
 
-For font requirements and diagnostics, see [usage](usage.md). For measurement
-models, sources, and historical comparison evidence, see [rendering notes](rendering-notes.md).
+For font requirements and diagnostics, see [usage](usage.md).
