@@ -10,7 +10,7 @@
 
 | 要求 | 現在の証拠 | 完成に必要な残作業 |
 | --- | --- | --- |
-| CLI 一回で PDF と成功 JSON を生成 | `src/lib.rs` の変換は常に `rendering_not_implemented`。`src/main.rs` に成功 JSON 出力はあるが通常経路からは到達しない | 検証済みの既定組版、PDF 保存、成功レポートを一つの変換経路へ接続 |
+| CLI 一回で PDF と成功 JSON を生成 | `src/lib.rs` の変換は常に `rendering_not_implemented`。CLI は rhodopsin 本体が `--format pdf` で受け付けるが、成功経路には到達しない | 検証済みの既定組版、PDF 保存、成功レポートを一つの変換経路へ接続 |
 | Excel と同じ紙面 | fixture に入力 `.xlsx` だけがあり、Excel 参照 PDF がない | 同一入力・書体・条件で参照 PDF を得て、全項目を照合 |
 | 標準数値書式 | 幅依存の General 数値をセル描画へ接続。幅なし書式 API は拒否を保持 | 実フォントと Excel 参照で選択・丸め・指数境界を照合し、通常 CLI へ接続 |
 | DBNum1–3 全体 | 日本語の非負整数の桁変換とロケール伝達のみ | General の単位、小数・符号・日付等の規則を実装・照合 |

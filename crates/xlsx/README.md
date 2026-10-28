@@ -1,6 +1,6 @@
 # rhodopsin-xlsx
 
-Library and CLI for rendering the printed pages of an `.xlsx` workbook to PDF in
+Library for rendering the printed pages of an `.xlsx` workbook to PDF in
 pure Rust, without Excel, LibreOffice, or a browser. Imported into the rhodopsin
 workspace from the former xlsx2pdf repository (commit fa55270, 2026-10-22).
 
@@ -10,21 +10,20 @@ policy (cell padding, line spacing, and so on), but the Excel-matching default
 layout is not finished. Inputs that pass validation currently exit with
 `rendering_not_implemented`.
 
+This crate has no binary of its own; the root CLI routes `.xlsx` input to it:
+
 ```sh
-cargo run -p rhodopsin-xlsx -- input.xlsx --out output.pdf
-cargo run -p rhodopsin-xlsx -- input.xlsx --out output.pdf --font-file /path/to/font.ttf
+rhodopsin book.xlsx --format pdf
 cargo test -p rhodopsin-xlsx
 ```
 
-Successful conversions print one machine-readable JSON report on stdout; failures
-print one JSON diagnostic on stderr with exit codes 2 to 6 by category.
-Diagnostics never include cell contents, formulas, sheet names, paths, or raw
-library errors.
+Results follow the rhodopsin YAML result documents (see the XLSX input section of
+`docs/usage.md`). Diagnostics never include cell contents, formulas, sheet names,
+paths, or raw library errors.
 
-`--font-file` and `--font-dir` are repeatable and are the only font sources by
-default. `--system-fonts` adds the OS font directories. `--fallback-font NAME`
-allows a substitute family for missing fonts only; the substitute must also be
-supplied through `--font-file` or `--font-dir`.
+`ConversionOptions` accepts explicit font files and directories, an optional
+system-font search, and an explicit fallback family that applies to missing
+fonts only. The CLI currently exposes font files and the system-font switch.
 
 Design notes (Japanese; paths in them are relative to this directory):
 

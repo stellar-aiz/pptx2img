@@ -101,8 +101,9 @@ Same-font PowerPoint reference regression tests remain future work.
 
 `crates/xlsx` holds `rhodopsin-xlsx`, the XLSX-to-PDF library and CLI imported from
 the former xlsx2pdf repository as a snapshot of commit fa55270 (2026-10-22), without
-history. It is a separate workspace member with its own binary; the PPTX converter
-does not depend on it yet. Its design notes live in [docs/xlsx](xlsx/) and are still
+history. It has no binary of its own: the root CLI routes `.xlsx` input to it through
+`src/cli_xlsx.rs` (`rhodopsin book.xlsx --format pdf`) and renders its diagnostics as
+the usual YAML result documents. Its design notes live in [docs/xlsx](xlsx/) and are still
 written in Japanese. Paths mentioned there (`src/`, `tests/`, `tools/`, `examples/`)
 are relative to `crates/xlsx`, and `cargo run --example` needs `-p rhodopsin-xlsx`.
 
@@ -110,12 +111,15 @@ Run its checks from the repository root:
 
 ```sh
 cargo test --locked -p rhodopsin-xlsx
+cargo test --locked --test xlsx_cli
 python3 -m unittest discover -s crates/xlsx/tools -p 'test_*.py'
 ```
 
-Planned convergence, in order: font discovery and loading, then the PDF writer (the
-PPTX PDF backend is expected to move to the CID-font subset embedding used by
-`rhodopsin-xlsx`), then a single CLI.
+XLSX input currently always behaves as `--strict`, because the renderer only has a
+stop-on-unsupported path. Planned convergence, in order: approximate rendering with
+warnings for individual unsupported elements, shared font discovery and loading, then
+the PDF writer (the PPTX PDF backend is expected to move to the CID-font subset
+embedding used by `rhodopsin-xlsx`).
 
 ## Implementation references
 

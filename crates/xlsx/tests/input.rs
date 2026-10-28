@@ -2,7 +2,7 @@ use rhodopsin_xlsx::{
     package::{Limits, Package},
     workbook,
 };
-use std::{fs::File, io::Write, path::Path, process::Command};
+use std::{fs::File, io::Write, path::Path};
 use tempfile::TempDir;
 use zip::{ZipWriter, write::SimpleFileOptions};
 
@@ -123,20 +123,15 @@ fn 空の数値キャッシュと空文字列の計算結果を区別する() {
                 r#"<sheetData><row r="1"><c r="A1"{cell_type}><f>機密の数式</f><v/></c></row></sheetData>"#
             ),
         );
-        let output = Command::new(env!("CARGO_BIN_EXE_rhodopsin-xlsx"))
-            .arg(&path)
-            .arg("--out")
-            .arg(dir.path().join("out.pdf"))
-            .output()
-            .unwrap();
-        assert_eq!(output.status.code(), Some(2));
-        assert!(output.stdout.is_empty());
-        let diagnostic: serde_json::Value = serde_json::from_slice(&output.stderr).unwrap();
-        assert_eq!(diagnostic["reason"], "formula_cached_value_missing");
-        assert_eq!(diagnostic["location"]["sheet_index"], 1);
-        assert_eq!(diagnostic["location"]["cell"], "A1");
-        assert!(!String::from_utf8(output.stderr).unwrap().contains("機密"));
-        assert!(!dir.path().join("out.pdf").exists());
+        let out = dir.path().join("out.pdf");
+        let error = rhodopsin_xlsx::convert(&path, &out, &Limits::default()).unwrap_err();
+        assert_eq!(error.category.exit_code(), 2);
+        assert_eq!(error.reason, "formula_cached_value_missing");
+        let location = error.location.clone().unwrap();
+        assert_eq!(location.sheet_index, 1);
+        assert_eq!(location.cell.as_deref(), Some("A1"));
+        assert!(!serde_json::to_string(&error).unwrap().contains("機密"));
+        assert!(!out.exists());
     }
     let dir = TempDir::new().unwrap();
     let path = fixture(
@@ -160,20 +155,13 @@ fn 数式結果なしは位置だけを返す() {
         r#"<sheetData><row r="1"><c r="A1"><f>機密の数式</f></c></row></sheetData>"#,
     );
     let out = dir.path().join("result.pdf");
-    let result = Command::new(env!("CARGO_BIN_EXE_rhodopsin-xlsx"))
-        .arg(path)
-        .arg("--out")
-        .arg(&out)
-        .output()
-        .unwrap();
-    assert_eq!(result.status.code(), Some(2));
-    assert!(result.stdout.is_empty());
-    let stderr = String::from_utf8(result.stderr).unwrap();
-    assert!(!stderr.contains("機密"));
-    let json: serde_json::Value = serde_json::from_str(&stderr).unwrap();
-    assert_eq!(json["reason"], "formula_cached_value_missing");
-    assert_eq!(json["location"]["sheet_index"], 1);
-    assert_eq!(json["location"]["cell"], "A1");
+    let error = rhodopsin_xlsx::convert(&path, &out, &Limits::default()).unwrap_err();
+    assert_eq!(error.category.exit_code(), 2);
+    assert_eq!(error.reason, "formula_cached_value_missing");
+    let location = error.location.clone().unwrap();
+    assert_eq!(location.sheet_index, 1);
+    assert_eq!(location.cell.as_deref(), Some("A1"));
+    assert!(!serde_json::to_string(&error).unwrap().contains("機密"));
     assert!(!out.exists());
     assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 1);
 }
@@ -276,19 +264,6 @@ fn 番地の境界を確認する() {
 }
 
 #[test]
-fn 引数エラーにも機密を含めない() {
-    let result = Command::new(env!("CARGO_BIN_EXE_rhodopsin-xlsx"))
-        .arg("--機密")
-        .output()
-        .unwrap();
-    assert_eq!(result.status.code(), Some(2));
-    assert!(result.stdout.is_empty());
-    let json: serde_json::Value = serde_json::from_slice(&result.stderr).unwrap();
-    assert_eq!(json["reason"], "invalid_arguments");
-    assert!(!String::from_utf8(result.stderr).unwrap().contains("機密"));
-}
-
-#[test]
 fn ブックから印刷範囲と繰り返しと日付基準を読む() {
     let dir = TempDir::new().unwrap();
     let path = fixture_with_book(
@@ -344,20 +319,13 @@ fn 回転文字の診断には使用セルの位置だけを付ける() {
         Some(styles),
     );
     let out = dir.path().join("out.pdf");
-    let result = Command::new(env!("CARGO_BIN_EXE_rhodopsin-xlsx"))
-        .arg(path)
-        .arg("--out")
-        .arg(&out)
-        .output()
-        .unwrap();
-    assert_eq!(result.status.code(), Some(3));
-    assert!(result.stdout.is_empty());
-    let text = String::from_utf8(result.stderr).unwrap();
-    assert!(!text.contains("機密"));
-    let json: serde_json::Value = serde_json::from_str(&text).unwrap();
-    assert_eq!(json["reason"], "rotated_text");
-    assert_eq!(json["location"]["sheet_index"], 1);
-    assert_eq!(json["location"]["cell"], "C7");
+    let error = rhodopsin_xlsx::convert(&path, &out, &Limits::default()).unwrap_err();
+    assert_eq!(error.category.exit_code(), 3);
+    assert_eq!(error.reason, "rotated_text");
+    let location = error.location.clone().unwrap();
+    assert_eq!(location.sheet_index, 1);
+    assert_eq!(location.cell.as_deref(), Some("C7"));
+    assert!(!serde_json::to_string(&error).unwrap().contains("機密"));
     assert!(!out.exists());
 }
 
@@ -463,7 +431,7 @@ fn 共有文字列も一度だけ復号して参照共有する() {
 
 mod support;
 #[test]
-fn cliから明示したフォントを読み込んで準備段へ渡す() {
+fn 明示したフォントを読み込んで準備段へ渡す() {
     let dir = TempDir::new().unwrap();
     let path = fixture(&dir, r#"<sheetData/>"#);
     let font = dir.path().join("試験.ttf");
@@ -486,39 +454,39 @@ fn cliから明示したフォントを読み込んで準備段へ渡す() {
         0
     );
     let output = dir.path().join("out.pdf");
-    let result = Command::new(env!("CARGO_BIN_EXE_rhodopsin-xlsx"))
-        .arg(&path)
-        .arg("--out")
-        .arg(&output)
-        .arg("--font-file")
-        .arg(&font)
-        .output()
-        .unwrap();
-    assert_eq!(result.status.code(), Some(3));
-    let diagnostic: serde_json::Value = serde_json::from_slice(&result.stderr).unwrap();
-    assert_eq!(diagnostic["reason"], "rendering_not_implemented");
-    assert!(result.stdout.is_empty());
+    let error = rhodopsin_xlsx::convert_with_options(&path, &output, &Limits::default(), &options)
+        .unwrap_err();
+    assert_eq!(error.reason, "rendering_not_implemented");
     assert!(!output.exists());
 }
 #[test]
-fn cliのフォント読み込みエラーに指定パスを漏らさない() {
+fn フォント読み込みエラーに指定パスを漏らさない() {
     let dir = TempDir::new().unwrap();
     let path = fixture(&dir, r#"<sheetData/>"#);
     let output = dir.path().join("out.pdf");
-    for option in ["--font-file", "--font-dir"] {
-        let result = Command::new(env!("CARGO_BIN_EXE_rhodopsin-xlsx"))
-            .arg(&path)
-            .arg("--out")
-            .arg(&output)
-            .arg(option)
-            .arg(dir.path().join("機密の書体"))
-            .output()
-            .unwrap();
-        assert_eq!(result.status.code(), Some(4));
-        let diagnostic: serde_json::Value = serde_json::from_slice(&result.stderr).unwrap();
-        assert_eq!(diagnostic["category"], "missing_font");
-        assert!(!String::from_utf8(result.stderr).unwrap().contains("機密"));
-        assert!(result.stdout.is_empty());
+    let missing = dir.path().join("機密の書体");
+    for sources in [
+        rhodopsin_xlsx::font_sources::Sources {
+            files: vec![missing.clone()],
+            directories: Vec::new(),
+        },
+        rhodopsin_xlsx::font_sources::Sources {
+            files: Vec::new(),
+            directories: vec![missing.clone()],
+        },
+    ] {
+        let options = rhodopsin_xlsx::ConversionOptions {
+            font_sources: sources,
+            ..Default::default()
+        };
+        let error =
+            rhodopsin_xlsx::convert_with_options(&path, &output, &Limits::default(), &options)
+                .unwrap_err();
+        assert_eq!(
+            error.category,
+            rhodopsin_xlsx::diagnostic::Category::MissingFont
+        );
+        assert!(!serde_json::to_string(&error).unwrap().contains("機密"));
         assert!(!output.exists());
     }
 }
@@ -617,7 +585,7 @@ fn 変換設定の書体代用を準備済み入力からセル描画と警告�
 }
 
 #[test]
-fn cliの代用書体オプションを検証し値を診断へ漏らさない() {
+fn 代用書体オプションを検証し値を診断へ漏らさない() {
     let dir = TempDir::new().unwrap();
     let path = fixture(&dir, "<sheetData/>");
     let output = dir.path().join("out.pdf");
@@ -626,49 +594,16 @@ fn cliの代用書体オプションを検証し値を診断へ漏らさない()
         ("機密\n書体", "invalid_fallback_font", 2),
         (" ", "invalid_fallback_font", 2),
     ] {
-        let result = Command::new(env!("CARGO_BIN_EXE_rhodopsin-xlsx"))
-            .arg(&path)
-            .arg("--out")
-            .arg(&output)
-            .arg("--fallback-font")
-            .arg(name)
-            .output()
-            .unwrap();
-        assert_eq!(result.status.code(), Some(code));
-        let diagnostic: serde_json::Value = serde_json::from_slice(&result.stderr).unwrap();
-        assert_eq!(diagnostic["reason"], reason);
-        assert!(!String::from_utf8_lossy(&result.stderr).contains("機密"));
-        assert!(result.stdout.is_empty());
-        assert!(!output.exists());
-    }
-}
-
-#[test]
-fn osフォント探索は明示した場合だけ環境の探索先を参照する() {
-    let dir = TempDir::new().unwrap();
-    let path = fixture(&dir, "<sheetData/>");
-    let output = dir.path().join("out.pdf");
-    for enabled in [false, true] {
-        let mut command = Command::new(env!("CARGO_BIN_EXE_rhodopsin-xlsx"));
-        command.arg(&path).arg("--out").arg(&output);
-        for key in ["HOME", "WINDIR", "LOCALAPPDATA", "XDG_DATA_HOME"] {
-            command.env(key, "機密の相対パス");
-        }
-        if enabled {
-            command.arg("--system-fonts");
-        }
-        let result = command.output().unwrap();
-        let diagnostic: serde_json::Value = serde_json::from_slice(&result.stderr).unwrap();
-        assert_eq!(
-            diagnostic["reason"],
-            if enabled {
-                "invalid_system_font_directory"
-            } else {
-                "rendering_not_implemented"
-            }
-        );
-        assert!(!String::from_utf8_lossy(&result.stderr).contains("機密"));
-        assert!(result.stdout.is_empty());
+        let options = rhodopsin_xlsx::ConversionOptions {
+            fallback_family: Some(name.into()),
+            ..Default::default()
+        };
+        let error =
+            rhodopsin_xlsx::convert_with_options(&path, &output, &Limits::default(), &options)
+                .unwrap_err();
+        assert_eq!(error.category.exit_code(), code);
+        assert_eq!(error.reason, reason);
+        assert!(!serde_json::to_string(&error).unwrap().contains("機密"));
         assert!(!output.exists());
     }
 }
@@ -797,60 +732,6 @@ fn xlsx入力から準備組版pdf生成と排他的保存まで接続する() {
             .to_string_lossy()
             .starts_with(".rhodopsin_xlsx-")
     }));
-}
-
-#[cfg(target_os = "macos")]
-#[test]
-fn seatbeltの権限制約下でも機密を含まない診断を返す() {
-    let dir = TempDir::new().unwrap();
-    let input = fixture(&dir, "<sheetData/>").canonicalize().unwrap();
-    let output = dir.path().canonicalize().unwrap().join("成果物.pdf");
-    let font = dir.path().join("機密の書体.ttf");
-    std::fs::write(&font, "読み取りを拒否する試験データ").unwrap();
-    let font = font.canonicalize().unwrap();
-    let binary = Path::new(env!("CARGO_BIN_EXE_rhodopsin-xlsx"))
-        .canonicalize()
-        .unwrap();
-    // OS ランタイム用の読み取りは広く許す。入力・書体の拒否は個別に追加する。
-    // これを本番の読み取り許可リストの証拠にはしない。
-    let base = r#"(version 1)(deny default)(allow sysctl-read)(allow file-read*)(allow process-exec (literal (param "BINARY")))"#;
-    for (extra, use_font, code, reason) in [
-        ("", false, 3, "rendering_not_implemented"),
-        (
-            r#"(deny file-read-data (literal (param "INPUT")))"#,
-            false,
-            2,
-            "input_unreadable",
-        ),
-        (
-            r#"(deny file-read-data (literal (param "FONT")))"#,
-            true,
-            4,
-            "font_file_unreadable",
-        ),
-    ] {
-        let mut command = Command::new("/usr/bin/sandbox-exec");
-        for (key, path) in [("BINARY", &binary), ("INPUT", &input), ("FONT", &font)] {
-            command.arg("-D").arg(format!("{key}={}", path.display()));
-        }
-        command
-            .arg("-p")
-            .arg(format!("{base}{extra}"))
-            .arg(&binary)
-            .arg(&input)
-            .arg("--out")
-            .arg(&output);
-        if use_font {
-            command.arg("--font-file").arg(&font);
-        }
-        let result = command.output().unwrap();
-        assert_eq!(result.status.code(), Some(code));
-        assert!(result.stdout.is_empty());
-        let diagnostic: serde_json::Value = serde_json::from_slice(&result.stderr).unwrap();
-        assert_eq!(diagnostic["reason"], reason);
-        assert!(!String::from_utf8(result.stderr).unwrap().contains("機密"));
-        assert!(!output.exists());
-    }
 }
 
 #[test]
