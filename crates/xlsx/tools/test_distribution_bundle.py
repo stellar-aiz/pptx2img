@@ -17,7 +17,7 @@ spec.loader.exec_module(module)
 
 
 def documents():
-    return {"NOTICE.txt": b"notice", "licenses/example/LICENSE": b"original", "sbom.cdx.json": json.dumps({"metadata": {"component": {"name": "rhodopsin-xlsx", "version": "0.1.0"}}}).encode()}
+    return {"NOTICE.txt": b"notice", "licenses/example/LICENSE": b"original", "sbom.cdx.json": json.dumps({"metadata": {"component": {"name": "rhodopsin", "version": "0.1.0"}}}).encode()}
 
 
 def make(target="aarch64-apple-darwin", docs=None):
@@ -52,11 +52,11 @@ class BundleTests(unittest.TestCase):
 
     def test_破損と欠落と権限変更を検出する(self):
         def permissions(info, data):
-            if info.filename.endswith("/rhodopsin-xlsx"):
+            if info.filename.endswith("/rhodopsin"):
                 info.external_attr = 0o100644 << 16
             return data
         for operation in [
-            lambda info, data: b"changed" if info.filename.endswith("/rhodopsin-xlsx") else data,
+            lambda info, data: b"changed" if info.filename.endswith("/rhodopsin") else data,
             lambda info, data: None if info.filename.endswith("/LICENSE") else data,
             lambda info, data: b"" if info.filename.endswith("/SHA256SUMS") else data,
             permissions,

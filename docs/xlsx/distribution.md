@@ -13,9 +13,9 @@ Python 3 の標準ライブラリだけを使い、配布バイナリには Pyth
 ```sh
 python3 tools/distribution-bundle.py \
   --target aarch64-apple-darwin \
-  --out target/distribution/rhodopsin-xlsx-aarch64-apple-darwin.zip
+  --out target/distribution/rhodopsin-aarch64-apple-darwin.zip
 python3 tools/distribution-bundle.py \
-  --verify target/distribution/rhodopsin-xlsx-aarch64-apple-darwin.zip
+  --verify target/distribution/rhodopsin-aarch64-apple-darwin.zip
 ```
 
 対象は macOS arm64 / x86_64、Windows x86_64、Linux x86_64 の四つ。
@@ -32,14 +32,14 @@ Cargo のビルド出力から実行ファイルを一意に特定する。
 
 | 内容 | 用途 |
 | --- | --- |
-| rhodopsin-xlsx または rhodopsin-xlsx.exe | 対象環境の単一実行ファイル |
+| rhodopsin または rhodopsin.exe | 対象環境の単一実行ファイル |
 | LICENSE | プロジェクト自身の MIT ライセンス原文 |
 | NOTICE.txt、licenses/ | 依存の宣言、選択ライセンス、原文資料 |
 | sbom.cdx.json | 全対象 OS・開発依存を含む CycloneDX 1.6 一覧 |
 | manifest.json | 対象、版、ソースコミット、Rust 版、Cargo.lock のハッシュ、各ファイルのハッシュ・サイズ・権限 |
 | SHA256SUMS | マニフェストを含む全ファイルの SHA-256。自身は除外 |
 
-ZIP 内は `rhodopsin-xlsx-版-対象/` に収める。実行ファイルには Unix の実行権限を
+ZIP 内は `rhodopsin-版-対象/` に収める。実行ファイルには Unix の実行権限を
 保存する。ZIP の順序・日時・権限・圧縮方式を固定し、同一バイナリ・資料・
 来歴情報から同じ ZIP を作る。異なる OS やコンパイラでのバイナリ一致は保証しない。
 

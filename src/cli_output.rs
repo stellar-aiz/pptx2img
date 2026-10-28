@@ -5,7 +5,7 @@ use std::{
     path::Path,
 };
 
-fn quoted(value: &str) -> String {
+pub fn quoted(value: &str) -> String {
     serde_json::to_string(value)
         .expect("string serialization")
         .replace('\u{0085}', "\\u0085")

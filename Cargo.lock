@@ -921,6 +921,7 @@ dependencies = [
  "imagesize",
  "png",
  "resvg",
+ "rhodopsin-xlsx",
  "roxmltree 0.21.1",
  "serde",
  "serde_json",
@@ -934,7 +935,6 @@ dependencies = [
 name = "rhodopsin-xlsx"
 version = "0.1.0"
 dependencies = [
- "clap",
  "image",
  "lopdf",
  "miniz_oxide 0.8.9",
