@@ -8,6 +8,10 @@ Early implementation: rendering is approximate, not fully PowerPoint-compatible.
 
 ## Quick start
 
+```
+rhodopsin <INPUT> [--format png|pdf] [--out PATH] [--width N] [...]
+```
+
 Requires Rust and Cargo. Install from this checkout:
 
 ```sh
