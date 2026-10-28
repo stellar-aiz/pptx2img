@@ -1,4 +1,4 @@
-# rhodopsin
+# rhodopsin - No more LibreOffice for AI
 
 Convert PPTX slides to PNG or searchable PDF with a standalone CLI or Rust library.
 
