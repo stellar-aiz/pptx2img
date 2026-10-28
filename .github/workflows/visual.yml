@@ -117,7 +117,7 @@ jobs:
         if: ${{ !cancelled() }}
         # Linux and Windows exceed the unchanged thresholds with Noto Sans CJK JP pinned (#71). Their
         # step is non-gating and the measured numbers are recorded in the job summary and in
-        # tests/visual/README.md; macOS stays gating.
+        # docs/visual-comparison.md; macOS stays gating.
         continue-on-error: ${{ runner.os != 'macOS' }}
         run: cargo test --locked --test libreoffice -- --ignored --nocapture --test-threads=1
       - name: Summarize comparison metrics
