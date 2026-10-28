@@ -1,6 +1,7 @@
 # Software Design Charter
 
-rhodopsin converts PPTX slides into images according to four design principles:
+rhodopsin converts PPTX slides into images, and its `rhodopsin-xlsx` crate renders
+XLSX pages to PDF, according to four design principles:
 lightweightness, fidelity, transparency, and observability.
 
 These principles guide the software's behavior and architecture. Development

@@ -28,6 +28,14 @@ PDF output preserves text and supported vector shapes using the existing renderi
 dependencies. Its initial [supported subset](docs/rendering.md#pdf-output) is narrower
 than PNG; unsupported PDF features fail explicitly. Existing files are never replaced.
 
+## XLSX to PDF (under development)
+
+The workspace also contains `rhodopsin-xlsx`, a separate crate and CLI that renders
+the printed pages of an `.xlsx` workbook to PDF. It was imported from the former
+xlsx2pdf project and is not connected end to end yet: the CLI validates the input
+and loads fonts, then stops with `rendering_not_implemented`.
+See [crates/xlsx/README.md](crates/xlsx/README.md) and [docs/xlsx](docs/xlsx/).
+
 ## Fonts and warnings
 
 - Supply missing fonts with `--font-file /path/to/font.ttf` (repeatable).

@@ -97,6 +97,26 @@ LibreOffice can differ from PowerPoint too. Matching the generating tool's own
 preview or passing comparison thresholds is not proof of display compatibility.
 Same-font PowerPoint reference regression tests remain future work.
 
+## Spreadsheet crate
+
+`crates/xlsx` holds `rhodopsin-xlsx`, the XLSX-to-PDF library and CLI imported from
+the former xlsx2pdf repository as a snapshot of commit fa55270 (2026-10-22), without
+history. It is a separate workspace member with its own binary; the PPTX converter
+does not depend on it yet. Its design notes live in [docs/xlsx](xlsx/) and are still
+written in Japanese. Paths mentioned there (`src/`, `tests/`, `tools/`, `examples/`)
+are relative to `crates/xlsx`, and `cargo run --example` needs `-p rhodopsin-xlsx`.
+
+Run its checks from the repository root:
+
+```sh
+cargo test --locked -p rhodopsin-xlsx
+python3 -m unittest discover -s crates/xlsx/tools -p 'test_*.py'
+```
+
+Planned convergence, in order: font discovery and loading, then the PDF writer (the
+PPTX PDF backend is expected to move to the CID-font subset embedding used by
+`rhodopsin-xlsx`), then a single CLI.
+
 ## Implementation references
 
 - [Slide masters](https://learn.microsoft.com/en-us/office/open-xml/presentation/working-with-slide-masters)
