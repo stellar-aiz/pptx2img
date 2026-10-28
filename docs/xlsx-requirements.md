@@ -4,19 +4,19 @@ kind: guide
 
 # XLSX to PDF: requirements
 
-This page holds the caller's requirements for the spreadsheet renderer. It is not a description of what is implemented; [xlsx.md](xlsx.md) tracks that, and completion needs implementation and verification evidence for every item.
+This page holds the caller's requirements for the spreadsheet renderer. It is not a description of what is implemented; [xlsx.md](xlsx.md) tracks that, including where the current CLI still deviates, and completion needs implementation and verification evidence for every item.
 
 ## Purpose and integration
 
 - Turn a workbook with saved print settings (estimates, forms) into a PDF with the same pages as Excel itself.
-- Stop rather than approximate when any element cannot be reproduced. (Per-element approximate rendering with warnings, as PPTX input has, is a planned extension; until then the default and `--strict` behave the same.)
+- Stop rather than approximate when any element cannot be reproduced.
 - The caller invokes the CLI once; print-setting checks and PDF validation stay with the caller.
 - Run inside macOS Seatbelt, Windows AppContainer, and Linux bwrap.
 - No Office, LibreOffice, browser, Python, or Node at runtime.
 
 ## Input, output, and diagnostics
 
-- One `.xlsx` input. `.xls`, `.xlsm`, and encrypted input are rejected with a reason. (The library rejects them; the CLI currently routes non-`.xlsx` extensions to the PPTX pipeline instead, which is tracked as an issue.)
+- One `.xlsx` input. `.xls`, `.xlsm`, and encrypted input are rejected with a reason.
 - One PDF output. Existing files are never overwritten, and no partial PDF remains after a failure.
 - Success on stdout, failure on stderr, one YAML document each in the rhodopsin CLI result format. Success includes page count, page sizes, sheet order and ranges, fonts and embedding state, and warnings.
 - Failure returns a category, a reason, and a location (one-based sheet order, cell reference). When a cell cannot be identified, the `cell` key is omitted; when no location is known, `location` is omitted.
@@ -25,7 +25,7 @@ This page holds the caller's requirements for the spreadsheet renderer. It is no
 
 ## Runtime and resources
 
-- A single binary for macOS arm64/x86_64, Windows x86_64, and Linux x86_64. (No release workflow exists yet.)
+- A single binary for macOS arm64/x86_64, Windows x86_64, and Linux x86_64.
 - No network access and no child processes.
 - Read only the input and the font locations; write only the output location.
 - Temporary files, if needed, live in the output directory and are removed on exit.
@@ -57,7 +57,7 @@ Shapes, text boxes, charts, conditional formatting, table styles, gradients, ver
 
 - No Microsoft or Apple fonts are bundled.
 - Fonts come from the OS font directories (searched by default, disabled with `--no-system-fonts`) and from `--font-file`. The search locations and the sandbox's read permissions must agree.
-- A missing font stops the conversion by default. Substitution is allowed only by explicit option, with a warning. (The library's `fallback_family` implements this; the CLI does not expose it yet.)
+- A missing font stops the conversion by default. Substitution is allowed only by explicit option, with a warning.
 - A single undrawable character stops the conversion.
 - Text is not converted to paths: the used glyphs are embedded as a subset with ToUnicode, so the caller can check every cell's text against the PDF.
 

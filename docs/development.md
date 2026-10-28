@@ -17,7 +17,7 @@ PPTX (ZIP/XML)
 CLI: argument parsing src/main.rs; YAML result documents src/cli_output.rs; .xlsx routing src/cli_xlsx.rs
 ```
 
-Direct dependencies are `resvg` (which brings usvg and tiny-skia) and `skrifa` for the PPTX side; the xlsx crate uses pdf-writer, subsetter, rustybuzz, ttf-parser, and image. Independent implementation does not mean avoiding libraries; their licences and attribution apply. The project's public licence has not yet been selected (the root `Cargo.toml` has no `license` field; the xlsx crate declares MIT); choose one before release.
+The rendering and font dependencies are `resvg` (which brings usvg and tiny-skia) and `skrifa` on the PPTX side, and pdf-writer, subsetter, rustybuzz (which brings ttf-parser), and image in the xlsx crate; `Cargo.toml` lists the rest. Independent implementation does not mean avoiding libraries; their licences and attribution apply. The project's public licence has not yet been selected (the root `Cargo.toml` has no `license` field; the xlsx crate declares MIT); choose one before release.
 
 [ibis-office](https://github.com/ibisjp/ibis-office) inspired the idea of an Office-independent renderer; its public README and crate entry points were consulted, and its code, tests, and assets were not copied, ported, or translated. The rules for this are in [AGENTS.md](../AGENTS.md). Keep private inputs and experimental output in the ignored `playground/`.
 
