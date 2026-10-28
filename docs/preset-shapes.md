@@ -1,264 +1,61 @@
-# Preset geometry and comparison evidence
+---
+kind: guide
+---
 
-Hand-written presets are homePlate, upArrow, rightArrow, rightBrace, and
-wedgeRoundRectCallout; further presets are
-[evaluated from shape guides](#presets-evaluated-from-shape-guides). Build outlines and text rectangles in local coordinates,
-then apply existing rotation, flipping, and group transforms.
+# Preset geometry, lines, and connectors
 
-Formulas and paths in DrawingMLGeometries from the
-[ECMA-376 Part 1 fifth-edition distribution](https://ecma-international.org/publications-and-standards/standards/ecma-376/)
-were used as specifications for an independent Rust implementation. upArrow uses
-coordinate exchange from rightArrow. No ibis-office code, tests, or assets were
-incorporated. Numeric `avLst` `val` adjustments are supported; unknown formulas
-warn and use defaults. Unsupported presets still produce omitted diagnostics.
+Preset outlines and text rectangles are built in local coordinates, then the existing rotation, flip, and group transforms apply (`src/pptx/geometry.rs`, `src/pptx/geometry/guides.rs`, `src/pptx/lines.rs`). Formulas and paths were transcribed independently from the DrawingMLGeometries part of [ECMA-376 Part 1](https://ecma-international.org/publications-and-standards/standards/ecma-376/); no ibis-office code, tests, or assets were incorporated. Fixture generator: `tests/visual/make_preset_shapes.py` (ten pages: hand-written presets, guide presets at defaults and adjusted/rotated/flipped, connectors as `p:cxnSp` and as `p:sp`).
 
-Generate independent fixtures without source-document assets:
+## Presets
 
-```sh
-python tests/visual/make_preset_shapes.py /tmp/presets.pptx
-python tests/visual/compare.py --fixture /tmp/presets.pptx \
-  --binary target/debug/rhodopsin --out /tmp/presets-comparison --width 1600
-```
+Three groups share one definition table (50 entries) and one guide evaluator:
 
-On 2026-10-18 with LibreOffice 26.2.5.2, Hiragino Sans, and punctuation compression
-OFF, the defaults page had MAE 0.000521/changed pixels 0.313%; the adjustments,
-rotation, and flip page had 0.001012/0.473%. Thresholds remained MAE 0.02, changed
-pixels 5%, and channel tolerance 16. Text-layout and theme-background diagnostics
-remain; this does not establish complete Office compatibility.
+- Hand-written outlines: homePlate, upArrow (coordinate exchange from rightArrow), rightArrow, rightBrace, wedgeRoundRectCallout.
+- Evaluated from transcribed definitions: chevron, triangle, downArrow, leftArrow, leftRightArrow, upDownArrow, diamond, trapezoid, pie, star5, cloud, round2SameRect, wedgeEllipseCallout, flowChartAlternateProcess, flowChartMultidocument, and the connectors bentConnector3, bentConnector4, curvedConnector2, curvedConnector3.
+- Also evaluated: rtTriangle, foldedCorner, borderCallout1, borderCallout2, wedgeRectCallout, cloudCallout, upArrowCallout, downArrowCallout, rightArrowCallout, flowChartDocument, flowChartMagneticDisk, flowChartTerminator, flowChartExtract, flowChartConnector, blockArc, donut, arc, can, snip1Rect, mathPlus, mathMultiply, plus, leftBracket, rightBracket, leftBrace, bentUpArrow, curvedDownArrow, circularArrow, irregularSeal2, star7, parallelogram.
 
-## Presets evaluated from shape guides
+Presets outside the table (for example heart) produce `Unsupported preset shape` and are omitted. Numeric `avLst` adjustments are supported; unknown formulas warn and use defaults.
 
-A second group of presets is evaluated from transcribed DrawingMLGeometries
-definitions instead of hand-written outlines: chevron, triangle, downArrow,
-leftArrow, leftRightArrow, upDownArrow, diamond, trapezoid, pie, star5, cloud,
-round2SameRect, wedgeEllipseCallout, flowChartAlternateProcess,
-flowChartMultidocument, and the connectors bentConnector3, bentConnector4,
-curvedConnector2, and curvedConnector3. The [next tier](#next-tier-presets) adds 31 more.
+The evaluator implements the ST_GeomGuideFormula operators (`val`, `*/`, `+-`, `+/`, `?:`, `abs`, `at2`, `cat2`, `cos`, `max`, `min`, `mod`, `pin`, `sat2`, `sin`, `sqrt`, `tan`), the built-in guides (`w`, `h`, `l`, `t`, `r`, `b`, `hc`, `vc`, `ss`, `ls`, `wd*`, `hd*`, `ssd*`, `cd*`), and the path commands `moveTo`, `lnTo`, `arcTo`, `cubicBezTo`, `quadBezTo`, `close`, with per-path `w`/`h` spaces and `fill="none"`/`stroke="false"`.
 
-Each definition lists the preset's adjustment defaults, guides, text rectangle,
-and paths from the ECMA-376 Part 1 DrawingMLGeometries part. An independent
-evaluator implements the guide operators of ST_GeomGuideFormula (`val`, `*/`,
-`+-`, `+/`, `?:`, `abs`, `at2`, `cat2`, `cos`, `max`, `min`, `mod`, `pin`, `sat2`,
-`sin`, `sqrt`, `tan`), the built-in guides (`w`, `h`, `l`, `t`, `r`, `b`, `hc`,
-`vc`, `ss`, `ls`, `wd*`, `hd*`, `ssd*`, `cd*`), and the path commands `moveTo`,
-`lnTo`, `arcTo`, `cubicBezTo`, `quadBezTo`, and `close`, including per-path
-`w`/`h` coordinate spaces and `fill="none"`/`stroke="false"`.
+Rules that are deliberate rather than transcribed:
 
-- `arcTo` angles are visual angles on the ellipse (clockwise, y down). They are
-  converted to parametric angles, and arcs are emitted in quarter-turn segments.
-- The published pie text rectangle reads `l=il t=ir r=it b=ib`; the guide names
-  describe the inscribed square, so `il it ir ib` is used. This is a deliberate
-  deviation from the literal file.
-- Paths without fill (connectors, the cloud's inner arcs, the multidocument's
-  outlines) are stroked only. Only those open paths keep line-end markers; closed
-  outlines never draw arrowheads.
-- Connectors still draw when their width or height is zero. Other presets with a
-  zero extent draw nothing, as before.
-- Path fill modes (`darken`, `lighten`, …) are not used by these presets and are
-  not implemented. Guides that evaluate to non-finite values omit the outline
-  with a warning.
-
-Fixture pages 3–6 of `tests/visual/make_preset_shapes.py`: page 3 has the 15 new
-presets at their defaults, page 4 the same presets with adjustments, 15° rotation,
-and alternating horizontal/vertical flips, page 5 the four connectors as `p:cxnSp`
-with tail arrows (defaults, then adjusted), and page 6 the same connector
-geometries as ordinary `p:sp` shapes.
-
-Comparison with LibreOffice 26.2.5.2 at 1600px on 2026-10-19 (thresholds unchanged:
-MAE 0.02, changed pixels 5%, channel tolerance 16):
-
-| Page | Before (`e103c5d`) | After |
-|---|---|---|
-| 3 new presets, defaults | MAE 0.284966, changed 40.911% (fail: omitted) | MAE 0.002176, changed 1.115% |
-| 4 adjusted, rotated, flipped | MAE 0.286900, changed 41.088% (fail: omitted) | MAE 0.002082, changed 1.016% |
-| 5 connectors (`p:cxnSp`) | MAE 0.012443, changed 1.986% (omitted) | MAE 0.021766, changed 3.450% (**fail**) |
-| 6 connector geometry (`p:sp`) | MAE 0.012206, changed 1.897% (omitted) | MAE 0.000529, changed 0.358% |
-
-Page 5 is a known difference, kept as reproduction material rather than hidden:
-LibreOffice reroutes `p:cxnSp` bent and curved connectors with its own connector
-router (for example, it starts bentConnector3 vertically) instead of drawing the
-saved preset path, even without connection sites. Page 6 draws the same geometries
-as ordinary shapes, where LibreOffice follows the preset path and the pages match.
-This renderer always draws the saved preset path. Before this change, page 5/6
-"passed" only because the omitted thin lines are a small share of the page.
-
-## Next tier presets
-
-Thirty-one further presets use the same evaluator: rtTriangle, foldedCorner,
-borderCallout1, borderCallout2, wedgeRectCallout, cloudCallout, upArrowCallout,
-downArrowCallout, rightArrowCallout, flowChartDocument, flowChartMagneticDisk,
-flowChartTerminator, flowChartExtract, flowChartConnector, blockArc, donut, arc,
-can, snip1Rect, mathPlus, mathMultiply, plus, leftBracket, rightBracket, leftBrace,
-bentUpArrow, curvedDownArrow, circularArrow, irregularSeal2, star7, and
-parallelogram. They were transcribed independently from the ECMA-376 Part 1
-DrawingMLGeometries part and checked against LibreOffice renderings. Presets
-unknown to the table (for example heart) still produce `Unsupported preset shape`.
-
-The definition format gained one directive, `approx <note>`, which records an
-approximation warning once per shape:
-
-- Lighten/darken path shading (foldedCorner's folded flap, can's top face) is not
-  drawn; the shapes use the normal fill. Warning: "lighten and darken path shading
-  is not drawn".
-- curvedDownArrow draws the darker inner face of the band with the normal fill.
-- cloudCallout draws the published cloud body; its two trailing bubbles are placed
-  along the tail by a fitted ratio rather than the published guide chain, so their
-  size and position are approximate.
-- Callouts keep the whole box as the text rectangle; brackets and braces inset it
-  by the corner arc; arrow callouts use the box part only.
-
-Fixture pages 7-10 of `tests/visual/make_preset_shapes.py`: pages 7-8 hold the 31
-presets at their defaults (18 and 13 shapes), pages 9-10 the same presets with
-non-default adjustments, 15 degree rotation, and alternating flips. Pages 1-6 are
-unchanged.
-
-Comparison with LibreOffice 26.2.5.2 at 1600px on 2026-10-20 (thresholds unchanged:
-MAE 0.02, changed pixels 5%, channel tolerance 16):
-
-| Page | Before (`0f85650`) | After |
-|---|---|---|
-| 7 next tier, defaults (18) | MAE 0.333579, changed 48.117% (fail: omitted) | MAE 0.003503, changed 1.663% |
-| 8 next tier, defaults (13) | MAE 0.188520, changed 27.271% (fail: omitted) | MAE 0.001318, changed 1.164% |
-| 9 adjusted, rotated, flipped (18) | MAE 0.335346, changed 48.332% (fail: omitted) | MAE 0.005556, changed 2.562% |
-| 10 adjusted, rotated, flipped (13) | MAE 0.183331, changed 26.453% (fail: omitted) | MAE 0.003309, changed 2.262% |
-
-Pages 1-6 keep their recorded results (page 5 remains the known `p:cxnSp` routing
-difference above).
-
-## Lines and connectors
-
-Support includes straightConnector1, bentConnector2, 11 prstDash patterns,
-five headEnd/tailEnd shapes, cap, and join. Line width sets dash and head sizes.
-Heads overlap shafts, leaving known differences at small arrows and stealth joins;
-approximation diagnostics remain. custDash and other unsupported features warn.
-
-Fixture: `python tests/visual/make_lines.py /tmp/lines.pptx`.
-Historical three-page LibreOffice comparison: MAE 0.004429/0.005158/0.001855,
-changed pixels 0.764%/2.025%/0.827%, within unchanged thresholds. Joins are not
-proven identical.
-
-## Theme line references
-
-Resolve one-based lnRef `idx` against lnStyleLst and replace phClr with the
-reference color. Apply theme lines, inherited lines, then nearest direct
-properties. Resolve width, cap, compound attributes, fill, dash, join, and each
-end separately. Direct noFill, end `type="none"`, and `prstDash="solid"` cancel
-inherited values. Partial end definitions retain unspecified attributes.
-`idx=0` means no line, with direct properties taking precedence. Unresolved indices,
-custDash, compound lines, and other unsupported features still warn.
-
-Independent implementation references:
-[LineReference](https://learn.microsoft.com/en-us/dotnet/api/documentformat.openxml.drawing.linereference?view=openxml-3.0.1),
-[LineStyleList](https://learn.microsoft.com/en-us/dotnet/api/documentformat.openxml.drawing.linestylelist?view=openxml-3.0.1),
-[Outline](https://learn.microsoft.com/en-us/dotnet/api/documentformat.openxml.drawing.outline?view=openxml-3.0.1).
-
-```sh
-python tests/visual/make_theme_lines.py /tmp/theme-lines.pptx
-python tests/visual/compare.py --fixture /tmp/theme-lines.pptx \
-  --binary target/release/rhodopsin --out /tmp/theme-lines-comparison --width 1600
-```
-
-The three pages cover theme styles, equivalent direct styles, and partial overrides
-at 0.25pt. Regression tests check pixel identity, overrides, resets, and diagnostics.
-Head joins remain approximate. Font substitution residuals are tracked separately
-in [Issue #25](https://github.com/stellar-aiz/rhodopsin/issues/25).
-
-Independent measurements of 27 combinations (0.25/0.5/0.75/1/1.5/2/3/4/6pt and
-sm/med/lg) against LibreOffice 26.2.5.2 showed constant head size through 2pt and
-proportional size above 2pt. Head reference width is therefore approximated as
-max(line width, 2pt), without thickening the shaft. Diagnostics explicitly describe
-this approximation; it is not complete PowerPoint compatibility.
-Reproduce with `python tests/visual/make_arrow_sizes.py /tmp/arrow-sizes.pptx`.
-
-## Saved bent routes and connection sites
-
-ECMA-376 Part 1 DrawingMLGeometries defines bentConnector2 as top-left -> top-right
--> bottom-right. Flip before rotating, following
-[OOXML Primer sections 5.7.3 and 5.7.6](https://download.microsoft.com/download/e/1/4/e14fb96f-83b8-4a2a-84db-7fa8acbe061a/Office%20Open%20XML%20Part%203%20-%20Primer.pdf).
-A horizontal flip followed by 270-degree rotation gives top-left -> bottom-left
--> bottom-right with a rightward head. Pixel regression tests cover this path.
-
-The static-rendering policy is to use saved geometry and transforms, including
-when `stCxn`/`endCxn` references are present. One `approximation` diagnostic per
-rendered slide states that live rerouting is not evaluated; it retains the first
-connector's target for traceability. The reference alone no longer produces a
-per-connector `unsupported` diagnostic. This is a saved-route policy, not a claim
-that all connector presets or files with stale saved geometry have been verified.
-
-`python tests/visual/make_connector_routing.py /tmp/routing.pptx` generates paired
-controls differing only in connection references, showing LibreOffice's moved
-start point versus our preserved route.
-
-### PowerPoint observation (2026-10-20)
-
-PowerPoint for Mac 16.105.3 (26020123), macOS 27.0.1 (26A434), at 100% normal-view
-zoom initially displayed the same saved L-shaped route on both fixture slides.
-Moving the lower pentagon ten unmodified Right-arrow presses left slide 1's
-unattached connector behind; slide 2's attached connector followed and rerouted.
-Saving a copy as `routing-moved.pptx` changed only slide 2's connector transform:
-
-| Saved value (EMU) | Original | After moving and saving |
-|---|---|---|
-| `a:off` (`x`, `y`) | (1097280, 1371600) | (1179830, 1174750) |
-| `a:ext` (`cx`, `cy`) | (1828800, 457200) | (1828800, 850900) |
-
-`rot=16200000`, `flipH=1`, `bentConnector2`, and the connection references stayed
-unchanged; slide 1's connector geometry stayed unchanged. Re-rendering the saved
-copy at `--width 1600 --font-fallback` reproduced the moved connector route and
-endpoint. Gradient and shadow differences remain: this verifies the route in
-this paired fixture, not pixel-perfect shape appearance or other presets. See the
-[measurement record](https://github.com/stellar-aiz/rhodopsin/issues/74#issuecomment-6286205921).
-
-This measurement supports retaining saved geometry for static rendering: the
-authoring application stores its updated route after the target moves. LibreOffice
-may choose a different route; do not change transform order or thresholds to hide it.
-
-The paired fixture was compared again against LibreOffice 26.2.5.2 with the
-unchanged `compare.py` defaults: width 1200, pixel tolerance 16, maximum MAE 0.02,
-maximum changed ratio 0.05. The results are identical before and after the
-diagnostic-only change:
-
-| Slide | Connection references | MAE | Changed pixels | Default result |
-|---|---|---|---|---|
-| 1 | absent | 0.0156192 | 4.8524% | pass |
-| 2 | present | 0.0219688 | 5.7204% | known difference (fail) |
-
-LibreOffice's reference-dependent connector route contributes to slide 2's
-failure; gradient and shadow rendering also differ on both pages. The page
-metrics measure all those differences, not just the connector. The fixture and
-the failing result remain reproducible; no threshold or transform was changed.
-
-```sh
-python tests/visual/make_connector_routing.py /tmp/routing.pptx
-python tests/visual/compare.py --fixture /tmp/routing.pptx \
-  --binary target/release/rhodopsin --out /tmp/routing-comparison
-```
+- `arcTo` angles are visual angles on the ellipse (clockwise, y down), converted to parametric angles and emitted in quarter-turn segments.
+- The published pie text rectangle reads `l=il t=ir r=it b=ib`; the guide names describe the inscribed square, so `il it ir ib` is used.
+- Unfilled paths (connectors, the cloud's inner arcs, multidocument outlines) are stroked only, and only those open paths keep line-end markers; closed outlines never draw arrowheads.
+- Connectors still draw when their width or height is zero; other presets with a zero extent draw nothing.
+- Guides that evaluate to non-finite values omit the outline with a warning.
+- The `approx <note>` directive records one approximation warning per shape: lighten/darken path shading (foldedCorner's flap, can's top face, curvedDownArrow's inner face) is drawn with the normal fill; cloudCallout's trailing bubbles are placed along the tail by a fitted ratio rather than the published guide chain.
+- Callouts keep the whole box as the text rectangle; brackets and braces inset it by the corner arc; arrow callouts use the box part only.
 
 ## Text rectangles of rect, roundRect, and ellipse
 
-`rect`, `roundRect`, and `ellipse` are still drawn as SVG primitives (their outlines are
-unchanged), but their text is laid out in the ECMA-376 Part 1 DrawingMLGeometries text
-rectangle instead of the whole bounding box:
+These three are drawn as SVG primitives, but their text is laid out in the ECMA-376 text rectangle, not the whole box, so text that does not fit records `text_overflow` instead of spilling outside a circle.
 
 | Preset | Text rectangle |
 |---|---|
 | `rect` | The whole box |
-| `roundRect` | The box inset by `0.29289 * r` on every side, where `r = min(w, h) * adj / 100000` and `adj` is pinned to 0-50000 |
-| `ellipse` | The inscribed rectangle: inset by `w * (1 - cos 45deg) / 2` horizontally and `h * (1 - cos 45deg) / 2` vertically (about 14.6% per side) |
+| `roundRect` | Inset by `0.29289 * r` on every side, where `r = min(w, h) * adj / 100000` and `adj` is pinned to 0-50000 |
+| `ellipse` | The inscribed rectangle: inset by `w * (1 - cos 45°) / 2` horizontally and `h * (1 - cos 45°) / 2` vertically |
 
-Because the text area is smaller, text that does not fit it now records `text_overflow`
-(previously it was laid out over the full box, so it started at the corner of the box,
-outside a circle, and an ellipse drawn later could cover it without any diagnostic).
-The `roundRect` adjustment handling and its "Rounded rectangle adjustment formulas are
-unsupported" diagnostic are unchanged.
+The `roundRect` adjustment diagnostic ("Rounded rectangle adjustment formulas are unsupported") is unchanged. Generator: `tests/visual/make_ellipse_text.py`.
 
-`python tests/visual/make_ellipse_text.py /tmp/ellipse-text.pptx` generates three
-concentric circles, two overlapping ellipses, a roundRect (`adj` 50000), a rect, and a
-small ellipse with text taller than its inscribed rectangle. Against LibreOffice 26.2.5.2 (cd7284b4)
-at `--width 1600` with the default thresholds, the page changed from MAE 0.01918 / changed
-pixels 4.25% (before) to MAE 0.01324 / 3.49% (after). Both are inside the thresholds, so
-the numbers alone do not show the defect: before, the outer circle's label was hidden
-under the next circle and the overlapping-ellipse labels ran past the ellipse outline.
-Compare the label positions in the two renderings, not only the metrics. Thresholds were
-not changed. Remaining differences are line-breaking and glyph advance differences
-(LibreOffice breaks a few lines one character later) and are not hidden.
+## Lines and connectors
+
+straightConnector1, bentConnector2, the preset dash patterns, headEnd/tailEnd shapes, cap, and join are supported; `custDash`, compound lines, and other unsupported features warn. Line width sets dash and head sizes. Head reference width is `max(line width, 2pt)` and the shaft is not thickened: 27 width/size combinations measured against LibreOffice showed a constant head size through 2 pt and proportional size above it. Heads overlap shafts, so small arrows and stealth joins keep known differences, and approximation diagnostics remain. Generators: `tests/visual/make_lines.py`, `tests/visual/make_arrow_sizes.py`.
+
+## Theme line references
+
+A one-based `lnRef idx` resolves against `lnStyleLst` with `phClr` replaced by the reference color. Theme lines apply first, then inherited lines, then the nearest direct properties, each of width, cap, compound, fill, dash, join, and the two ends resolved separately. Direct `noFill`, an end with `type="none"`, and `prstDash="solid"` cancel inherited values; partial end definitions keep unspecified attributes. `idx=0` means no line, with direct properties taking precedence. Unresolved indices and unsupported features warn. Generator: `tests/visual/make_theme_lines.py` (theme styles, equivalent direct styles, and partial overrides at 0.25 pt; regression tests check pixel identity between the first two). Font substitution residuals on these fixtures are tracked in [issue #25](https://github.com/stellar-aiz/rhodopsin/issues/25).
+
+References: [LineReference](https://learn.microsoft.com/en-us/dotnet/api/documentformat.openxml.drawing.linereference?view=openxml-3.0.1), [LineStyleList](https://learn.microsoft.com/en-us/dotnet/api/documentformat.openxml.drawing.linestylelist?view=openxml-3.0.1), [Outline](https://learn.microsoft.com/en-us/dotnet/api/documentformat.openxml.drawing.outline?view=openxml-3.0.1).
+
+## Saved bent routes and connection sites
+
+bentConnector2 is top-left -> top-right -> bottom-right; flips apply before rotation ([OOXML Primer 5.7.3 and 5.7.6](https://download.microsoft.com/download/e/1/4/e14fb96f-83b8-4a2a-84db-7fa8acbe061a/Office%20Open%20XML%20Part%203%20-%20Primer.pdf)), so a horizontal flip followed by 270-degree rotation gives top-left -> bottom-left -> bottom-right with a rightward head. Pixel regression tests cover this path.
+
+Static rendering uses the saved geometry and transforms even when `stCxn`/`endCxn` references are present. One `approximation` diagnostic per rendered slide states that live rerouting is not evaluated and retains the first connector target; the reference alone no longer produces a per-connector `unsupported`.
+
+Why this is the policy: a paired fixture (`tests/visual/make_connector_routing.py`) was opened in PowerPoint for Mac 16.105.3, the target of the attached connector was moved, and the copy was saved. PowerPoint stored the updated route in the connector's own `a:off`/`a:ext`; re-rendering the saved copy reproduced the moved route (issue #74). The authoring application therefore keeps saved geometry current, and a static renderer can trust it. This verifies the route for bentConnector2 in that fixture, not every preset or files with stale saved geometry.
+
+LibreOffice reroutes `p:cxnSp` bent and curved connectors with its own router (for example starting bentConnector3 vertically) even without connection sites, while it follows the preset path for the same geometry as `p:sp`. The `p:cxnSp` page of the preset fixture and slide 2 of the routing fixture therefore fail the default thresholds against LibreOffice and are kept as reproduction material. Do not change transform order or thresholds to hide this.

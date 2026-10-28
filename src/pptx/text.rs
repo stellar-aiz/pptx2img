@@ -121,7 +121,7 @@ fn is_east_asian(ch: char) -> bool {
     matches!(ch as u32, 0x3000..=0x9fff | 0xf900..=0xfaff | 0xff00..=0xffef | 0x20000..=0x323af)
 }
 // Measurement size matching Impress's 600 DPI reference device.
-// Keep glyph rendering size unchanged. See docs/rendering-notes.md for evidence and scope.
+// Keep glyph rendering size unchanged. See docs/history/20261015_text-measurement.md for evidence and scope.
 fn measurement_size(css_px: f64) -> f64 {
     let hundredth_mm = (css_px * 2540.0 / 96.0).round();
     (hundredth_mm * 600.0 / 2540.0).round().max(1.0) * 96.0 / 600.0
