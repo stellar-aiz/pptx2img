@@ -129,3 +129,5 @@ PPTX PDF backend is expected to move to the CID-font subset embedding used by
 
 Historical results and remaining differences are preserved in
 [rendering notes](rendering-notes.md) and the feature-specific documents.
+
+This line verifies the Markdown-only path filter (temporary; see #109).
