@@ -135,10 +135,10 @@ fn table_font_reference_mapping_and_cell_margins_match_explicit_textbox() {
                 ("ppt/tableStyles.xml", styles.into_bytes()),
             ],
         );
-        let report = pptx2img::convert(
+        let report = rhodopsin::convert(
             &input,
             &out,
-            &pptx2img::ConvertOptions {
+            &rhodopsin::ConvertOptions {
                 font_fallback: true,
                 width: 100,
                 no_system_fonts: true,

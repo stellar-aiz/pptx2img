@@ -1,4 +1,4 @@
-# pptx2img
+# rhodopsin
 
 Convert PPTX slides to PNG or searchable PDF with a standalone CLI or Rust library.
 
@@ -12,14 +12,14 @@ Requires Rust and Cargo. Install from this checkout:
 
 ```sh
 cargo install --path . --locked
-pptx2img slides.pptx
-pptx2img --help
+rhodopsin slides.pptx
+rhodopsin --help
 ```
 
-Writes `slides.pptx2img/slide-001.png`, etc., and `manifest.json`.
+Writes `slides.rhodopsin/slide-001.png`, etc., and `manifest.json`.
 Use `--out images` to choose a destination; existing directories are never overwritten.
 
-For one PDF per deck, use `pptx2img slides.pptx --format pdf --out slides.pdf`.
+For one PDF per deck, use `rhodopsin slides.pptx --format pdf --out slides.pdf`.
 PDF output preserves text and supported vector shapes using the existing rendering
 dependencies. Its initial [supported subset](docs/rendering.md#pdf-output) is narrower
 than PNG; unsupported PDF features fail explicitly. Existing files are never replaced.

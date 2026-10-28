@@ -1,5 +1,5 @@
 {
-  "comment": "Pins the LibreOffice reference to the face pptx2img resolves to on the comparison machine, so the comparison measures layout rather than font fallback. Keys are families usually missing from the machine. The CJK, Aptos and Century families added after the corpus survey are those whose LibreOffice fallback was seen to switch between runs. Entries that map a family to itself (Arial, Georgia, ...) pin faces that macOS ships, so they count as pinned in unpinned_families; they do not change the reference.",
+  "comment": "Pins the LibreOffice reference to the face rhodopsin resolves to on the comparison machine, so the comparison measures layout rather than font fallback. Keys are families usually missing from the machine. The CJK, Aptos and Century families added after the corpus survey are those whose LibreOffice fallback was seen to switch between runs. Entries that map a family to itself (Arial, Georgia, ...) pin faces that macOS ships, so they count as pinned in unpinned_families; they do not change the reference.",
   "families": {
     "Aptos": "Hiragino Sans",
     "Aptos Display": "Hiragino Sans",

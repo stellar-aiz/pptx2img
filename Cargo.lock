@@ -528,25 +528,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "pptx2img"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "base64 0.22.1",
- "clap",
- "imagesize",
- "png",
- "resvg",
- "roxmltree 0.21.1",
- "serde",
- "serde_json",
- "skrifa",
- "tempfile",
- "zip",
- "zune-jpeg",
-]
-
-[[package]]
 name = "proc-macro2"
 version = "1.0.107"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -612,6 +593,25 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "47b34b781b31e5d73e9fbc8689c70551fd1ade9a19e3e28cfec8580a79290cc4"
 dependencies = [
  "bytemuck",
+]
+
+[[package]]
+name = "rhodopsin"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "base64 0.22.1",
+ "clap",
+ "imagesize",
+ "png",
+ "resvg",
+ "roxmltree 0.21.1",
+ "serde",
+ "serde_json",
+ "skrifa",
+ "tempfile",
+ "zip",
+ "zune-jpeg",
 ]
 
 [[package]]

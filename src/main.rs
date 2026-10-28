@@ -1,7 +1,7 @@
 //! CLI for the PPTX-to-PNG conversion library.
 mod cli_output;
 use clap::{Parser, ValueEnum};
-use pptx2img::{ConvertOptions, SlideReport, convert, convert_pdf};
+use rhodopsin::{ConvertOptions, SlideReport, convert, convert_pdf};
 use std::path::PathBuf;
 
 #[derive(Clone, Copy, Debug, Default, ValueEnum)]
@@ -25,7 +25,7 @@ struct Args {
     /// Output format
     #[arg(long, value_enum, default_value_t = Format::Png)]
     format: Format,
-    /// PNG directory or PDF file (default: <input>.pptx2img or <input>.pdf; never overwritten)
+    /// PNG directory or PDF file (default: <input>.rhodopsin or <input>.pdf; never overwritten)
     #[arg(long)]
     out: Option<PathBuf>,
     /// PNG image width; ignored for PDF page size
@@ -107,7 +107,7 @@ fn main() {
     };
     let out = args.out.unwrap_or_else(|| {
         args.input.with_extension(match args.format {
-            Format::Png => "pptx2img",
+            Format::Png => "rhodopsin",
             Format::Pdf => "pdf",
         })
     });

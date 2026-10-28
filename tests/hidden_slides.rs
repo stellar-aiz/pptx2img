@@ -63,7 +63,7 @@ fn convert(
     let input = dir.path().join("deck.pptx");
     let out = dir.path().join("out");
     deck(&input, shows);
-    let output = Command::new(env!("CARGO_BIN_EXE_pptx2img"))
+    let output = Command::new(env!("CARGO_BIN_EXE_rhodopsin"))
         .arg(&input)
         .arg("--out")
         .arg(&out)

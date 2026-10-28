@@ -1,6 +1,6 @@
 # Software Design Charter
 
-pptx2img converts PPTX slides into images according to four design principles:
+rhodopsin converts PPTX slides into images according to four design principles:
 lightweightness, fidelity, transparency, and observability.
 
 These principles guide the software's behavior and architecture. Development

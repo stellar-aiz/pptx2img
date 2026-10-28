@@ -2,7 +2,7 @@
 project_common_language: en
 ---
 
-# pptx2img Development Guidelines
+# rhodopsin Development Guidelines
 
 ## Software design charter
 

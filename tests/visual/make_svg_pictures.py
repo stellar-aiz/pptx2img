@@ -8,7 +8,7 @@ One slide with three pictures of the same generated icon (an SVG written here):
    (a coarser copy of the icon) and `svgBlip` points at the SVG;
 3. SVG only, stretched to a wide frame (the picture fills its frame, ignoring aspect).
 
-pptx2img renders the SVG for all three. python-pptx and Pillow are needed only for
+rhodopsin renders the SVG for all three. python-pptx and Pillow are needed only for
 generation.
 """
 from io import BytesIO

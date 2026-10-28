@@ -20,9 +20,9 @@ for name in names:
 builder.setupGlyf(glyphs)
 builder.setupHorizontalMetrics(dict(zip(names, [(1000, 0), (1000, 0), (500, 0), (250, 0), (0, 0)])))
 builder.setupHorizontalHeader(ascent=800, descent=-200)
-builder.setupNameTable({'familyName': 'Pptx2img Metrics Test', 'styleName': 'Regular',
-                        'uniqueFontIdentifier': 'Pptx2img Metrics Test',
-                        'fullName': 'Pptx2img Metrics Test', 'psName': 'Pptx2imgMetricsTest'})
+builder.setupNameTable({'familyName': 'Rhodopsin Metrics Test', 'styleName': 'Regular',
+                        'uniqueFontIdentifier': 'Rhodopsin Metrics Test',
+                        'fullName': 'Rhodopsin Metrics Test', 'psName': 'RhodopsinMetricsTest'})
 builder.setupOS2(sTypoAscender=800, sTypoDescender=-200, usWinAscent=800, usWinDescent=200)
 builder.setupPost()
 builder.setupMaxp()

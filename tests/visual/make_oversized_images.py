@@ -1,6 +1,6 @@
 """Independent fixture: pictures above the embed limit (4400x4400 PNG, 5800x3456 JPEG).
 
-pptx2img downscales both with `approximation` diagnostics instead of aborting. The
+rhodopsin downscales both with `approximation` diagnostics instead of aborting. The
 script also writes a same-layout deck without pictures, for peak-memory comparison.
 python-pptx and Pillow are needed only for generation.
 """

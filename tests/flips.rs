@@ -7,7 +7,7 @@ use support::*;
 const BOX: (i32, i32, i32, i32) = (5, 10, 90, 40);
 /// Uneven glyph gaps ("A" is narrow, "あ" is wide) make a mirror image distinguishable
 /// from a translation, and each glyph sits low in its line, so a 180-degree turn is too.
-const BODY: &str = r#"<p:txBody><a:bodyPr lIns="0" rIns="0" tIns="0" bIns="0" anchor="t"/><a:p><a:pPr algn="l"/><a:r><a:rPr sz="1800"><a:latin typeface="Pptx2img Metrics Test"/><a:ea typeface="Pptx2img Metrics Test"/><a:solidFill><a:srgbClr val="000000"/></a:solidFill></a:rPr><a:t>AAあA</a:t></a:r></a:p></p:txBody>"#;
+const BODY: &str = r#"<p:txBody><a:bodyPr lIns="0" rIns="0" tIns="0" bIns="0" anchor="t"/><a:p><a:pPr algn="l"/><a:r><a:rPr sz="1800"><a:latin typeface="Rhodopsin Metrics Test"/><a:ea typeface="Rhodopsin Metrics Test"/><a:solidFill><a:srgbClr val="000000"/></a:solidFill></a:rPr><a:t>AAあA</a:t></a:r></a:p></p:txBody>"#;
 
 type Pixels = BTreeSet<(i32, i32)>;
 

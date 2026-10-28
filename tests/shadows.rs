@@ -74,7 +74,7 @@ fn autofit_shadow_and_rotated_geometry_match_explicit_final_dimensions() {
             let xfrm =
                 transform(20, y, 60, h).replace("<a:xfrm>", r#"<a:xfrm rot="1800000" flipH="1">"#);
             let shape = format!(
-                r#"<p:sp><p:spPr>{xfrm}<a:prstGeom prst="rightArrow"/><a:solidFill><a:srgbClr val="00FF00"/></a:solidFill><a:effectLst><a:outerShdw blurRad="9525" dist="95250" dir="5400000" rotWithShape="{follows}"><a:srgbClr val="000000"><a:alpha val="50000"/></a:srgbClr></a:outerShdw></a:effectLst></p:spPr><p:txBody><a:bodyPr lIns="0" rIns="0" tIns="0" bIns="0" anchor="ctr"><a:{mode}/></a:bodyPr><a:p><a:pPr><a:defRPr sz="600"><a:latin typeface="Pptx2img Metrics Test"/></a:defRPr></a:pPr><a:r><a:t>A</a:t></a:r><a:br/><a:r><a:t>A</a:t></a:r><a:br/><a:r><a:t>A</a:t></a:r></a:p></p:txBody></p:sp>"#
+                r#"<p:sp><p:spPr>{xfrm}<a:prstGeom prst="rightArrow"/><a:solidFill><a:srgbClr val="00FF00"/></a:solidFill><a:effectLst><a:outerShdw blurRad="9525" dist="95250" dir="5400000" rotWithShape="{follows}"><a:srgbClr val="000000"><a:alpha val="50000"/></a:srgbClr></a:outerShdw></a:effectLst></p:spPr><p:txBody><a:bodyPr lIns="0" rIns="0" tIns="0" bIns="0" anchor="ctr"><a:{mode}/></a:bodyPr><a:p><a:pPr><a:defRPr sz="600"><a:latin typeface="Rhodopsin Metrics Test"/></a:defRPr></a:pPr><a:r><a:t>A</a:t></a:r><a:br/><a:r><a:t>A</a:t></a:r><a:br/><a:r><a:t>A</a:t></a:r></a:p></p:txBody></p:sp>"#
             );
             let input = d.path().join(format!("{follows}-{fitted}.pptx"));
             let out = d.path().join(format!("{follows}-{fitted}"));
