@@ -1,5 +1,5 @@
 //! Exercise the PDF API and CLI using deterministic local fonts and OOXML.
-use pptx2img::{ConvertOptions, convert, convert_pdf};
+use rhodopsin::{ConvertOptions, convert, convert_pdf};
 use std::{fs, io::Write, path::Path, process::Command};
 use zip::{ZipWriter, write::SimpleFileOptions};
 const P: &str = "http://schemas.openxmlformats.org/presentationml/2006/main";
@@ -49,7 +49,7 @@ fn options() -> ConvertOptions {
     }
 }
 fn run(input: &Path, out: Option<&Path>) -> std::process::Output {
-    let mut command = Command::new(env!("CARGO_BIN_EXE_pptx2img"));
+    let mut command = Command::new(env!("CARGO_BIN_EXE_rhodopsin"));
     command
         .arg(input)
         .args(["--format", "pdf", "--no-system-fonts", "--font-file"])
@@ -137,7 +137,7 @@ fn unsupported_paint_and_strict_mode_leave_no_pdf_or_temporary_file() {
     let mut opts = options();
     opts.strict = true;
     let error = convert_pdf(&input, &out, &opts).unwrap_err();
-    assert!(error.downcast_ref::<pptx2img::StrictModeError>().is_some());
+    assert!(error.downcast_ref::<rhodopsin::StrictModeError>().is_some());
     assert!(!out.exists());
 }
 #[test]

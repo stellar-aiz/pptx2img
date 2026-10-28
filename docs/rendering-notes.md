@@ -18,8 +18,13 @@ Fixed-line first-line placement and inherited hanging punctuation improved the
 second page sufficiently to meet the existing thresholds. Both text-theme pages
 and theme.pptx are regression fixtures.
 
+On 2026-10-28 the project was renamed and the title run in `basic.pptx` changed
+from `pptx2img — 最初の描画` to `rhodopsin — 最初の描画`. Re-measured on the same
+macOS setup, basic.pptx moved from 3.94% / 0.01478 to 3.93% / 0.01480, within
+run-to-run noise; the table above predates the rename.
+
 ```sh
-python tests/visual/compare.py --binary target/release/pptx2img \
+python tests/visual/compare.py --binary target/release/rhodopsin \
   --fixture examples/text-theme.pptx --out target/visual-tests/text-theme-001
 ```
 
@@ -91,7 +96,7 @@ and changed pixels from 4.14% to 1.60%. Local differences can remain below globa
 thresholds, so unit tests also cover advances, positions, breaks, and empty lines.
 
 ```sh
-PPTX2IMG_TEST_PYTHON="$PWD/.venv-visual/bin/python" \
+RHODOPSIN_TEST_PYTHON="$PWD/.venv-visual/bin/python" \
   cargo test --test libreoffice automatic_punctuation -- --ignored --nocapture
 python tests/visual/make_auto_punctuation.py examples/auto-punctuation.pptx
 ```
@@ -113,7 +118,7 @@ one-character move even when line count stays the same. Results are recorded in
 `line-break-report.json`.
 
 ```sh
-PPTX2IMG_TEST_PYTHON="$PWD/.venv-visual/bin/python" \
+RHODOPSIN_TEST_PYTHON="$PWD/.venv-visual/bin/python" \
   cargo test --test libreoffice boundary_widths -- --ignored --nocapture
 python tests/visual/make_boundary_widths.py examples/boundary-widths.pptx --include-prefix-cases
 ```
@@ -124,7 +129,7 @@ the line-level checks. The separate 72-page `boundary-font-metrics.pptx` preserv
 all 144 OFF/ON conditions, including 12pt OFF at 59.98/59.99pt.
 
 ```sh
-python tests/visual/compare_boundary_widths.py --binary target/release/pptx2img \
+python tests/visual/compare_boundary_widths.py --binary target/release/rhodopsin \
   --fixture examples/boundary-font-metrics.pptx --out /tmp/font-metrics-comparison
 python tests/visual/make_boundary_widths.py examples/boundary-font-metrics.pptx \
   --sizes 12 20 21.5 32
@@ -209,7 +214,7 @@ unchanged outer bounds, but is not OCR or per-character coordinate matching.
 Observed maxima were about 1.91px transport and 2px edge offset.
 
 ```sh
-python tests/visual/compare_punctuation_positions.py --binary target/release/pptx2img \
+python tests/visual/compare_punctuation_positions.py --binary target/release/rhodopsin \
   --fixture examples/punctuation-positions.pptx --out /tmp/punctuation-positions
 python tests/visual/make_punctuation_positions.py examples/punctuation-positions.pptx
 ```
@@ -221,7 +226,7 @@ Nested brackets `「「あ」」い」` still differ. The known failing fixture 
 separate from passing regression cases; the following command reports failure:
 
 ```sh
-python tests/visual/compare_punctuation_positions.py --binary target/release/pptx2img \
+python tests/visual/compare_punctuation_positions.py --binary target/release/rhodopsin \
   --fixture examples/punctuation-position-nested.pptx --out /tmp/punctuation-nested
 python tests/visual/make_punctuation_positions.py \
   examples/punctuation-position-nested.pptx --sizes 24 --nested
@@ -241,7 +246,7 @@ and schema-version-2 diagnostics by part, object, and location.
 cropped images, and inherited titles. Regenerate with python-pptx 1.0.2:
 
 ```sh
-PPTX2IMG_TEST_PYTHON="$PWD/.venv-visual/bin/python" \
+RHODOPSIN_TEST_PYTHON="$PWD/.venv-visual/bin/python" \
   cargo test --test libreoffice composite_shapes -- --ignored --nocapture
 python tests/visual/make_composite_shapes.py
 ```
@@ -274,5 +279,5 @@ The independent fixture generator preserves the observed paragraph contents:
 python tests/visual/make_empty_bullets.py examples/empty-bullets.pptx
 ```
 
-The [Issue #53 observation](https://github.com/stellar-aiz/pptx2img/issues/53#issuecomment-6286206284)
+The [Issue #53 observation](https://github.com/stellar-aiz/rhodopsin/issues/53#issuecomment-6286206284)
 records the manual check. The original was neither edited nor saved.

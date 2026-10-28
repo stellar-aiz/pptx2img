@@ -4,7 +4,7 @@ One slide, four generated PNG pictures, each with a caption:
 
 1. a control picture with an ordinary image relationship;
 2. a picture whose relationship type is rewritten to `oleObject` (as some third-party
-   writers do); pptx2img loads the part because the picture references it and renders it;
+   writers do); rhodopsin loads the part because the picture references it and renders it;
 3. a picture whose `r:embed` points at a relationship id that does not exist;
 4. a picture whose crop (`srcRect`) leaves no visible area.
 

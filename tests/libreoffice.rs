@@ -39,7 +39,7 @@ fn explicit_character_spacing_matches_libreoffice() {
 #[ignore = "Requires LibreOffice and Japanese fonts"]
 fn automatic_punctuation_compression_matches_both_modes() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let python = std::env::var_os("PPTX2IMG_TEST_PYTHON").unwrap_or_else(|| "python3".into());
+    let python = std::env::var_os("RHODOPSIN_TEST_PYTHON").unwrap_or_else(|| "python3".into());
     let run_id = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap()
@@ -50,7 +50,7 @@ fn automatic_punctuation_compression_matches_both_modes() {
     let status = Command::new(python)
         .arg(root.join("tests/visual/compare_auto_punctuation.py"))
         .arg("--binary")
-        .arg(env!("CARGO_BIN_EXE_pptx2img"))
+        .arg(env!("CARGO_BIN_EXE_rhodopsin"))
         .arg("--fixture")
         .arg(root.join("examples/auto-punctuation.pptx"))
         .arg("--out")
@@ -68,7 +68,7 @@ fn automatic_punctuation_compression_matches_both_modes() {
 #[ignore = "Requires LibreOffice and Japanese fonts"]
 fn boundary_widths_match_both_modes() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let python = std::env::var_os("PPTX2IMG_TEST_PYTHON").unwrap_or_else(|| "python3".into());
+    let python = std::env::var_os("RHODOPSIN_TEST_PYTHON").unwrap_or_else(|| "python3".into());
     let run_id = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap()
@@ -79,7 +79,7 @@ fn boundary_widths_match_both_modes() {
     let status = Command::new(python)
         .arg(root.join("tests/visual/compare_boundary_widths.py"))
         .arg("--binary")
-        .arg(env!("CARGO_BIN_EXE_pptx2img"))
+        .arg(env!("CARGO_BIN_EXE_rhodopsin"))
         .arg("--fixture")
         .arg(root.join("examples/boundary-widths.pptx"))
         .arg("--out")
@@ -97,7 +97,7 @@ fn boundary_widths_match_both_modes() {
 #[ignore = "Requires LibreOffice and Japanese fonts"]
 fn punctuation_positions_match_both_modes() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let python = std::env::var_os("PPTX2IMG_TEST_PYTHON").unwrap_or_else(|| "python3".into());
+    let python = std::env::var_os("RHODOPSIN_TEST_PYTHON").unwrap_or_else(|| "python3".into());
     let run_id = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap()
@@ -109,7 +109,7 @@ fn punctuation_positions_match_both_modes() {
     let status = Command::new(python)
         .arg(root.join("tests/visual/compare_punctuation_positions.py"))
         .arg("--binary")
-        .arg(env!("CARGO_BIN_EXE_pptx2img"))
+        .arg(env!("CARGO_BIN_EXE_rhodopsin"))
         .arg("--fixture")
         .arg(root.join("examples/punctuation-positions.pptx"))
         .arg("--out")
@@ -125,7 +125,7 @@ fn punctuation_positions_match_both_modes() {
 
 fn compare_fixture(fixture: &str) {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let python = std::env::var_os("PPTX2IMG_TEST_PYTHON").unwrap_or_else(|| "python3".into());
+    let python = std::env::var_os("RHODOPSIN_TEST_PYTHON").unwrap_or_else(|| "python3".into());
     let run_id = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap()
@@ -136,7 +136,7 @@ fn compare_fixture(fixture: &str) {
     let status = Command::new(python)
         .arg(root.join("tests/visual/compare.py"))
         .arg("--binary")
-        .arg(env!("CARGO_BIN_EXE_pptx2img"))
+        .arg(env!("CARGO_BIN_EXE_rhodopsin"))
         .arg("--fixture")
         .arg(root.join(format!("examples/{fixture}.pptx")))
         .arg("--out")

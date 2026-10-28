@@ -134,7 +134,7 @@ fn publish(out: &Path, write: impl FnOnce(&mut fs::File) -> Result<()>) -> Resul
     let mut candidate = None;
     for _ in 0..32 {
         let path = parent.join(format!(
-            ".pptx2img-{}-{}.tmp",
+            ".rhodopsin-{}-{}.tmp",
             std::process::id(),
             NEXT_TEMP.fetch_add(1, Ordering::Relaxed)
         ));

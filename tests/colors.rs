@@ -49,7 +49,7 @@ fn presentation_text_defaults_and_theme_fill_survive_together() {
     for explicit in [false, true] {
         let input = d.path().join(format!("{explicit}.pptx"));
         let out = d.path().join(format!("{explicit}"));
-        let defaults = r#"<a:defRPr sz="1200"><a:latin typeface="Pptx2img Metrics Test"/><a:solidFill><a:schemeClr val="accent1"/></a:solidFill></a:defRPr>"#;
+        let defaults = r#"<a:defRPr sz="1200"><a:latin typeface="Rhodopsin Metrics Test"/><a:solidFill><a:schemeClr val="accent1"/></a:solidFill></a:defRPr>"#;
         let local = if explicit { defaults } else { "" };
         let shape = format!(
             r#"<p:sp><p:nvSpPr><p:cNvPr id="2" name="既定本文"/><p:cNvSpPr txBox="1"/><p:nvPr/></p:nvSpPr><p:spPr>{}<a:prstGeom prst="rect"/></p:spPr><p:style><a:fillRef idx="1"><a:schemeClr val="accent2"/></a:fillRef></p:style><p:txBody><a:bodyPr lIns="0" rIns="0" tIns="0" bIns="0"/><a:p><a:pPr>{local}</a:pPr><a:r><a:t>AAAA</a:t></a:r></a:p></p:txBody></p:sp>"#,

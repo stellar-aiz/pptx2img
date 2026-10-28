@@ -37,7 +37,7 @@ jobs:
     env:
       # Per-OS replacement table pinned in every LibreOffice profile, including runs that cannot
       # pass --font-substitution-map (cargo-driven comparisons).
-      PPTX2IMG_FONT_SUBSTITUTION_MAP: ${{ github.workspace }}/${{ matrix.substitution_map }}
+      RHODOPSIN_FONT_SUBSTITUTION_MAP: ${{ github.workspace }}/${{ matrix.substitution_map }}
       NOTO_SANS_CJK_TAG: Sans2.004
       PYTHONUTF8: '1'
     steps:
@@ -145,7 +145,7 @@ jobs:
           : > determinism-summary.md
           status=0
           for fixture in examples/text-bullets.pptx target/visual-tests/fixtures/font-substitution.pptx; do
-            python tests/visual/check_determinism.py --binary "target/release/pptx2img${{ matrix.exe }}" \
+            python tests/visual/check_determinism.py --binary "target/release/rhodopsin${{ matrix.exe }}" \
               --fixture "$fixture" --font-substitution-map "${{ matrix.substitution_map }}" \
               --soffice "$SOFFICE" ${{ matrix.strict_pinning }} --out "target/visual-tests/determinism/$(basename "$fixture" .pptx)" >> determinism-summary.md || status=1
           done

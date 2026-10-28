@@ -137,11 +137,11 @@ fn glyphs(
     let requested = style.face.clone();
     let id = fonts
         .faces()
-        .find(|f| format!("pptx2img-face-{}", f.id) == style.face)
+        .find(|f| format!("rhodopsin-face-{}", f.id) == style.face)
         .map(|f| f.id)
         .or_else(|| resolver.select(&style.face, value, style.bold, style.italic, warnings));
     if let Some(id) = id {
-        style.face = format!("pptx2img-face-{id}");
+        style.face = format!("rhodopsin-face-{id}");
         if let Some(Some(result)) = fonts.with_face_data(id, |data, index| {
             let font = FontRef::from_index(data, index).ok()?;
             let size = Size::new(style.size as f32);
@@ -188,7 +188,7 @@ fn glyphs(
                             );
                             if let Some(fallback) = fallback {
                                 let mut replacement = style.clone();
-                                replacement.face = format!("pptx2img-face-{fallback}");
+                                replacement.face = format!("rhodopsin-face-{fallback}");
                                 return glyphs(&ch.to_string(), replacement, resolver, warnings)
                                     .remove(0);
                             }
@@ -1193,7 +1193,7 @@ mod tests {
             (32.0, 42.72),
         ] {
             let mut style = sample("あ")[0].style.clone();
-            style.face = "Pptx2img Metrics Test".into();
+            style.face = "Rhodopsin Metrics Test".into();
             style.size = size_pt * 4.0 / 3.0;
             let mut warnings = Warnings::default();
             let measured = glyphs(
@@ -1581,7 +1581,7 @@ mod tests {
         let doc = Document::parse(&source).unwrap();
         let mut theme = Theme::default();
         theme.presentation = Some(format!(
-            r#"<p:presentation xmlns:p="{P}" xmlns:a="{A}"><p:defaultTextStyle><a:lvl1pPr><a:defRPr sz="{size}"><a:latin typeface="Pptx2img Metrics Test"/></a:defRPr></a:lvl1pPr></p:defaultTextStyle></p:presentation>"#
+            r#"<p:presentation xmlns:p="{P}" xmlns:a="{A}"><p:defaultTextStyle><a:lvl1pPr><a:defRPr sz="{size}"><a:latin typeface="Rhodopsin Metrics Test"/></a:defRPr></a:lvl1pPr></p:defaultTextStyle></p:presentation>"#
         ));
         let mut fonts = Database::new();
         fonts.load_font_data(include_bytes!("../../tests/fixtures/metrics.ttf").to_vec());
@@ -1678,7 +1678,7 @@ mod tests {
         paragraphs: &str,
     ) -> (String, TextExtent, Warnings) {
         let xml = format!(
-            r#"<root xmlns:a="{A}" xmlns:p="{P}"><p:txBody><a:bodyPr lIns="0" rIns="0" tIns="0" bIns="0" anchor="{anchor}" wrap="{wrap}">{mode}</a:bodyPr><a:lstStyle><a:lvl1pPr><a:defRPr sz="1500"><a:latin typeface="Pptx2img Metrics Test"/></a:defRPr></a:lvl1pPr></a:lstStyle>{paragraphs}</p:txBody><p:txBody><a:bodyPr>{inherited_mode}</a:bodyPr></p:txBody></root>"#
+            r#"<root xmlns:a="{A}" xmlns:p="{P}"><p:txBody><a:bodyPr lIns="0" rIns="0" tIns="0" bIns="0" anchor="{anchor}" wrap="{wrap}">{mode}</a:bodyPr><a:lstStyle><a:lvl1pPr><a:defRPr sz="1500"><a:latin typeface="Rhodopsin Metrics Test"/></a:defRPr></a:lvl1pPr></a:lstStyle>{paragraphs}</p:txBody><p:txBody><a:bodyPr>{inherited_mode}</a:bodyPr></p:txBody></root>"#
         );
         let doc = Document::parse(&xml).unwrap();
         let bodies: Vec<_> = doc
@@ -1859,7 +1859,7 @@ mod tests {
     fn bullets_and_wrapped_lines_have_separate_starts() {
         for (level, margin, marker_x) in [(0, 190500, 0.0), (1, 381000, 20.0)] {
             let paragraph = format!(
-                r#"<a:p><a:pPr lvl="{level}" marL="{margin}" indent="-190500"><a:buFont typeface="Pptx2img Metrics Test"/><a:buChar char="A"/></a:pPr><a:r><a:t>AAAA AAAA AAAA AAAA AAAA</a:t></a:r></a:p>"#
+                r#"<a:p><a:pPr lvl="{level}" marL="{margin}" indent="-190500"><a:buFont typeface="Rhodopsin Metrics Test"/><a:buChar char="A"/></a:pPr><a:r><a:t>AAAA AAAA AAAA AAAA AAAA</a:t></a:r></a:p>"#
             );
             let (svg, _) = inherited_fixture(&paragraph, "900");
             let root = format!("<svg>{svg}</svg>");
@@ -1887,7 +1887,7 @@ mod tests {
     }
     #[test]
     fn empty_paragraphs_hide_markers_but_space_runs_show_them() {
-        let bullet = r#"<a:pPr marL="190500" indent="-190500"><a:buFont typeface="Pptx2img Metrics Test"/><a:buChar char="A"/></a:pPr>"#;
+        let bullet = r#"<a:pPr marL="190500" indent="-190500"><a:buFont typeface="Rhodopsin Metrics Test"/><a:buChar char="A"/></a:pPr>"#;
         let tail = r#"<a:p><a:r><a:t>B</a:t></a:r></a:p>"#;
         let marker_count = |svg: &str| {
             let root = format!("<svg>{svg}</svg>");

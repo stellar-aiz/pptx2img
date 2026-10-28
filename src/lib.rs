@@ -1,7 +1,7 @@
 //! Convert PPTX to PNG or PDF without an Office runtime dependency.
 //!
 //! ```no_run
-//! use pptx2img::{convert, ConvertOptions};
+//! use rhodopsin::{convert, ConvertOptions};
 //! let report = convert("slides.pptx", "images", &ConvertOptions::default())?;
 //! println!("Rendered {} slides", report.slides.len());
 //! # Ok::<(), anyhow::Error>(())
@@ -265,7 +265,7 @@ fn prepare(
     let aliases: std::collections::HashMap<_, _> = options
         .fontdb
         .faces()
-        .map(|f| (format!("pptx2img-face-{}", f.id), f.id))
+        .map(|f| (format!("rhodopsin-face-{}", f.id), f.id))
         .collect();
     options.font_resolver.select_font = Box::new(move |font, _| {
         font.families().iter().find_map(|family| match family {
@@ -362,7 +362,7 @@ fn report_fonts(deck: &pptx::Deck, options: &resvg::usvg::Options<'_>) -> Vec<Fo
         .filter(|f| {
             deck.slides.iter().any(|s| {
                 s.svg
-                    .contains(&format!("font-family=\"pptx2img-face-{}\"", f.id))
+                    .contains(&format!("font-family=\"rhodopsin-face-{}\"", f.id))
             })
         })
         .map(|f| FontReport {

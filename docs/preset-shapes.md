@@ -17,7 +17,7 @@ Generate independent fixtures without source-document assets:
 ```sh
 python tests/visual/make_preset_shapes.py /tmp/presets.pptx
 python tests/visual/compare.py --fixture /tmp/presets.pptx \
-  --binary target/debug/pptx2img --out /tmp/presets-comparison --width 1600
+  --binary target/debug/rhodopsin --out /tmp/presets-comparison --width 1600
 ```
 
 On 2026-10-18 with LibreOffice 26.2.5.2, Hiragino Sans, and punctuation compression
@@ -155,13 +155,13 @@ Independent implementation references:
 ```sh
 python tests/visual/make_theme_lines.py /tmp/theme-lines.pptx
 python tests/visual/compare.py --fixture /tmp/theme-lines.pptx \
-  --binary target/release/pptx2img --out /tmp/theme-lines-comparison --width 1600
+  --binary target/release/rhodopsin --out /tmp/theme-lines-comparison --width 1600
 ```
 
 The three pages cover theme styles, equivalent direct styles, and partial overrides
 at 0.25pt. Regression tests check pixel identity, overrides, resets, and diagnostics.
 Head joins remain approximate. Font substitution residuals are tracked separately
-in [Issue #25](https://github.com/stellar-aiz/pptx2img/issues/25).
+in [Issue #25](https://github.com/stellar-aiz/rhodopsin/issues/25).
 
 Independent measurements of 27 combinations (0.25/0.5/0.75/1/1.5/2/3/4/6pt and
 sm/med/lg) against LibreOffice 26.2.5.2 showed constant head size through 2pt and
@@ -207,7 +207,7 @@ unchanged; slide 1's connector geometry stayed unchanged. Re-rendering the saved
 copy at `--width 1600 --font-fallback` reproduced the moved connector route and
 endpoint. Gradient and shadow differences remain: this verifies the route in
 this paired fixture, not pixel-perfect shape appearance or other presets. See the
-[measurement record](https://github.com/stellar-aiz/pptx2img/issues/74#issuecomment-6286205921).
+[measurement record](https://github.com/stellar-aiz/rhodopsin/issues/74#issuecomment-6286205921).
 
 This measurement supports retaining saved geometry for static rendering: the
 authoring application stores its updated route after the target moves. LibreOffice
@@ -231,7 +231,7 @@ the failing result remain reproducible; no threshold or transform was changed.
 ```sh
 python tests/visual/make_connector_routing.py /tmp/routing.pptx
 python tests/visual/compare.py --fixture /tmp/routing.pptx \
-  --binary target/release/pptx2img --out /tmp/routing-comparison
+  --binary target/release/rhodopsin --out /tmp/routing-comparison
 ```
 
 ## Text rectangles of rect, roundRect, and ellipse

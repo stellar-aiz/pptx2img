@@ -21,7 +21,7 @@ const MAX_GENERATED_BYTES: usize = 32 * 1024 * 1024;
 pub(super) fn check(data: &[u8]) -> Result<bool, String> {
     gate(data, MAX_BYTES, false)
 }
-/// Gate for SVG that pptx2img translated from a metafile: the same node limit, reference
+/// Gate for SVG that rhodopsin translated from a metafile: the same node limit, reference
 /// rules, and render check, except that `<image>` may carry the PNG data URIs the
 /// translator encoded under the PNG/JPEG size policy.
 pub(super) fn check_generated(data: &[u8]) -> Result<bool, String> {

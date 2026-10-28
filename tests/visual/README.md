@@ -57,7 +57,7 @@ limitation, not fixed by this comparator.
 cargo build --locked
 .venv-visual/bin/python tests/visual/make_local_omission.py /tmp/local-omission.pptx
 .venv-visual/bin/python tests/visual/compare.py \
-  --binary target/debug/pptx2img \
+  --binary target/debug/rhodopsin \
   --fixture /tmp/local-omission.pptx --regions /tmp/local-omission.json \
   --width 1600 --out target/visual-tests/local-omission
 ```
@@ -69,30 +69,30 @@ remain in the report.
 ## Independent unsupported-image fixture
 
 Generate a deck whose slide and shared layout each place a minimal EMF picture
-(written byte by byte by the script). Since issue #78 step 2 pptx2img translates
+(written byte by byte by the script). Since issue #78 step 2 rhodopsin translates
 these EMF rectangles to SVG and draws them, as LibreOffice does; the deck now checks
 that a layout picture renders on every slide.
 
 ```sh
 .venv-visual/bin/python tests/visual/make_unsupported_images.py /tmp/unsupported-images.pptx
-target/debug/pptx2img /tmp/unsupported-images.pptx --out /tmp/unsupported-images --width 1600 --font-fallback
+target/debug/rhodopsin /tmp/unsupported-images.pptx --out /tmp/unsupported-images --width 1600 --font-fallback
 ```
 
 ## Independent oversized-image fixture
 
 Generate a deck with a 4400x4400 PNG and a 5800x3456 JPEG, plus a same-layout
-baseline deck without pictures for peak-memory comparison. pptx2img downscales both
+baseline deck without pictures for peak-memory comparison. rhodopsin downscales both
 pictures (longest side 2048 px) with `approximation` diagnostics.
 
 ```sh
 .venv-visual/bin/python tests/visual/make_oversized_images.py /tmp/oversized-images.pptx
-/usr/bin/time -l target/release/pptx2img /tmp/oversized-images.pptx --out /tmp/oversized --width 1600 --font-fallback
-/usr/bin/time -l target/release/pptx2img /tmp/oversized-images-baseline.pptx --out /tmp/oversized-baseline --width 1600 --font-fallback
+/usr/bin/time -l target/release/rhodopsin /tmp/oversized-images.pptx --out /tmp/oversized --width 1600 --font-fallback
+/usr/bin/time -l target/release/rhodopsin /tmp/oversized-images-baseline.pptx --out /tmp/oversized-baseline --width 1600 --font-fallback
 ```
 
 ## Hidden slides
 
-LibreOffice's PDF export skips hidden slides. pptx2img does too by default, so pages pair
+LibreOffice's PDF export skips hidden slides. rhodopsin does too by default, so pages pair
 one to one; the comparator additionally drops manifest entries with `hidden: true` before
 pairing (so a deck rendered with `--include-hidden` elsewhere still lines up) and records
 `hidden_slides` in `report.json`. A renderer older than manifest schema 3 draws hidden
@@ -101,7 +101,7 @@ PDF page number and `slides[].deck_slide` is the position in the deck.
 
 ```sh
 .venv-visual/bin/python tests/visual/make_hidden_slides.py /tmp/hidden-slides.pptx
-.venv-visual/bin/python tests/visual/compare.py --binary target/release/pptx2img \
+.venv-visual/bin/python tests/visual/compare.py --binary target/release/rhodopsin \
   --fixture /tmp/hidden-slides.pptx --width 1600 --out target/visual-tests/hidden-slides
 ```
 
@@ -109,12 +109,12 @@ PDF page number and `slides[].deck_slide` is the position in the deck.
 
 LibreOffice resolves families that are missing from the machine (Meiryo UI, Yu Gothic,
 Calibri, ...) through CoreText/fontconfig, and the result was observed to differ between
-runs, which made reference images fluctuate independently of any pptx2img change. The
+runs, which made reference images fluctuate independently of any rhodopsin change. The
 comparator therefore writes a replacement table (`Font/Substitution`, "Always") into the
 generated LibreOffice profile. The default table, `tests/visual/font-substitution.json`,
-maps those families to Hiragino Sans, the face pptx2img resolves to on macOS, so the
+maps those families to Hiragino Sans, the face rhodopsin resolves to on macOS, so the
 comparison measures layout rather than font choice. Override it with
-`--font-substitution-map map.json` or `PPTX2IMG_FONT_SUBSTITUTION_MAP` (`{"families": {"Family": "Substitute"}}`).
+`--font-substitution-map map.json` or `RHODOPSIN_FONT_SUBSTITUTION_MAP` (`{"families": {"Family": "Substitute"}}`).
 
 | Report field | Meaning |
 |---|---|
@@ -142,11 +142,11 @@ table additionally maps shipped faces (Arial, Georgia, Times New Roman, ...) to 
 so they count as pinned without changing the reference; the Linux and Windows tables
 leave those out, so Arial text is reported as unpinned there. Add a row to all three
 tables when a new family shows up in `unpinned_families`. The substitution replaces font choice, not font
-metrics: pinned references still differ from pptx2img where layout differs.
+metrics: pinned references still differ from rhodopsin where layout differs.
 
 ```sh
 .venv-visual/bin/python tests/visual/make_font_substitution.py /tmp/font-substitution.pptx
-.venv-visual/bin/python tests/visual/compare.py --binary target/release/pptx2img \
+.venv-visual/bin/python tests/visual/compare.py --binary target/release/rhodopsin \
   --fixture /tmp/font-substitution.pptx --width 1600 --out target/visual-tests/font-substitution
 ```
 
@@ -156,7 +156,7 @@ that an error):
 
 ```sh
 .venv-visual/bin/python tests/visual/make_unpinned_font.py /tmp/unpinned-font.pptx
-.venv-visual/bin/python tests/visual/compare.py --binary target/release/pptx2img \
+.venv-visual/bin/python tests/visual/compare.py --binary target/release/rhodopsin \
   --fixture /tmp/unpinned-font.pptx --width 1600 --out target/visual-tests/unpinned-font
 ```
 
@@ -172,7 +172,7 @@ falls back inside LibreOffice:
 | Windows | `font-substitution.windows.json` | Noto Sans CJK JP | The same two files, installed into the per-user font directory |
 
 The scheduled/manual workflow (`.github/workflows/visual.yml`) runs a matrix over these
-three OSes with the pinned LibreOffice 26.2.5.2 and sets `PPTX2IMG_FONT_SUBSTITUTION_MAP` to
+three OSes with the pinned LibreOffice 26.2.5.2 and sets `RHODOPSIN_FONT_SUBSTITUTION_MAP` to
 the OS table, which `compare.py` uses as its default when `--font-substitution-map` is absent
 (this is how the cargo-driven comparisons receive it). The job then runs
 `check_determinism.py`, which passes `--font-substitution-map` explicitly, compares
@@ -191,7 +191,7 @@ the recorded comparison.
 
 The "Rendering comparison with unchanged thresholds" step gates on macOS only. On Linux and
 Windows it runs with `continue-on-error: true`: Noto Sans CJK JP is pinned in the LibreOffice
-reference, but pptx2img still resolves families from each OS's system fonts, so line widths
+reference, but rhodopsin still resolves families from each OS's system fonts, so line widths
 differ. The "Reference determinism and pinned table" step gates on every OS, and the macOS leg
 also passes `--strict-font-pinning` because its table covers every family the determinism
 fixtures request (Linux and Windows still report Arial as unpinned, so the flag stays off
@@ -250,7 +250,7 @@ grow to fit their text and are not stretched to the frame; see
 
 ```sh
 .venv-visual/bin/python tests/visual/make_table_row_growth.py examples/table-row-growth.pptx
-.venv-visual/bin/python tests/visual/compare.py --binary target/release/pptx2img \
+.venv-visual/bin/python tests/visual/compare.py --binary target/release/rhodopsin \
   --fixture examples/table-row-growth.pptx --width 1600 --out target/visual-tests/table-row-growth
 ```
 
@@ -265,7 +265,7 @@ their regions differ from the reference by design (see `docs/rendering.md`).
 ```sh
 .venv-visual/bin/python tests/visual/make_flipped_text.py examples/flipped-text.pptx
 .venv-visual/bin/python tests/visual/compare.py \
-  --binary target/release/pptx2img --fixture examples/flipped-text.pptx \
+  --binary target/release/rhodopsin --fixture examples/flipped-text.pptx \
   --regions examples/flipped-text.json --width 1600 --out target/visual-tests/flipped-text
 ```
 
@@ -280,7 +280,7 @@ recorded metrics.
 ```sh
 .venv-visual/bin/python tests/visual/make_custom_geometry.py examples/custom-geometry.pptx
 .venv-visual/bin/python tests/visual/compare.py \
-  --binary target/release/pptx2img --fixture examples/custom-geometry.pptx \
+  --binary target/release/rhodopsin --fixture examples/custom-geometry.pptx \
   --regions examples/custom-geometry.json --width 1600 --out target/visual-tests/custom-geometry
 ```
 
@@ -295,7 +295,7 @@ those pages are expected to differ. See
 ```sh
 .venv-visual/bin/python tests/visual/make_image_effects.py examples/image-effects.pptx
 .venv-visual/bin/python tests/visual/compare.py \
-  --binary target/release/pptx2img --fixture examples/image-effects.pptx \
+  --binary target/release/rhodopsin --fixture examples/image-effects.pptx \
   --regions examples/image-effects.json --width 1600 --out target/visual-tests/image-effects
 ```
 
@@ -353,25 +353,25 @@ always rejects glyphs unavailable in every loaded font.
 
 Generate a slide with four generated PNG pictures: a control, one whose relationship
 type is rewritten to `oleObject`, one whose `r:embed` names a missing relationship,
-and one whose crop leaves no visible area. pptx2img renders the first two and omits
+and one whose crop leaves no visible area. rhodopsin renders the first two and omits
 the other two with `omitted` diagnostics instead of aborting the deck.
 
 ```sh
 .venv-visual/bin/python tests/visual/make_image_references.py /tmp/image-references.pptx
-target/debug/pptx2img /tmp/image-references.pptx --out /tmp/image-references --width 1600 --font-fallback
+target/debug/rhodopsin /tmp/image-references.pptx --out /tmp/image-references --width 1600 --font-fallback
 ```
 
 ## Independent SVG-picture fixture
 
 Generate a slide with one generated SVG icon placed three ways: SVG only (`svgBlip`
 without `r:embed`), SVG with a coarser PNG fallback drawn with Pillow, and SVG only
-stretched to a wide frame. pptx2img renders the SVG for the first and third pictures
+stretched to a wide frame. rhodopsin renders the SVG for the first and third pictures
 and the PNG fallback for the second (LibreOffice draws the SVG there, so its edges are
 smoother in the reference).
 
 ```sh
 .venv-visual/bin/python tests/visual/make_svg_pictures.py /tmp/svg-pictures.pptx
-.venv-visual/bin/python tests/visual/compare.py --binary target/release/pptx2img \
+.venv-visual/bin/python tests/visual/compare.py --binary target/release/rhodopsin \
   --fixture /tmp/svg-pictures.pptx --width 1600 --out target/visual-tests/svg-pictures
 ```
 
@@ -383,7 +383,7 @@ layout. Only the visible rectangles are drawn, with no diagnostic for the hidden
 
 ```sh
 .venv-visual/bin/python tests/visual/make_hidden.py /tmp/hidden.pptx
-.venv-visual/bin/python tests/visual/compare.py --binary target/release/pptx2img \
+.venv-visual/bin/python tests/visual/compare.py --binary target/release/rhodopsin \
   --fixture /tmp/hidden.pptx --width 1600 --out target/visual-tests/hidden
 ```
 
@@ -394,7 +394,7 @@ paragraphs. They draw no bullet marker.
 
 ```sh
 .venv-visual/bin/python tests/visual/make_empty_bullets.py examples/empty-bullets.pptx
-.venv-visual/bin/python tests/visual/compare.py --binary target/release/pptx2img \
+.venv-visual/bin/python tests/visual/compare.py --binary target/release/rhodopsin \
   --fixture examples/empty-bullets.pptx --width 1600 --out target/visual-tests/empty-bullets
 ```
 
@@ -402,12 +402,12 @@ paragraphs. They draw no bullet marker.
 
 `make_embedded_media.py [size_mib]` writes a slide with an embedded video (generated
 zero bytes, 40 MiB by default, above the 32 MiB part limit) and a PNG poster frame.
-The deck is written outside the repository. pptx2img renders the poster and reports
+The deck is written outside the repository. rhodopsin renders the poster and reports
 `Audio and video playback is unsupported`.
 
 ```sh
 .venv-visual/bin/python tests/visual/make_embedded_media.py /tmp/embedded-media.pptx
-target/release/pptx2img /tmp/embedded-media.pptx --out /tmp/embedded-media --width 1600 --font-fallback
+target/release/rhodopsin /tmp/embedded-media.pptx --out /tmp/embedded-media --width 1600 --font-fallback
 ```
 
 ## Independent text-inheritance fixture
@@ -419,6 +419,6 @@ a wrongly applied `otherStyle` shows up as a size difference between the slides.
 
 ```sh
 .venv-visual/bin/python tests/visual/make_text_inheritance.py examples/text-inheritance.pptx
-.venv-visual/bin/python tests/visual/compare.py --binary target/release/pptx2img \
+.venv-visual/bin/python tests/visual/compare.py --binary target/release/rhodopsin \
   --fixture examples/text-inheritance.pptx --width 1600 --out target/visual-tests/text-inheritance
 ```

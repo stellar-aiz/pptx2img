@@ -139,7 +139,7 @@ def font_inventory() -> list[dict]:
 
 
 DEFAULT_SUBSTITUTION_MAP = Path(__file__).resolve().with_name("font-substitution.json")
-SUBSTITUTION_MAP_ENV = "PPTX2IMG_FONT_SUBSTITUTION_MAP"
+SUBSTITUTION_MAP_ENV = "RHODOPSIN_FONT_SUBSTITUTION_MAP"
 
 
 def default_substitution_map() -> Path:
@@ -287,7 +287,7 @@ def run(args: argparse.Namespace) -> bool:
             "vcl_plugin": env.get("SAL_USE_VCLPLUGIN"),
             "fonts": font_inventory(),
             "libreoffice": execute([soffice, "--version"], out, "libreoffice-version", env),
-            "pptx2img": execute([str(binary), "--version"], out, "pptx2img-version", env),
+            "rhodopsin": execute([str(binary), "--version"], out, "rhodopsin-version", env),
             "punctuation_compression": args.punctuation_compression,
             "libreoffice_compress_character_distance": 1 if args.punctuation_compression else 0,
             "binary_sha256": digest(binary), "fixture_sha256": digest(fixture),
@@ -304,7 +304,7 @@ def run(args: argparse.Namespace) -> bool:
         command = [str(binary), str(copied), "--out", str(out / "actual"), "--width", str(args.width), "--font-fallback"]
         if args.punctuation_compression:
             command.append("--punctuation-compression")
-        execute(command, out, "pptx2img", env)
+        execute(command, out, "rhodopsin", env)
         manifest = json.loads((out / "actual/manifest.json").read_text(encoding="utf-8"))
         pages = visible_slides(manifest)
         report["hidden_slides"] = {
@@ -318,7 +318,7 @@ def run(args: argparse.Namespace) -> bool:
         reference_dir.mkdir()
         profile_xml = compression_profile(args.punctuation_compression, substitutions)
         (out / "libreoffice-profile.xcu").write_text(profile_xml, encoding="utf-8")
-        with tempfile.TemporaryDirectory(prefix="pptx2img-lo-profile-") as profile:
+        with tempfile.TemporaryDirectory(prefix="rhodopsin-lo-profile-") as profile:
             user = Path(profile) / "user"
             user.mkdir()
             (user / "registrymodifications.xcu").write_text(profile_xml, encoding="utf-8")
@@ -332,7 +332,7 @@ def run(args: argparse.Namespace) -> bool:
             if len(document) != len(pages) or len(document) == 0:
                 raise ValueError(
                     f"Page counts differ: PPTX={len(pages)}, PDF={len(document)}. A renderer older than "
-                    "manifest schema 3 draws hidden slides that LibreOffice skips; rebuild pptx2img")
+                    "manifest schema 3 draws hidden slides that LibreOffice skips; rebuild rhodopsin")
             for index, slide in enumerate(pages):
                 name = f"slide-{index + 1:03}.png"
                 with Image.open(out / "actual" / slide["image"]) as loaded:
@@ -405,7 +405,7 @@ def main() -> int:
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--soffice")
     parser.add_argument("--regions", type=Path, help="JSON with normalized rectangles; compare regions using the whole-page thresholds")
-    parser.add_argument("--font-substitution-map", type=Path, help="JSON {\"families\": {family: substitute}} pinned in the LibreOffice profile (default: $PPTX2IMG_FONT_SUBSTITUTION_MAP, else tests/visual/font-substitution.json)")
+    parser.add_argument("--font-substitution-map", type=Path, help="JSON {\"families\": {family: substitute}} pinned in the LibreOffice profile (default: $RHODOPSIN_FONT_SUBSTITUTION_MAP, else tests/visual/font-substitution.json)")
     parser.add_argument("--strict-font-pinning", action="store_true", help="Fail (exit 1) when the deck requests a latin/ea family that the substitution table does not list; by default these are reported as unpinned_families only")
     parser.add_argument("--punctuation-compression", action="store_true", help="Enable automatic punctuation compression in both engines")
     parser.add_argument("--width", type=int, default=1200, choices=range(64, 4097), metavar="64..4096")

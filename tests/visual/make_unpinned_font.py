@@ -7,7 +7,7 @@ from pptx import Presentation
 from pptx.util import Inches, Pt
 
 # Not a real font; the name must stay absent from tests/visual/font-substitution*.json.
-UNLISTED_FAMILY = "Pptx2img Unlisted Sans"
+UNLISTED_FAMILY = "Rhodopsin Unlisted Sans"
 TEXT = "Unlisted family sample 0123"
 
 

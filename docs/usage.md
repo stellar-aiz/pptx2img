@@ -7,24 +7,24 @@ Build with `cargo build --release --locked`, or install from a checkout with
 access; conversion itself is local and does not start Office or access the network.
 
 ```sh
-pptx2img slides.pptx --out images --width 1600
-pptx2img slides.pptx --out verified --strict
-pptx2img slides.pptx --out images --font-file /path/to/font.ttf
+rhodopsin slides.pptx --out images --width 1600
+rhodopsin slides.pptx --out verified --strict
+rhodopsin slides.pptx --out images --font-file /path/to/font.ttf
 ```
 
-Without `--out`, replace the input's final extension with `.pptx2img` beside the
-input: `slides.pptx` becomes `slides.pptx2img/`. An explicit output path wins.
+Without `--out`, replace the input's final extension with `.rhodopsin` beside the
+input: `slides.pptx` becomes `slides.rhodopsin/`. An explicit output path wins.
 Existing output directories are never overwritten. Output consists of numbered
 `slide-001.png` files and `manifest.json`. An I/O failure can leave partial images;
 the manifest is written only after successful completion.
 
-Output width must be 64–4096 pixels. See `pptx2img --help` for all arguments.
+Output width must be 64–4096 pixels. See `rhodopsin --help` for all arguments.
 
 ## PDF output
 
 ```sh
-pptx2img slides.pptx --format pdf --out slides.pdf
-pptx2img slides.pptx --format pdf --font-file /path/to/font.ttf
+rhodopsin slides.pptx --format pdf --out slides.pdf
+rhodopsin slides.pptx --format pdf --font-file /path/to/font.ttf
 ```
 
 PNG remains the default. PDF mode writes one file, with one page per rendered
@@ -38,7 +38,7 @@ are never replaced, even if another process creates the destination during
 conversion. Publication requires a filesystem supporting same-directory hard
 links (including typical NTFS, APFS, and ext4 filesystems); otherwise it fails
 explicitly. Ordinary errors clean up the temporary file. A killed process may
-leave a `.pptx2img-<pid>-<counter>.tmp` file, but no partial final PDF.
+leave a `.rhodopsin-<pid>-<counter>.tmp` file, but no partial final PDF.
 
 Success YAML includes `output.file`, `output.pages`, and `report`, a JSON flow
 mapping valid in YAML 1.2. `report` contains `fonts`, per-slide `warnings` and
@@ -52,7 +52,7 @@ The library exposes `convert_pdf(input, out, &ConvertOptions)`, returning
 side effects, and does not change the existing `convert` API or PNG report.
 
 ```rust,no_run
-use pptx2img::{ConvertOptions, convert_pdf};
+use rhodopsin::{ConvertOptions, convert_pdf};
 let report = convert_pdf("slides.pptx", "slides.pdf", &ConvertOptions::default())?;
 assert_eq!(report.pages, report.slides.len());
 # Ok::<(), anyhow::Error>(())
@@ -86,7 +86,7 @@ Use repeatable `--font-file` arguments for fonts you can access and are entitled
 to use. To isolate conversion from system fonts:
 
 ```sh
-pptx2img slides.pptx --out images \
+rhodopsin slides.pptx --out images \
   --no-system-fonts --font-file /path/to/font.ttf
 ```
 
@@ -207,11 +207,11 @@ assume a crates.io release:
 
 ```toml
 [dependencies]
-pptx2img = { path = "../pptx2img" }
+rhodopsin = { path = "../rhodopsin" }
 ```
 
 ```rust,no_run
-use pptx2img::{convert, ConvertOptions, FontFallbackError, StrictModeError};
+use rhodopsin::{convert, ConvertOptions, FontFallbackError, StrictModeError};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let options = ConvertOptions { width: 1600, ..Default::default() };

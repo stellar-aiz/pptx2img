@@ -386,13 +386,13 @@ The individual 8-pixel color/white runs are not complete tiles.
 | Renderer | Complete tiles over the 11-inch base | Physical tile width |
 |---|---|---|
 | PowerPoint (observed screenshot) | about 49.5 | about 0.2222 inch |
-| pptx2img (96 dpi fallback) | about 33 | about 0.3333 inch |
+| rhodopsin (96 dpi fallback) | about 33 | about 0.3333 inch |
 | LibreOffice 26.2.5.2 (supplied reference) | about 43 | about 0.26 inch |
 
 At 50% scale, `64 * 0.5 / 0.2222` corresponds to an effective 144 dpi in this
 PNG/shape fixture. The earlier rough 7/9-column estimates did not count complete
 source tiles and are superseded by these measurements. See the
-[PowerPoint measurement record](https://github.com/stellar-aiz/pptx2img/issues/88#issuecomment-6286206605).
+[PowerPoint measurement record](https://github.com/stellar-aiz/rhodopsin/issues/88#issuecomment-6286206605).
 
 This is a known rendering difference. The 96 dpi fallback remains unchanged:
 one PNG/shape observation does not establish a universal density for PNG/JPEG,
@@ -427,7 +427,7 @@ directly.
 
 ## EMF and WMF pictures survey
 
-At the time of this survey pptx2img did not render EMF or WMF: such a picture was
+At the time of this survey rhodopsin did not render EMF or WMF: such a picture was
 omitted with `Only PNG/JPEG images are supported: <part>`. This section records the
 step 1 survey of issue #78 (2026-10-20), made before any implementation; step 2 is
 described in [EMF and WMF pictures](#emf-and-wmf-pictures).
@@ -571,11 +571,11 @@ page but `emf-text` and `wmf-clip-bitmap` exceeded them (MAE 0.030 to 0.081).
 | `emf-shapes` (108-byte header) | 0.006214 | 1.182% | antialiasing along outlines |
 | `emf-path` | 0.006753 | 1.095% | antialiasing along outlines |
 | `emf-transform` | 0.007286 | 1.186% | antialiasing along outlines |
-| `emf-clip` | 0.010538 | 2.014% | pptx2img draws the `ExcludeClipRect` hole MS-EMF specifies; LibreOffice does not, so this part rests on the specification, not on the reference |
+| `emf-clip` | 0.010538 | 2.014% | rhodopsin draws the `ExcludeClipRect` hole MS-EMF specifies; LibreOffice does not, so this part rests on the specification, not on the reference |
 | `emf-bitmap` | 0.005600 | 1.058% | edges of the stretched pixels |
-| `emf-text` | 0.006773 | 1.127% | LibreOffice draws the text; pptx2img reports it as `unsupported` |
+| `emf-text` | 0.006773 | 1.127% | LibreOffice draws the text; rhodopsin reports it as `unsupported` |
 | `wmf-shapes` | 0.003045 | 0.594% | antialiasing along outlines |
-| `wmf-clip-bitmap` | 0.005641 | 0.877% | LibreOffice draws the `TextOut` text; pptx2img reports it |
+| `wmf-clip-bitmap` | 0.005641 | 0.877% | LibreOffice draws the `TextOut` text; rhodopsin reports it |
 
 The text pages pass only because the text is small; passing does not mean text is
 supported.

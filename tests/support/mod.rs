@@ -57,7 +57,7 @@ pub fn write_deck(path: &Path, slide: String, extra: Vec<(&str, Vec<u8>)>) {
     zip.finish().unwrap();
 }
 pub fn run(path: &Path, out: &Path, strict: bool) -> std::process::Output {
-    let mut cmd = Command::new(env!("CARGO_BIN_EXE_pptx2img"));
+    let mut cmd = Command::new(env!("CARGO_BIN_EXE_rhodopsin"));
     cmd.arg(path)
         .arg("--out")
         .arg(out)

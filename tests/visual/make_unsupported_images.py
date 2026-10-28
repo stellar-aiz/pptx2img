@@ -1,7 +1,7 @@
 """Independent fixture: EMF pictures on a slide and in a shared slide layout.
 
 The EMF is a minimal metafile (one red rectangle) written byte by byte here. Before
-issue #78 step 2 pptx2img omitted each picture with a diagnostic; it now translates the
+issue #78 step 2 rhodopsin omitted each picture with a diagnostic; it now translates the
 EMF and draws the rectangle on every slide, including the shared layout logo.
 python-pptx is needed only for generation.
 """

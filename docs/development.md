@@ -56,7 +56,7 @@ their dependencies.
 python3 -m venv .venv-visual
 .venv-visual/bin/python -m pip install -r tests/visual/requirements.txt
 # Install LibreOffice separately; use PATH or SOFFICE to select its executable.
-PPTX2IMG_TEST_PYTHON="$PWD/.venv-visual/bin/python" \
+RHODOPSIN_TEST_PYTHON="$PWD/.venv-visual/bin/python" \
   cargo test --test libreoffice -- --ignored --nocapture
 .venv-visual/bin/python -m unittest discover -s tests/visual -p 'test_*.py'
 ```
@@ -72,7 +72,7 @@ resolution. No regular user profile or Office automation service is used.
 ```sh
 cargo build --release --locked
 .venv-visual/bin/python tests/visual/compare.py \
-  --binary target/release/pptx2img --fixture examples/basic.pptx \
+  --binary target/release/rhodopsin --fixture examples/basic.pptx \
   --out target/visual-tests/basic-001
 ```
 

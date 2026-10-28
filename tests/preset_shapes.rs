@@ -6,15 +6,15 @@ fn shape(kind: &str, guides: &str, attrs: &str) -> String {
         transform(20, 20, 60, 40).replace("<a:xfrm>", &format!("<a:xfrm {attrs}>"))
     )
 }
-fn deck(shapes: &str) -> (pptx2img::ConversionReport, resvg::tiny_skia::Pixmap) {
+fn deck(shapes: &str) -> (rhodopsin::ConversionReport, resvg::tiny_skia::Pixmap) {
     let dir = tempfile::tempdir().unwrap();
     let input = dir.path().join("preset.pptx");
     let out = dir.path().join("out");
     write_deck(&input, page("sld", "", "", shapes), vec![]);
-    let result = pptx2img::convert(
+    let result = rhodopsin::convert(
         &input,
         &out,
-        &pptx2img::ConvertOptions {
+        &rhodopsin::ConvertOptions {
             font_fallback: true,
             width: 100,
             no_system_fonts: true,
@@ -55,7 +55,7 @@ fn supported_presets_keep_fill_outline_and_transform() {
             !result.slides[0]
                 .diagnostics
                 .iter()
-                .any(|d| d.code == pptx2img::DiagnosticCode::Omitted),
+                .any(|d| d.code == rhodopsin::DiagnosticCode::Omitted),
             "{kind}"
         );
     }
@@ -85,7 +85,7 @@ fn unknown_preset_and_adjustment_remain_diagnosed() {
         unknown.slides[0]
             .diagnostics
             .iter()
-            .any(|d| d.code == pptx2img::DiagnosticCode::Omitted)
+            .any(|d| d.code == rhodopsin::DiagnosticCode::Omitted)
     );
     let (invalid, _) = deck(&shape(
         "homePlate",

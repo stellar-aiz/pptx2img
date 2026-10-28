@@ -52,7 +52,7 @@ fn write_deck(path: &Path, slide: String, extra: Vec<(&str, Vec<u8>)>) {
     zip.finish().unwrap();
 }
 fn run(path: &Path, out: &Path, strict: bool) -> std::process::Output {
-    let mut cmd = Command::new(env!("CARGO_BIN_EXE_pptx2img"));
+    let mut cmd = Command::new(env!("CARGO_BIN_EXE_rhodopsin"));
     cmd.arg(path)
         .arg("--out")
         .arg(out)
@@ -233,7 +233,7 @@ fn explicit_font_renders_with_no_system_fonts_and_records_actual_face() {
     let dir = tempfile::tempdir().unwrap();
     let input = dir.path().join("a.pptx");
     let out = dir.path().join("out");
-    let body = r#"<p:txBody><a:bodyPr lIns="0" tIns="0"/><a:p><a:r><a:rPr sz="2400"><a:latin typeface="Pptx2img Metrics Test"/></a:rPr><a:t>AA</a:t></a:r></a:p></p:txBody>"#;
+    let body = r#"<p:txBody><a:bodyPr lIns="0" tIns="0"/><a:p><a:r><a:rPr sz="2400"><a:latin typeface="Rhodopsin Metrics Test"/></a:rPr><a:t>AA</a:t></a:r></a:p></p:txBody>"#;
     let shape = format!(
         "<p:sp><p:spPr>{}</p:spPr>{body}</p:sp>",
         transform(0, 0, 100, 100)
@@ -249,7 +249,7 @@ fn explicit_font_renders_with_no_system_fonts_and_records_actual_face() {
         serde_json::from_slice(&fs::read(out.join("manifest.json")).unwrap()).unwrap();
     assert_eq!(manifest["schema_version"], 3);
     assert_eq!(manifest["system_fonts"], false);
-    assert_eq!(manifest["fonts"][0]["family"], "Pptx2img Metrics Test");
+    assert_eq!(manifest["fonts"][0]["family"], "Rhodopsin Metrics Test");
 }
 
 #[test]
@@ -259,7 +259,7 @@ fn inherited_text_settings_match_explicit_settings_and_local_values_win() {
         format!(r#"<p:txBody><a:bodyPr {props}/><a:p>{run}</a:p></p:txBody>"#)
     };
     let text = r#"<a:r><a:rPr sz="1200"/><a:t>AA</a:t></a:r>"#;
-    let defaults = r#"<a:pPr algn="r"><a:defRPr sz="2400"><a:solidFill><a:srgbClr val="FF0000"/></a:solidFill><a:latin typeface="Pptx2img Metrics Test"/></a:defRPr></a:pPr>"#;
+    let defaults = r#"<a:pPr algn="r"><a:defRPr sz="2400"><a:solidFill><a:srgbClr val="FF0000"/></a:solidFill><a:latin typeface="Rhodopsin Metrics Test"/></a:defRPr></a:pPr>"#;
     let inherited = placeholder(7, "title", "", &body("", text));
     let explicit = placeholder(
         7,
@@ -439,7 +439,7 @@ fn font_mapping_matches_api_and_cli_and_aggregates_targets() {
     );
     let font = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/cjk.ttf");
     let cli_out = dir.path().join("cli");
-    let cli = Command::new(env!("CARGO_BIN_EXE_pptx2img"))
+    let cli = Command::new(env!("CARGO_BIN_EXE_rhodopsin"))
         .arg("--font-fallback")
         .arg(&input)
         .arg("--out")
@@ -463,10 +463,10 @@ fn font_mapping_matches_api_and_cli_and_aggregates_targets() {
     );
     check(cli);
     let api_out = dir.path().join("api");
-    let report = pptx2img::convert(
+    let report = rhodopsin::convert(
         &input,
         &api_out,
-        &pptx2img::ConvertOptions {
+        &rhodopsin::ConvertOptions {
             font_fallback: true,
             width: 100,
             no_system_fonts: true,
@@ -509,7 +509,7 @@ fn missing_glyph_strict_leaves_no_output() {
                 1,
                 "title",
                 &transform(0, 0, 100, 100),
-                r#"<p:txBody><a:bodyPr/><a:p><a:r><a:rPr><a:ea typeface="Pptx2img Metrics Test"/></a:rPr><a:t>未</a:t></a:r></a:p></p:txBody>"#,
+                r#"<p:txBody><a:bodyPr/><a:p><a:r><a:rPr><a:ea typeface="Rhodopsin Metrics Test"/></a:rPr><a:t>未</a:t></a:r></a:p></p:txBody>"#,
             ),
         ),
         vec![],
@@ -527,7 +527,7 @@ fn shape_autofit_expands_fill_and_text_around_the_anchor() {
         let input = dir.path().join("autofit.pptx");
         let out = dir.path().join("out");
         let shape = format!(
-            r#"<p:sp><p:spPr>{}<a:prstGeom prst="rect"/><a:solidFill><a:srgbClr val="00FF00"/></a:solidFill></p:spPr><p:txBody><a:bodyPr lIns="0" rIns="0" tIns="0" bIns="0" anchor="{anchor}"><a:spAutoFit/></a:bodyPr><a:p><a:pPr><a:defRPr sz="1200"><a:latin typeface="Pptx2img Metrics Test"/></a:defRPr></a:pPr><a:r><a:t>A</a:t></a:r><a:br/><a:r><a:t>A</a:t></a:r><a:br/><a:r><a:t>A</a:t></a:r></a:p></p:txBody></p:sp>"#,
+            r#"<p:sp><p:spPr>{}<a:prstGeom prst="rect"/><a:solidFill><a:srgbClr val="00FF00"/></a:solidFill></p:spPr><p:txBody><a:bodyPr lIns="0" rIns="0" tIns="0" bIns="0" anchor="{anchor}"><a:spAutoFit/></a:bodyPr><a:p><a:pPr><a:defRPr sz="1200"><a:latin typeface="Rhodopsin Metrics Test"/></a:defRPr></a:pPr><a:r><a:t>A</a:t></a:r><a:br/><a:r><a:t>A</a:t></a:r><a:br/><a:r><a:t>A</a:t></a:r></a:p></p:txBody></p:sp>"#,
             transform(0, y, 100, 10)
         );
         write_deck(&input, page("sld", "", "", &shape), vec![]);
@@ -557,7 +557,7 @@ fn bullet_font_mapping_color_and_local_none_reach_pixels() {
         let out = dir.path().join("out");
         let none = if disabled { "<a:buNone/>" } else { "" };
         let body = format!(
-            r#"<p:txBody><a:bodyPr lIns="0" tIns="0" rIns="0" bIns="0"/><a:lstStyle><a:lvl1pPr marL="190500" indent="-190500"><a:buChar char="•"/><a:buFont typeface="要求記号書体"/><a:buSzPct val="150000"/><a:buClr><a:srgbClr val="0000FF"/></a:buClr><a:defRPr sz="1200"><a:latin typeface="Pptx2img Metrics Test"/></a:defRPr></a:lvl1pPr></a:lstStyle><a:p><a:pPr>{none}</a:pPr><a:r><a:t>AAAA AAAA AAAA</a:t></a:r></a:p></p:txBody>"#
+            r#"<p:txBody><a:bodyPr lIns="0" tIns="0" rIns="0" bIns="0"/><a:lstStyle><a:lvl1pPr marL="190500" indent="-190500"><a:buChar char="•"/><a:buFont typeface="要求記号書体"/><a:buSzPct val="150000"/><a:buClr><a:srgbClr val="0000FF"/></a:buClr><a:defRPr sz="1200"><a:latin typeface="Rhodopsin Metrics Test"/></a:defRPr></a:lvl1pPr></a:lstStyle><a:p><a:pPr>{none}</a:pPr><a:r><a:t>AAAA AAAA AAAA</a:t></a:r></a:p></p:txBody>"#
         );
         write_deck(
             &input,
@@ -569,10 +569,10 @@ fn bullet_font_mapping_color_and_local_none_reach_pixels() {
             ),
             vec![],
         );
-        let report = pptx2img::convert(
+        let report = rhodopsin::convert(
             &input,
             &out,
-            &pptx2img::ConvertOptions {
+            &rhodopsin::ConvertOptions {
                 font_fallback: true,
                 width: 100,
                 no_system_fonts: true,
@@ -615,7 +615,7 @@ fn bullet_font_mapping_color_and_local_none_reach_pixels() {
 #[test]
 fn preset_text_rectangle_applies_body_and_paragraph_margins_once() {
     let dir = tempfile::tempdir().unwrap();
-    let body = r#"<p:txBody><a:bodyPr lIns="19050" rIns="28575" tIns="0" bIns="0"><a:normAutofit fontScale="55000"/></a:bodyPr><a:p><a:pPr marL="47625" marR="66675"><a:defRPr sz="1200"><a:latin typeface="Pptx2img Metrics Test"/></a:defRPr></a:pPr><a:r><a:t>AAAA AAAA AAAA AAAA AAAA AAAA</a:t></a:r></a:p></p:txBody>"#;
+    let body = r#"<p:txBody><a:bodyPr lIns="19050" rIns="28575" tIns="0" bIns="0"><a:normAutofit fontScale="55000"/></a:bodyPr><a:p><a:pPr marL="47625" marR="66675"><a:defRPr sz="1200"><a:latin typeface="Rhodopsin Metrics Test"/></a:defRPr></a:pPr><a:r><a:t>AAAA AAAA AAAA AAAA AAAA AAAA</a:t></a:r></a:p></p:txBody>"#;
     for (name, geometry, x, y, w, h) in [
         ("arrow", "rightArrow", 0, 0, 100, 40),
         ("rectangle", "rect", 0, 10, 90, 20),
@@ -642,7 +642,7 @@ fn preset_autofit_matches_explicit_expanded_geometry_for_each_anchor() {
             let mode = if fitted { "spAutoFit" } else { "noAutofit" };
             let (top, height) = if fitted { (y, 10) } else { (final_y, 48) };
             let shape = format!(
-                r#"<p:sp><p:spPr>{}<a:prstGeom prst="rightArrow"/><a:solidFill><a:srgbClr val="00FF00"/></a:solidFill></p:spPr><p:txBody><a:bodyPr lIns="0" rIns="0" tIns="0" bIns="0" anchor="{anchor}"><a:{mode}/></a:bodyPr><a:p><a:pPr><a:defRPr sz="600"><a:latin typeface="Pptx2img Metrics Test"/></a:defRPr></a:pPr><a:r><a:t>A</a:t></a:r><a:br/><a:r><a:t>A</a:t></a:r><a:br/><a:r><a:t>A</a:t></a:r></a:p></p:txBody></p:sp>"#,
+                r#"<p:sp><p:spPr>{}<a:prstGeom prst="rightArrow"/><a:solidFill><a:srgbClr val="00FF00"/></a:solidFill></p:spPr><p:txBody><a:bodyPr lIns="0" rIns="0" tIns="0" bIns="0" anchor="{anchor}"><a:{mode}/></a:bodyPr><a:p><a:pPr><a:defRPr sz="600"><a:latin typeface="Rhodopsin Metrics Test"/></a:defRPr></a:pPr><a:r><a:t>A</a:t></a:r><a:br/><a:r><a:t>A</a:t></a:r><a:br/><a:r><a:t>A</a:t></a:r></a:p></p:txBody></p:sp>"#,
                 transform(0, top, 100, height)
             );
             let input = dir.path().join(format!("{anchor}-{fitted}.pptx"));
@@ -735,7 +735,7 @@ fn table_frame(heights: &[i32], widths: &[i32], frame_h: i32, texts: &[Option<&s
         .map(|(i, h)| {
             let text = texts.get(i).copied().flatten().map(|t| {
                 format!(
-                    r#"<a:txBody><a:bodyPr/><a:p><a:r><a:rPr sz="1200"><a:latin typeface="Pptx2img Metrics Test"/></a:rPr><a:t>{t}</a:t></a:r></a:p></a:txBody>"#
+                    r#"<a:txBody><a:bodyPr/><a:p><a:r><a:rPr sz="1200"><a:latin typeface="Rhodopsin Metrics Test"/></a:rPr><a:t>{t}</a:t></a:r></a:p></a:txBody>"#
                 )
             });
             let cells: String = widths
@@ -872,7 +872,7 @@ fn row_spanning_cell_adds_its_shortfall_to_the_last_spanned_row() {
             String::new()
         } else {
             format!(
-                r#"<a:txBody><a:bodyPr/><a:p><a:r><a:rPr sz="1200"><a:latin typeface="Pptx2img Metrics Test"/></a:rPr><a:t>{text}</a:t></a:r></a:p></a:txBody>"#
+                r#"<a:txBody><a:bodyPr/><a:p><a:r><a:rPr sz="1200"><a:latin typeface="Rhodopsin Metrics Test"/></a:rPr><a:t>{text}</a:t></a:r></a:p></a:txBody>"#
             )
         };
         format!(
@@ -995,7 +995,7 @@ fn unwrapped_shape_autofit_sets_width_and_keeps_the_alignment_edge() {
         let input = dir.path().join("autofit-width.pptx");
         let out = dir.path().join("out");
         let shape = format!(
-            r#"<p:sp><p:spPr>{}<a:prstGeom prst="rect"/><a:solidFill><a:srgbClr val="00FF00"/></a:solidFill><a:ln w="0"><a:noFill/></a:ln></p:spPr><p:txBody><a:bodyPr wrap="none" lIns="38100" rIns="38100" tIns="0" bIns="0"><a:spAutoFit/></a:bodyPr><a:p><a:pPr algn="{align}"><a:defRPr sz="1200"><a:latin typeface="Pptx2img Metrics Test"/></a:defRPr></a:pPr><a:r><a:t>AAAA</a:t></a:r></a:p></p:txBody></p:sp>"#,
+            r#"<p:sp><p:spPr>{}<a:prstGeom prst="rect"/><a:solidFill><a:srgbClr val="00FF00"/></a:solidFill><a:ln w="0"><a:noFill/></a:ln></p:spPr><p:txBody><a:bodyPr wrap="none" lIns="38100" rIns="38100" tIns="0" bIns="0"><a:spAutoFit/></a:bodyPr><a:p><a:pPr algn="{align}"><a:defRPr sz="1200"><a:latin typeface="Rhodopsin Metrics Test"/></a:defRPr></a:pPr><a:r><a:t>AAAA</a:t></a:r></a:p></p:txBody></p:sp>"#,
             transform(x, 10, w, 60).replace("<a:xfrm>", &format!("<a:xfrm {xfrm}>"))
         );
         write_deck(&input, page("sld", "", "", &shape), vec![]);
@@ -1042,7 +1042,7 @@ fn unwrapped_shape_autofit_keeps_width_for_empty_and_vertical_bodies() {
         let input = dir.path().join("autofit-kept.pptx");
         let out = dir.path().join("out");
         let shape = format!(
-            r#"<p:sp><p:spPr>{}<a:prstGeom prst="rect"/><a:solidFill><a:srgbClr val="00FF00"/></a:solidFill><a:ln w="0"><a:noFill/></a:ln></p:spPr><p:txBody><a:bodyPr wrap="none" vert="{vert}" lIns="0" rIns="0" tIns="0" bIns="0"><a:spAutoFit/></a:bodyPr><a:p><a:pPr><a:defRPr sz="600"><a:latin typeface="Pptx2img Metrics Test"/></a:defRPr></a:pPr><a:r><a:t>{text}</a:t></a:r></a:p></p:txBody></p:sp>"#,
+            r#"<p:sp><p:spPr>{}<a:prstGeom prst="rect"/><a:solidFill><a:srgbClr val="00FF00"/></a:solidFill><a:ln w="0"><a:noFill/></a:ln></p:spPr><p:txBody><a:bodyPr wrap="none" vert="{vert}" lIns="0" rIns="0" tIns="0" bIns="0"><a:spAutoFit/></a:bodyPr><a:p><a:pPr><a:defRPr sz="600"><a:latin typeface="Rhodopsin Metrics Test"/></a:defRPr></a:pPr><a:r><a:t>{text}</a:t></a:r></a:p></p:txBody></p:sp>"#,
             transform(40, 10, 10, 80)
         );
         write_deck(&input, page("sld", "", "", &shape), vec![]);
@@ -1080,7 +1080,7 @@ fn autofit_in_a_small_inset_text_area_grows_only_by_the_needed_height() {
     for (paragraph, grows) in [
         ("<a:p><a:endParaRPr sz=\"600\"/></a:p>", false),
         (
-            r#"<a:p><a:pPr><a:defRPr sz="600"><a:latin typeface="Pptx2img Metrics Test"/></a:defRPr></a:pPr><a:r><a:t>A</a:t></a:r></a:p>"#,
+            r#"<a:p><a:pPr><a:defRPr sz="600"><a:latin typeface="Rhodopsin Metrics Test"/></a:defRPr></a:pPr><a:r><a:t>A</a:t></a:r></a:p>"#,
             true,
         ),
     ] {
@@ -1124,7 +1124,7 @@ fn autofit_in_a_small_inset_text_area_grows_only_by_the_needed_height() {
     let input = dir.path().join("inset-width.pptx");
     let out = dir.path().join("out");
     let shape = format!(
-        r#"<p:sp><p:spPr>{}{geometry}<a:solidFill><a:srgbClr val="00FF00"/></a:solidFill><a:ln w="0"><a:noFill/></a:ln></p:spPr><p:txBody><a:bodyPr wrap="none" lIns="54000" tIns="54000" rIns="54000" bIns="54000" anchor="ctr"><a:spAutoFit/></a:bodyPr><a:p><a:pPr><a:defRPr sz="600"><a:latin typeface="Pptx2img Metrics Test"/></a:defRPr></a:pPr><a:r><a:t>AAAA</a:t></a:r></a:p></p:txBody></p:sp>"#,
+        r#"<p:sp><p:spPr>{}{geometry}<a:solidFill><a:srgbClr val="00FF00"/></a:solidFill><a:ln w="0"><a:noFill/></a:ln></p:spPr><p:txBody><a:bodyPr wrap="none" lIns="54000" tIns="54000" rIns="54000" bIns="54000" anchor="ctr"><a:spAutoFit/></a:bodyPr><a:p><a:pPr><a:defRPr sz="600"><a:latin typeface="Rhodopsin Metrics Test"/></a:defRPr></a:pPr><a:r><a:t>AAAA</a:t></a:r></a:p></p:txBody></p:sp>"#,
         transform(40, 40, 20, 20)
     );
     write_deck(&input, page("sld", "", "", &shape), vec![]);
@@ -1156,7 +1156,7 @@ fn rotated_vertical_text_runs_along_the_box_and_stays_inside() {
         let input = dir.path().join("vertical.pptx");
         let out = dir.path().join("out");
         let shape = format!(
-            r#"<p:sp><p:spPr>{}<a:prstGeom prst="rect"/><a:noFill/></p:spPr><p:txBody><a:bodyPr vert="{vert}" lIns="0" rIns="0" tIns="0" bIns="0" anchor="t"/><a:p><a:pPr><a:defRPr sz="1200"><a:latin typeface="Pptx2img Metrics Test"/></a:defRPr></a:pPr><a:r><a:t>AAAA</a:t></a:r></a:p></p:txBody></p:sp>"#,
+            r#"<p:sp><p:spPr>{}<a:prstGeom prst="rect"/><a:noFill/></p:spPr><p:txBody><a:bodyPr vert="{vert}" lIns="0" rIns="0" tIns="0" bIns="0" anchor="t"/><a:p><a:pPr><a:defRPr sz="1200"><a:latin typeface="Rhodopsin Metrics Test"/></a:defRPr></a:pPr><a:r><a:t>AAAA</a:t></a:r></a:p></p:txBody></p:sp>"#,
             transform(40, 5, 20, 90)
         );
         write_deck(&input, page("sld", "", "", &shape), vec![]);
@@ -1206,7 +1206,7 @@ fn blue_text_bounds(
     let input = dir.path().join("basic.pptx");
     let out = dir.path().join("out");
     let shape = format!(
-        r#"<p:sp><p:spPr>{}<a:prstGeom prst="{kind}"><a:avLst>{guides}</a:avLst></a:prstGeom><a:noFill/></p:spPr><p:txBody><a:bodyPr lIns="0" rIns="0" tIns="0" bIns="0" anchor="{anchor}"><a:noAutofit/></a:bodyPr><a:p><a:pPr algn="l"><a:defRPr sz="900"><a:solidFill><a:srgbClr val="0000FF"/></a:solidFill><a:latin typeface="Pptx2img Metrics Test"/></a:defRPr></a:pPr>{paragraph}</a:p></p:txBody></p:sp>"#,
+        r#"<p:sp><p:spPr>{}<a:prstGeom prst="{kind}"><a:avLst>{guides}</a:avLst></a:prstGeom><a:noFill/></p:spPr><p:txBody><a:bodyPr lIns="0" rIns="0" tIns="0" bIns="0" anchor="{anchor}"><a:noAutofit/></a:bodyPr><a:p><a:pPr algn="l"><a:defRPr sz="900"><a:solidFill><a:srgbClr val="0000FF"/></a:solidFill><a:latin typeface="Rhodopsin Metrics Test"/></a:defRPr></a:pPr>{paragraph}</a:p></p:txBody></p:sp>"#,
         transform(frame.0, frame.1, frame.2, frame.3)
     );
     write_deck(&input, page("sld", "", "", &shape), vec![]);
@@ -1365,7 +1365,7 @@ fn convert_fields(
     let input = dir.path().join("fields.pptx");
     let out = dir.path().join("out");
     field_deck(&input, count, hidden, first_slide_num, field);
-    let mut command = Command::new(env!("CARGO_BIN_EXE_pptx2img"));
+    let mut command = Command::new(env!("CARGO_BIN_EXE_rhodopsin"));
     // Hidden slides stay skipped, which is the case under test.
     command
         .arg(&input)

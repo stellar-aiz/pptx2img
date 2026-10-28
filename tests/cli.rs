@@ -41,7 +41,7 @@ fn fixture(path: &Path, extra: &str) {
     zip.finish().unwrap();
 }
 fn run(input: &Path, output: &Path, strict: bool) -> std::process::Output {
-    let mut command = Command::new(env!("CARGO_BIN_EXE_pptx2img"));
+    let mut command = Command::new(env!("CARGO_BIN_EXE_rhodopsin"));
     command
         .arg(input)
         .arg("--out")
@@ -158,9 +158,9 @@ fn default_output_is_next_to_input_and_explicit_output_takes_precedence() {
     fs::create_dir(&nested).unwrap();
     let input = nested.join("資料.v2.pptx");
     fixture(&input, "");
-    let out = nested.join("資料.v2.pptx2img");
+    let out = nested.join("資料.v2.rhodopsin");
     let invoke = || {
-        let mut command = Command::new(env!("CARGO_BIN_EXE_pptx2img"));
+        let mut command = Command::new(env!("CARGO_BIN_EXE_rhodopsin"));
         command
             .current_dir(dir.path())
             .arg(Path::new("入力 資料").join("資料.v2.pptx"))
@@ -175,7 +175,7 @@ fn default_output_is_next_to_input_and_explicit_output_takes_precedence() {
     );
     let stdout = String::from_utf8_lossy(&result.stdout);
     assert!(stdout.starts_with("status: completed\noutput:\n  created: true\n"));
-    assert!(stdout.contains("資料.v2.pptx2img\""));
+    assert!(stdout.contains("資料.v2.rhodopsin\""));
     assert!(stdout.contains("  slides: 2\n"));
     assert!(out.join("slide-001.png").is_file());
     assert!(out.join("slide-002.png").is_file());
@@ -191,7 +191,7 @@ fn default_output_is_next_to_input_and_explicit_output_takes_precedence() {
 
 #[test]
 fn library_matches_cli_pixels_and_manifest() {
-    use pptx2img::{ConvertOptions, convert};
+    use rhodopsin::{ConvertOptions, convert};
     let dir = tempfile::tempdir().unwrap();
     let input = dir.path().join("input.pptx");
     fixture(&input, "<p:graphicFrame/>");
@@ -229,7 +229,7 @@ fn library_matches_cli_pixels_and_manifest() {
 
 #[test]
 fn library_returns_strict_diagnostics_and_validates_width() {
-    use pptx2img::{ConvertOptions, DiagnosticCode, StrictModeError, convert};
+    use rhodopsin::{ConvertOptions, DiagnosticCode, StrictModeError, convert};
     let dir = tempfile::tempdir().unwrap();
     let input = dir.path().join("input.pptx");
     let out = dir.path().join("images");
@@ -274,7 +274,7 @@ fn library_returns_strict_diagnostics_and_validates_width() {
 
 #[test]
 fn font_fallback_is_explicit_and_reports_all_affected_slides() {
-    use pptx2img::{ConvertOptions, FontFallbackError, convert};
+    use rhodopsin::{ConvertOptions, FontFallbackError, convert};
     let font = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/latin.ttf");
     // Verify missing families, glyphs, and styles independently of OS fonts.
     for (family, value, attributes, reason) in [
@@ -311,7 +311,7 @@ fn font_fallback_is_explicit_and_reports_all_affected_slides() {
             ("strict", vec!["--font-fallback", "--strict"], false),
         ] {
             let out = dir.path().join(suffix);
-            let result = Command::new(env!("CARGO_BIN_EXE_pptx2img"))
+            let result = Command::new(env!("CARGO_BIN_EXE_rhodopsin"))
                 .arg(&input)
                 .arg("--out")
                 .arg(&out)
@@ -356,7 +356,7 @@ fn font_fallback_is_explicit_and_reports_all_affected_slides() {
 
 #[test]
 fn exact_font_needs_no_flag_but_mapping_requires_permission() {
-    use pptx2img::{ConvertOptions, FontFallbackError, convert};
+    use rhodopsin::{ConvertOptions, FontFallbackError, convert};
     let dir = tempfile::tempdir().unwrap();
     let input = dir.path().join("fonts.pptx");
     fixture(
@@ -396,7 +396,7 @@ fn exact_font_needs_no_flag_but_mapping_requires_permission() {
 
 #[test]
 fn invalid_arguments_are_yaml_but_help_and_version_remain_available() {
-    let help = Command::new(env!("CARGO_BIN_EXE_pptx2img"))
+    let help = Command::new(env!("CARGO_BIN_EXE_rhodopsin"))
         .arg("--help")
         .output()
         .unwrap();
@@ -406,7 +406,7 @@ fn invalid_arguments_are_yaml_but_help_and_version_remain_available() {
     assert!(help.contains("Individual missing glyphs"));
     assert!(!help.chars().any(|c| ('\u{3040}'..='\u{30ff}').contains(&c)));
 
-    let invalid = Command::new(env!("CARGO_BIN_EXE_pptx2img"))
+    let invalid = Command::new(env!("CARGO_BIN_EXE_rhodopsin"))
         .arg("--invalid-option")
         .output()
         .unwrap();
@@ -416,7 +416,7 @@ fn invalid_arguments_are_yaml_but_help_and_version_remain_available() {
     assert!(stderr.starts_with("status: failed\n"));
     assert!(stderr.contains("code: INVALID_ARGUMENTS"));
     for arg in ["--help", "--version"] {
-        let result = Command::new(env!("CARGO_BIN_EXE_pptx2img"))
+        let result = Command::new(env!("CARGO_BIN_EXE_rhodopsin"))
             .arg(arg)
             .output()
             .unwrap();
@@ -437,7 +437,7 @@ fn glyph_fallback_completes_with_structured_warning_without_permission() {
     let fonts = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
     for strict in [false, true] {
         let out = dir.path().join(if strict { "strict" } else { "normal" });
-        let mut command = Command::new(env!("CARGO_BIN_EXE_pptx2img"));
+        let mut command = Command::new(env!("CARGO_BIN_EXE_rhodopsin"));
         command
             .arg(&input)
             .arg("--out")
