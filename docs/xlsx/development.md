@@ -207,13 +207,11 @@ Excel が生成した正解 fixture ではない。
 これによるフォントテストは選択・計測・欠落検出の制御を検証するもので、
 実際の文字描画や高度な shaping の再現性を証明しない。
 
-2026-10-20 にローカルの Excel 16.105.3 と LibreOffice の存在を確認。
-`tools/excel-date-reference.applescript` を作成して検証用ブックの生成を試みたが、
-保存が完了せず、GUI 確認もツールのアプリ操作権限で拒否された。
-呼び出しは AppleEvent タイムアウト（-1712）で終了した。
-Excel 側に検証用ブックが開いたままの可能性がある。
-`tests/fixtures/excel-date/` のロックファイルは参照成果物に数えない。
-このスクリプトは開発時の手動検証用で、CLI の実行時依存ではない。
+No Excel-generated reference workbook or PDF exists yet. An earlier attempt to
+produce one by driving Excel from AppleScript never completed, and the script was
+removed from the repository. `tests/fixtures/excel-date/input.xlsx` is synthetic data,
+not an Excel export. Lock files under `tests/fixtures/excel-date/` are not reference
+artifacts.
 
 コード変更時は `cargo fmt --check`、`cargo test`、
 `cargo clippy --all-targets -- -D warnings` を実行する。
