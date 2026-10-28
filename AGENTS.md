@@ -8,7 +8,10 @@ project_common_language: en
 
 At the start of every session, read [docs/constitution.md](docs/constitution.md)
 before making design decisions. It is the single source of the software design
-principles: lightweightness, fidelity, transparency, and observability.
+principles: lightweightness, fidelity, transparency, and observability. Every
+other document under `docs/` applies it ([docs/README.md](docs/README.md) explains
+the layout); when a document and the code disagree, the code is right.
+Build, test, and CI commands are in [docs/development.md](docs/development.md).
 
 ## Language policy
 

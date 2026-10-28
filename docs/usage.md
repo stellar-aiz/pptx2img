@@ -1,3 +1,7 @@
+---
+kind: guide
+---
+
 # CLI and Rust API
 
 ## Installation and output
@@ -18,7 +22,7 @@ Existing output directories are never overwritten. Output consists of numbered
 `slide-001.png` files and `manifest.json`. An I/O failure can leave partial images;
 the manifest is written only after successful completion.
 
-Output width must be 64–4096 pixels. See `rhodopsin --help` for all arguments.
+Output width must be 64–4096 pixels (default 1600). See `rhodopsin --help` for all arguments.
 
 ## PDF output
 
@@ -60,16 +64,14 @@ assert_eq!(report.pages, report.slides.len());
 
 PDF support is deliberately limited initially; see
 [PDF rendering limits](rendering.md#pdf-output). A successfully displayed PDF
-does not guarantee identical text extraction in every reader or downstream AI
+does not guarantee identical text extraction in every reader or downstream
 service. Check representative text, numbers, and tables in the consuming service.
 
 ## XLSX input
 
-`.xlsx` workbooks use the same command and are converted to PDF only. The
-spreadsheet renderer is not connected end to end yet, so no workbook is converted:
-unsupported content and invalid input are reported with their own reason codes, and
-a workbook that passes validation and font loading stops with
-`UNSUPPORTED_FEATURE` / `rendering_not_implemented`.
+`.xlsx` workbooks use the same command and are converted to PDF only.
+The spreadsheet renderer is not connected end to end yet, so no workbook is converted: unsupported content and invalid input are reported with their own reason codes, and a workbook that passes validation and font loading stops with `UNSUPPORTED_FEATURE` / `rendering_not_implemented`.
+Its design rules and open items are in [xlsx.md](xlsx.md).
 
 ```sh
 rhodopsin book.xlsx --format pdf
@@ -85,14 +87,11 @@ rhodopsin book.xlsx --format pdf --out printed.pdf --font-file /path/to/font.ttf
 | `--width` | Ignored, as for PDF output. |
 | `--format png`, `--font-fallback`, `--font-map`, `--include-hidden`, `--punctuation-compression` | Rejected with exit code 2 (`FORMAT_NOT_SUPPORTED` or `OPTION_NOT_SUPPORTED`). |
 
-Font substitution for XLSX input is not exposed yet; the renderer's own font
-directory and fallback-family options were not carried over to the CLI. When the
-OS font search is enabled and the home or data directory environment variables
-point to relative paths, the conversion fails with `invalid_system_font_directory`
-instead of proceeding.
+Font substitution for XLSX input is not exposed; the renderer's own font directory and fallback-family options were not carried over to the CLI.
+When the OS font search is enabled and the home or data directory environment variables point to relative paths, the conversion fails with `invalid_system_font_directory`.
+Only the `.xlsx` extension (case-insensitive) is routed to the spreadsheet renderer; other extensions are treated as PPTX.
 
-Failures use the same YAML layout as PPTX input and never include cell contents,
-sheet names, or paths:
+Failures use the same YAML layout as PPTX input and never include cell contents, sheet names, or paths:
 
 ```yaml
 status: failed
@@ -107,14 +106,10 @@ errors:
     suggestion: "..."
 ```
 
-`code` is one of `INVALID_INPUT`, `UNSUPPORTED_FEATURE`, `FONT_NOT_FOUND`,
-`LAYOUT_FAILED`, and `INTERNAL_ERROR`. `reason` is the renderer's fixed reason
-code, and `location` appears when the sheet (one-based, in workbook order) or cell
-is known. Conversion failures exit with 1, as for PPTX input. A successful
-conversion prints `status: completed` with `file`, `pages`, and a `report` object
-listing pages, fonts, and warnings. Planned work adds approximate rendering with
-warnings for individual unsupported elements, after which the default mode and
-`--strict` will differ for XLSX input as they do for PPTX.
+`code` is one of `INVALID_INPUT`, `UNSUPPORTED_FEATURE`, `FONT_NOT_FOUND`, `LAYOUT_FAILED`, and `INTERNAL_ERROR`.
+`reason` is the renderer's fixed reason code, and `location` appears when the sheet (one-based, in workbook order) or cell is known.
+Conversion failures exit with 1, as for PPTX input.
+A successful conversion prints `status: completed` with `file`, `pages`, and a `report` object listing pages, fonts, and warnings.
 
 ## Hidden slides
 
@@ -210,8 +205,9 @@ errors:
 `errors` groups font problems by code and family, listing distinct slide numbers.
 `FONT_GLYPH_MISSING` includes `characters` with `character` and `codepoint`.
 Other codes are `FONT_STYLE_MISSING`, `FONT_MAPPING_TARGET_NOT_FOUND`,
-`FONT_SUBSTITUTION_REQUIRED`, `STRICT_MODE_REJECTED`, `CONVERSION_FAILED`, and
-`INVALID_ARGUMENTS`. Missing-font errors do not recommend bypassing the problem
+`FONT_SUBSTITUTION_REQUIRED`, `STRICT_MODE_REJECTED`, `CONVERSION_FAILED`,
+`INVALID_ARGUMENTS`, and, for XLSX input, `FORMAT_NOT_SUPPORTED` and
+`OPTION_NOT_SUPPORTED` (exit code 2). Missing-font errors do not recommend bypassing the problem
 with fallback. Treat codes and fields as structured data, not message text.
 
 `output.created` says whether this invocation created the output directory.
