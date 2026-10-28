@@ -66,9 +66,10 @@ service. Check representative text, numbers, and tables in the consuming service
 ## XLSX input
 
 `.xlsx` workbooks use the same command and are converted to PDF only. The
-spreadsheet renderer is not connected end to end yet, so every workbook currently
-stops with `UNSUPPORTED_FEATURE` / `rendering_not_implemented` after input
-validation and font loading.
+spreadsheet renderer is not connected end to end yet, so no workbook is converted:
+unsupported content and invalid input are reported with their own reason codes, and
+a workbook that passes validation and font loading stops with
+`UNSUPPORTED_FEATURE` / `rendering_not_implemented`.
 
 ```sh
 rhodopsin book.xlsx --format pdf

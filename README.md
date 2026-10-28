@@ -38,8 +38,9 @@ rhodopsin book.xlsx --format pdf
 
 The spreadsheet renderer lives in the `rhodopsin-xlsx` crate under `crates/xlsx`,
 imported from the former xlsx2pdf project. Its conversion path is not connected end
-to end yet: the CLI validates the workbook and loads fonts, then stops with
-`UNSUPPORTED_FEATURE` / `rendering_not_implemented`. XLSX input always stops on
+to end yet: unsupported content is reported with its own reason code, and a workbook
+that passes validation stops with `UNSUPPORTED_FEATURE` / `rendering_not_implemented`.
+XLSX input always stops on
 unsupported content, as with `--strict`.
 See [XLSX input](docs/usage.md#xlsx-input) and [docs/xlsx](docs/xlsx/).
 
