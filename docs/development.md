@@ -40,8 +40,11 @@ font selection, layout, and diagnostics. `examples/basic.pptx` is synthetic.
 Generated rectangle fonts are structural test fixtures, not evidence of Japanese
 glyph fidelity. No Office or Python runtime is needed for ordinary Rust tests.
 
-Push/PR CI runs Rust checks and Python comparator tests on Windows, Linux, and
-macOS. Scheduled/manual visual CI uses LibreOffice 26.2.5.2 with a verified download
+CI runs Rust checks and Python comparator tests on Windows, Linux, and macOS,
+once per change: on pull requests and on pushes to `main`, skipping Markdown-only
+changes. A new push to a pull-request branch cancels the superseded run; runs on
+`main` are never cancelled. Cargo and pip dependencies are cached between runs.
+Scheduled/manual visual CI uses LibreOffice 26.2.5.2 with a verified download
 SHA-256 and checks Hiragino Sans W3/W6 hashes before comparison. Host OS images are
 not fully pinned; environment information is retained in reports. Do not compensate
 for environment differences by relaxing thresholds.

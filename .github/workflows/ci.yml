@@ -1,9 +1,17 @@
 name: Continuous integration
 on:
   push:
+    branches: [main]
+    paths-ignore: ['**.md']
   pull_request:
+    paths-ignore: ['**.md']
 permissions:
   contents: read
+# One run per change: a new push to a PR branch cancels the superseded run. Runs on
+# main are never cancelled so every merge commit keeps a completed result.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 jobs:
   test:
     name: Rust and comparison tests
@@ -22,6 +30,9 @@ jobs:
         run: |
           rustup toolchain install 1.97.0 --profile minimal --component clippy,rustfmt
           rustup override set 1.97.0
+      - name: Restore cargo caches
+        # Swatinem/rust-cache v2.9.3, pinned by commit SHA.
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0
       - name: Formatting, linting, and unit tests
         run: |
           cargo fmt --check
@@ -34,6 +45,8 @@ jobs:
       - uses: actions/setup-python@v7
         with:
           python-version: '3.14'
+          cache: pip
+          cache-dependency-path: tests/visual/requirements.txt
       - name: Image comparison unit tests
         run: |
           python -m pip install -r tests/visual/requirements.txt
