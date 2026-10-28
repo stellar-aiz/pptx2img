@@ -30,11 +30,18 @@ than PNG; unsupported PDF features fail explicitly. Existing files are never rep
 
 ## XLSX to PDF (under development)
 
-The workspace also contains `rhodopsin-xlsx`, a separate crate and CLI that renders
-the printed pages of an `.xlsx` workbook to PDF. It was imported from the former
-xlsx2pdf project and is not connected end to end yet: the CLI validates the input
-and loads fonts, then stops with `rendering_not_implemented`.
-See [crates/xlsx/README.md](crates/xlsx/README.md) and [docs/xlsx](docs/xlsx/).
+`.xlsx` input is accepted by the same CLI and converted to PDF only:
+
+```sh
+rhodopsin book.xlsx --format pdf
+```
+
+The spreadsheet renderer lives in the `rhodopsin-xlsx` crate under `crates/xlsx`,
+imported from the former xlsx2pdf project. Its conversion path is not connected end
+to end yet: the CLI validates the workbook and loads fonts, then stops with
+`UNSUPPORTED_FEATURE` / `rendering_not_implemented`. XLSX input always stops on
+unsupported content, as with `--strict`.
+See [XLSX input](docs/usage.md#xlsx-input) and [docs/xlsx](docs/xlsx/).
 
 ## Fonts and warnings
 

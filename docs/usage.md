@@ -63,6 +63,58 @@ PDF support is deliberately limited initially; see
 does not guarantee identical text extraction in every reader or downstream AI
 service. Check representative text, numbers, and tables in the consuming service.
 
+## XLSX input
+
+`.xlsx` workbooks use the same command and are converted to PDF only. The
+spreadsheet renderer is not connected end to end yet, so every workbook currently
+stops with `UNSUPPORTED_FEATURE` / `rendering_not_implemented` after input
+validation and font loading.
+
+```sh
+rhodopsin book.xlsx --format pdf
+rhodopsin book.xlsx --format pdf --out printed.pdf --font-file /path/to/font.ttf
+```
+
+| Option | XLSX input |
+| --- | --- |
+| `--format pdf`, `--out` | Supported. Without `--out`, `book.xlsx` becomes `book.pdf`. |
+| `--font-file` | Supported; repeatable. |
+| `--no-system-fonts` | Supported. By default the OS font directories are searched for the families the workbook uses. |
+| `--strict` | Accepted. XLSX input always behaves as strict: unsupported content stops the conversion instead of being approximated with a warning. |
+| `--width` | Ignored, as for PDF output. |
+| `--format png`, `--font-fallback`, `--font-map`, `--include-hidden`, `--punctuation-compression` | Rejected with exit code 2 (`FORMAT_NOT_SUPPORTED` or `OPTION_NOT_SUPPORTED`). |
+
+Font substitution for XLSX input is not exposed yet; the renderer's own font
+directory and fallback-family options were not carried over to the CLI. When the
+OS font search is enabled and the home or data directory environment variables
+point to relative paths, the conversion fails with `invalid_system_font_directory`
+instead of proceeding.
+
+Failures use the same YAML layout as PPTX input and never include cell contents,
+sheet names, or paths:
+
+```yaml
+status: failed
+output:
+  created: false
+errors:
+  - code: INVALID_INPUT
+    reason: formula_cached_value_missing
+    location:
+      sheet: 1
+      cell: "A1"
+    suggestion: "..."
+```
+
+`code` is one of `INVALID_INPUT`, `UNSUPPORTED_FEATURE`, `FONT_NOT_FOUND`,
+`LAYOUT_FAILED`, and `INTERNAL_ERROR`. `reason` is the renderer's fixed reason
+code, and `location` appears when the sheet (one-based, in workbook order) or cell
+is known. Conversion failures exit with 1, as for PPTX input. A successful
+conversion prints `status: completed` with `file`, `pages`, and a `report` object
+listing pages, fonts, and warnings. Planned work adds approximate rendering with
+warnings for individual unsupported elements, after which the default mode and
+`--strict` will differ for XLSX input as they do for PPTX.
+
 ## Hidden slides
 
 Slides marked hidden in PowerPoint (`p:sld/@show="0"`) are skipped by default, like

@@ -3,10 +3,9 @@ name = "rhodopsin-xlsx"
 version = "0.1.0"
 edition = "2024"
 license = "MIT"
-description = "Library and CLI for rendering printed XLSX pages to PDF without Office (under development; not yet connected end to end)"
+description = "Library for rendering printed XLSX pages to PDF without Office (under development; the rhodopsin CLI drives it)"
 
 [dependencies]
-clap = { version = "4", features = ["derive"] }
 image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
 miniz_oxide = "0.8"
 pdf-writer = "0.15"

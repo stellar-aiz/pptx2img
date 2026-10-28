@@ -1,5 +1,6 @@
 //! CLI for the PPTX-to-PNG conversion library.
 mod cli_output;
+mod cli_xlsx;
 use clap::{Parser, ValueEnum};
 use rhodopsin::{ConvertOptions, SlideReport, convert, convert_pdf};
 use std::path::PathBuf;
@@ -17,10 +18,11 @@ enum Format {
     about = "Convert PPTX to PNG or PDF without Office (early release)",
     after_help = "Fonts: system fonts are loaded by default; application bundles and inaccessible paths may not be searched. Add available font files with --font-file.
 Individual missing glyphs use available fallback fonts with warnings; unrenderable glyphs fail. Family substitution requires --font-fallback.
-Results: YAML on stdout for success, stderr for failure. PNG diagnostics are saved in manifest.json; PDF diagnostics are included in the result document."
+Results: YAML on stdout for success, stderr for failure. PNG diagnostics are saved in manifest.json; PDF diagnostics are included in the result document.
+XLSX: .xlsx input is converted to PDF only and always stops on unsupported content (as with --strict). Supported options: --out, --font-file, --no-system-fonts, --strict. Rendering is not complete yet."
 )]
 struct Args {
-    /// Input PPTX
+    /// Input PPTX, or XLSX workbook (PDF only)
     input: PathBuf,
     /// Output format
     #[arg(long, value_enum, default_value_t = Format::Png)]
@@ -111,6 +113,34 @@ fn main() {
             Format::Pdf => "pdf",
         })
     });
+    if cli_xlsx::is_xlsx(&args.input) {
+        if matches!(args.format, Format::Png) {
+            eprint!("{}", cli_xlsx::unsupported_format());
+            std::process::exit(2);
+        }
+        let rejected = [
+            (args.font_fallback, "--font-fallback"),
+            (!args.font_map.is_empty(), "--font-map"),
+            (args.include_hidden, "--include-hidden"),
+            (args.punctuation_compression, "--punctuation-compression"),
+        ];
+        if let Some((_, option)) = rejected.iter().find(|(set, _)| *set) {
+            eprint!("{}", cli_xlsx::unsupported_option(option));
+            std::process::exit(2);
+        }
+        let options = cli_xlsx::Options {
+            font_file: args.font_file,
+            no_system_fonts: args.no_system_fonts,
+        };
+        match cli_xlsx::convert(&args.input, &out, options) {
+            Ok(document) => print!("{document}"),
+            Err(document) => {
+                eprint!("{document}");
+                std::process::exit(1);
+            }
+        }
+        return;
+    }
     let existed = out.exists();
     let settings = ConvertOptions {
         width: args.width,

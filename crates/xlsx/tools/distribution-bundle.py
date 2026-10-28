@@ -36,9 +36,9 @@ def archive_bytes(binary, documents, license_text, version, target, provenance):
     if not binary or not license_text or not {"NOTICE.txt", "sbom.cdx.json"} <= documents.keys():
         raise ValueError("必須の配布物が不足")
     component = json.loads(documents["sbom.cdx.json"])["metadata"]["component"]
-    if component["name"] != "rhodopsin-xlsx" or component["version"] != version:
+    if component["name"] != "rhodopsin" or component["version"] != version:
         raise ValueError("SBOM と実行ファイルの版が不一致")
-    executable = "rhodopsin-xlsx.exe" if target.endswith("windows-msvc") else "rhodopsin-xlsx"
+    executable = "rhodopsin.exe" if target.endswith("windows-msvc") else "rhodopsin"
     reserved = {executable, "LICENSE", "manifest.json", "SHA256SUMS"}
     if reserved & documents.keys():
         raise ValueError("梱包ファイル名の重複")
@@ -46,7 +46,7 @@ def archive_bytes(binary, documents, license_text, version, target, provenance):
     for name in files:
         safe_name(name)
     manifest = {
-        "schema_version": 1, "name": "rhodopsin-xlsx", "version": version,
+        "schema_version": 1, "name": "rhodopsin", "version": version,
         "target": target, "status": "development", "executable": executable,
         "inventory_scope": "all-targets-with-development-dependencies",
         "build": provenance,
@@ -54,7 +54,7 @@ def archive_bytes(binary, documents, license_text, version, target, provenance):
     }
     files["manifest.json"] = encoded(manifest)
     files["SHA256SUMS"] = "".join(f"{digest(data)}  {name}\n" for name, data in sorted(files.items())).encode()
-    prefix = f"rhodopsin-xlsx-{version}-{target}/"
+    prefix = f"rhodopsin-{version}-{target}/"
     output = io.BytesIO()
     with zipfile.ZipFile(output, "w", compression=zipfile.ZIP_STORED) as archive:
         for name, data in sorted(files.items()):
@@ -79,14 +79,14 @@ def verify(data):
         prefix = prefixes.pop() + "/"
         files = {name[len(prefix):]: archive.read(name) for name in names}
         manifest = json.loads(files["manifest.json"])
-        if manifest["schema_version"] != 1 or manifest["name"] != "rhodopsin-xlsx" or manifest["status"] != "development" or manifest["target"] not in TARGETS:
+        if manifest["schema_version"] != 1 or manifest["name"] != "rhodopsin" or manifest["status"] != "development" or manifest["target"] not in TARGETS:
             raise ValueError("未知の配布マニフェスト")
-        if prefix != f'rhodopsin-xlsx-{manifest["version"]}-{manifest["target"]}/':
+        if prefix != f'rhodopsin-{manifest["version"]}-{manifest["target"]}/':
             raise ValueError("配布名とマニフェストの不一致")
         expected = set(manifest["files"]) | {"manifest.json", "SHA256SUMS"}
         if expected != files.keys():
             raise ValueError("梱包ファイルの欠落または追加")
-        executable = "rhodopsin-xlsx.exe" if manifest["target"].endswith("windows-msvc") else "rhodopsin-xlsx"
+        executable = "rhodopsin.exe" if manifest["target"].endswith("windows-msvc") else "rhodopsin"
         if manifest["executable"] != executable or not {executable, "LICENSE", "NOTICE.txt", "sbom.cdx.json"} <= files.keys():
             raise ValueError("必須ファイルの不整合")
         component = json.loads(files["sbom.cdx.json"])["metadata"]["component"]
@@ -137,16 +137,16 @@ def build(root, target):
         raise ValueError("配布対象と同じネイティブ環境で実行してください")
     metadata = json.loads(run(root, "cargo", "metadata", "--locked", "--offline", "--format-version", "1"))
     package = next(p for p in metadata["packages"] if p["id"] == metadata["resolve"]["root"])
-    if package["name"] != "rhodopsin-xlsx" or package["license"] != "MIT":
+    if package["name"] != "rhodopsin" or package["license"] != "MIT":
         raise ValueError("プロジェクトの配布宣言が不一致")
     lock = (root / "Cargo.lock").read_bytes()
-    output = run(root, "cargo", "build", "--locked", "--offline", "--release", "--target", target, "--bin", "rhodopsin-xlsx", "--message-format=json")
+    output = run(root, "cargo", "build", "--locked", "--offline", "--release", "--target", target, "--bin", "rhodopsin", "--message-format=json")
     artifacts = [json.loads(line) for line in output.splitlines()]
-    executables = [Path(item["executable"]) for item in artifacts if item.get("reason") == "compiler-artifact" and item.get("package_id") == package["id"] and item["target"]["name"] == "rhodopsin-xlsx" and item.get("executable")]
+    executables = [Path(item["executable"]) for item in artifacts if item.get("reason") == "compiler-artifact" and item.get("package_id") == package["id"] and item["target"]["name"] == "rhodopsin" and item.get("executable")]
     if len(executables) != 1:
         raise ValueError("ビルドした実行ファイルを一意に特定できません")
     binary = executables[0]
-    if run(root, str(binary), "--version").decode().strip() != f'rhodopsin-xlsx {package["version"]}':
+    if run(root, str(binary), "--version").decode().strip() != f'rhodopsin {package["version"]}':
         raise ValueError("実行ファイルの版が不一致")
     if not run(root, str(binary), "--help").strip():
         raise ValueError("実行ファイルのヘルプが空です")
