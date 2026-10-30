@@ -2,8 +2,6 @@
 date: 2026-10-20
 kind: decision
 principles: [lightweightness, transparency, observability]
-status: obsolete
-reason: Written for the standalone xlsx2pdf repository, whose root package built the binary. In the workspace `crates/xlsx/tools/distribution-bundle.py` finds `rhodopsin-xlsx` as the metadata root (it expects `rhodopsin`), has no `--bin` to build in that crate, and looks for `Cargo.lock` and `LICENSE` beside the crate. No CI job produces or stores a bundle. Rewire after the root LICENSE decision.
 ---
 
 # Development distribution bundle: build it yourself, verify it, and never call it a release

@@ -3,6 +3,7 @@ name = "rhodopsin-xlsx"
 version = "0.1.0"
 edition = "2024"
 license = "MIT"
+repository = "https://github.com/stellar-aiz/rhodopsin"
 description = "Library for rendering printed XLSX pages to PDF without Office (under development; the rhodopsin CLI drives it)"
 
 [dependencies]
