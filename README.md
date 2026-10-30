@@ -12,7 +12,9 @@ Early implementation: rendering is approximate, not fully PowerPoint-compatible.
 rhodopsin <INPUT> [--format png|pdf] [--out PATH] [--width N] [...]
 ```
 
-Requires Rust and Cargo. Install from this checkout:
+Download a prebuilt binary from the [releases page](https://github.com/stellar-aiz/rhodopsin/releases)
+(pre-release, unsigned; see [installing from a release](docs/usage.md#install-from-a-release)),
+or install from this checkout with Rust and Cargo:
 
 ```sh
 cargo install --path . --locked

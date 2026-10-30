@@ -6,6 +6,8 @@ kind: guide
 
 ## Installation and output
 
+Install from a [GitHub release](#install-from-a-release) or build from a checkout.
+
 Build with `cargo build --release --locked`, or install from a checkout with
 `cargo install --path . --locked`. The initial dependency download needs network
 access; conversion itself is local and does not start Office or access the network.
@@ -23,6 +25,29 @@ Existing output directories are never overwritten. Output consists of numbered
 the manifest is written only after successful completion.
 
 Output width must be 64–4096 pixels (default 1600). See `rhodopsin --help` for all arguments.
+
+## Install from a release
+
+Tagged versions are published as GitHub pre-releases with one ZIP per target
+(`aarch64-apple-darwin`, `x86_64-pc-windows-msvc`, `x86_64-unknown-linux-gnu`) and a
+`SHA256SUMS` file. Each ZIP holds the executable, `LICENSE`, `NOTICE.txt`, the
+dependency licence texts, an SBOM, and a manifest whose status is `development`.
+
+```sh
+shasum -a 256 -c SHA256SUMS --ignore-missing   # Linux: sha256sum -c
+unzip rhodopsin-<version>-<target>.zip
+```
+
+On Windows, compare the output of `Get-FileHash <zip> -Algorithm SHA256` with the
+matching line of `SHA256SUMS`.
+
+The checksum confirms that the download is intact; it does not prove who published it.
+The binaries are not signed. On macOS, a ZIP downloaded with a browser is quarantined
+and the executable is blocked on first run; clear the flag for that one file:
+
+```sh
+xattr -d com.apple.quarantine rhodopsin-<version>-aarch64-apple-darwin/rhodopsin
+```
 
 ## PDF output
 

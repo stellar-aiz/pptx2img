@@ -1,0 +1,132 @@
+name: Release
+# Publishes the development bundles from crates/xlsx/tools/distribution-bundle.py as a
+# GitHub pre-release (docs/history/20261030_release-publication.md). workflow_dispatch is a
+# dry run: it builds, verifies, and smoke-tests the bundles and keeps them as workflow
+# artifacts without creating a release.
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  guard:
+    name: Tag matches Cargo.toml
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Read the package version and compare it with the tag
+        id: version
+        shell: bash
+        run: |
+          version=$(cargo metadata --no-deps --format-version 1 \
+            | python3 -c 'import json,sys; print(next(p["version"] for p in json.load(sys.stdin)["packages"] if p["name"] == "rhodopsin"))')
+          if [ "$GITHUB_REF_TYPE" = tag ] && [ "$GITHUB_REF_NAME" != "v$version" ]; then
+            echo "::error::Tag $GITHUB_REF_NAME does not match Cargo.toml version $version"
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+  bundle:
+    name: Bundle ${{ matrix.target }}
+    needs: guard
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - os: macos-15
+            target: aarch64-apple-darwin
+            exe: ''
+          - os: windows-2025
+            target: x86_64-pc-windows-msvc
+            exe: .exe
+          - os: ubuntu-24.04
+            target: x86_64-unknown-linux-gnu
+            exe: ''
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: bash
+    env:
+      ZIP: rhodopsin-${{ needs.guard.outputs.version }}-${{ matrix.target }}.zip
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: '3.14'
+      - name: Pin Rust toolchain
+        run: |
+          rustup toolchain install 1.97.0 --profile minimal
+          rustup override set 1.97.0
+      - name: Fetch dependencies for the offline build
+        run: cargo fetch --locked
+      - name: Build and verify the bundle
+        run: |
+          python crates/xlsx/tools/distribution-bundle.py --target "${{ matrix.target }}" --out "target/distribution/$ZIP"
+          python crates/xlsx/tools/distribution-bundle.py --verify "target/distribution/$ZIP"
+      - name: Convert a deck with the extracted binary
+        # Same font setup as tests/cli.rs, so the result does not depend on runner fonts.
+        run: |
+          smoke="$RUNNER_TEMP/smoke"
+          python - "target/distribution/$ZIP" "$smoke" <<'PY'
+          import os, sys, zipfile
+          with zipfile.ZipFile(sys.argv[1]) as archive:
+              for info in archive.infolist():
+                  path = archive.extract(info, sys.argv[2])
+                  mode = info.external_attr >> 16
+                  if mode:
+                      os.chmod(path, mode & 0o777)
+          PY
+          binary=$(ls "$smoke"/rhodopsin-*/rhodopsin${{ matrix.exe }})
+          "$binary" --version
+          "$binary" examples/basic.pptx --out "$smoke/out" --width 100 --font-fallback \
+            --no-system-fonts --font-file tests/fixtures/samples.ttf > /dev/null
+          test -f "$smoke/out/manifest.json"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ${{ env.ZIP }}
+          path: target/distribution/${{ env.ZIP }}
+          if-no-files-found: error
+          retention-days: 7
+  publish:
+    name: Publish pre-release
+    if: github.ref_type == 'tag'
+    needs: [guard, bundle]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          path: assets
+          merge-multiple: true
+      - name: Write download checksums and create the pre-release
+        working-directory: assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.guard.outputs.version }}
+        run: |
+          zips=(rhodopsin-*.zip)
+          test "${#zips[@]}" -eq 3
+          sha256sum "${zips[@]}" > SHA256SUMS
+          cat > notes.md <<NOTES
+          Development build of rhodopsin $VERSION (pre-release). PPTX conversion works with the
+          limitations in docs/rendering.md; XLSX input always stops with a diagnostic.
+
+          Each ZIP is the output of crates/xlsx/tools/distribution-bundle.py: the executable,
+          LICENSE, NOTICE.txt, licenses/, sbom.cdx.json, and manifest.json (status: development).
+          The SBOM lists the dependencies of every target, including development dependencies,
+          not only those linked into this executable.
+
+          Binaries are unsigned. SHA256SUMS confirms that a download is intact; it does not prove
+          who published it. See "Install from a release" in docs/usage.md.
+          NOTES
+          gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --verify-tag --prerelease \
+            --title "rhodopsin $VERSION" --notes-file notes.md "${zips[@]}" SHA256SUMS
