@@ -38,6 +38,9 @@ shasum -a 256 -c SHA256SUMS --ignore-missing   # Linux: sha256sum -c
 unzip rhodopsin-<version>-<target>.zip
 ```
 
+On Windows, compare the output of `Get-FileHash <zip> -Algorithm SHA256` with the
+matching line of `SHA256SUMS`.
+
 The checksum confirms that the download is intact; it does not prove who published it.
 The binaries are not signed. On macOS, a ZIP downloaded with a browser is quarantined
 and the executable is blocked on first run; clear the flag for that one file:
