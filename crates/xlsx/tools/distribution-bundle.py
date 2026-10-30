@@ -183,7 +183,7 @@ def main():
         parser.error("生成には --target と --out が必要です")
     if args.out.exists() or args.out.is_symlink():
         parser.error("出力ファイルは既に存在します")
-    data = build(Path(__file__).resolve().parent.parent, args.target)
+    data = build(Path(__file__).resolve().parents[3], args.target)
     publish(data, args.out)
     print(f"開発用配布 ZIP を生成しました。SHA-256={digest(data)}")
 

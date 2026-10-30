@@ -2,8 +2,6 @@
 date: 2026-10-20
 kind: decision
 principles: [lightweightness, transparency]
-status: obsolete
-reason: Written for the standalone xlsx2pdf repository. In the rhodopsin workspace `crates/xlsx/tools/dependency-artifacts.py` reads every workspace package and stops on the root `rhodopsin` crate, which declares no license; the tool must be rewired (select the `rhodopsin-xlsx` package, or declare the root license) before its output is current again.
 ---
 
 # Dependency licence policy, SBOM, and NOTICE generation for the spreadsheet crate

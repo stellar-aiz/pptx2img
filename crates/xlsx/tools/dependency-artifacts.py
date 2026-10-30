@@ -74,11 +74,16 @@ def build(metadata):
     documents = {}
     components = []
     notice = ["依存ライセンス一覧", "", "全対象 OS・開発依存を含む Cargo metadata の一覧。配布バイナリだけの一覧ではない。", "選択したライセンスと、取得済みクレートの原文資料を保持する。", ""]
+    members = set(metadata["workspace_members"])
     for package in packages:
-        expression, selected = license_choice(package.get("license") or "")
+        if package["id"] in members:
+            # First-party crates are the licensed product, not third-party inventory.
+            expression = selected = package.get("license") or ""
+        else:
+            expression, selected = license_choice(package.get("license") or "")
         component = {"type": "application" if package["id"] == root else "library", "bom-ref": refs[package["id"]], "name": package["name"], "version": package["version"], "purl": refs[package["id"]], "licenses": [{"expression": expression}], "properties": [{"name": "rhodopsin-xlsx:selected-license", "value": selected}]}
         components.append(component)
-        if package["id"] == root:
+        if package["id"] in members:
             continue
         directory = Path(package["manifest_path"]).parent
         paths = sorted(p for p in directory.rglob("*") if p.is_file() and p.name.upper().startswith(("LICENSE", "LICENCE", "COPYING", "NOTICE", "COPYRIGHT", "AUTHORS")))
@@ -104,7 +109,7 @@ def main():
     args = parser.parse_args()
     if args.out_dir.exists():
         parser.error("出力ディレクトリは既に存在します")
-    root = Path(__file__).resolve().parent.parent
+    root = Path(__file__).resolve().parents[3]
     result = subprocess.run(["cargo", "metadata", "--locked", "--offline", "--format-version", "1"], cwd=root, check=True, stdout=subprocess.PIPE)
     documents = build(json.loads(result.stdout))
     args.out_dir.parent.mkdir(parents=True, exist_ok=True)

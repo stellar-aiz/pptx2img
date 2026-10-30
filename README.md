@@ -51,6 +51,15 @@ Success returns YAML on stdout; failures return YAML on stderr.
 Warnings and rendering diagnostics are retained in the PNG manifest or PDF result
 document on stdout.
 
+## License
+
+Copyright (c) 2026 Stellar AIz and the rhodopsin contributors.
+
+Both crates are released under the [MIT License](LICENSE). Third-party
+dependencies keep their own permissive licenses; each release ships a NOTICE file
+with their attributions. See [the decision record](docs/history/20261030_licence.md)
+for the reasoning.
+
 [CLI, fonts, and Rust API](docs/usage.md) ·
 [Supported features and limitations](docs/rendering.md) ·
 [Development and provenance](docs/development.md) ·
