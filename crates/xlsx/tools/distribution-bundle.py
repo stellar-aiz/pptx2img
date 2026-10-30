@@ -150,7 +150,7 @@ def build(root, target):
         raise ValueError("実行ファイルの版が不一致")
     if not run(root, str(binary), "--help").strip():
         raise ValueError("実行ファイルのヘルプが空です")
-    spec = importlib.util.spec_from_file_location("dependency_artifacts", root / "tools/dependency-artifacts.py")
+    spec = importlib.util.spec_from_file_location("dependency_artifacts", Path(__file__).with_name("dependency-artifacts.py"))
     dependencies = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(dependencies)
     documents = dependencies.build(metadata)
